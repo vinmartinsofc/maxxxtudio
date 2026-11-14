@@ -143,7 +143,7 @@ bool Track::isFree (double start, double length, int ignoreId) const
 }
 
 AudioPlacement* Track::addAudioClip (double start, double length, std::string filePath,
-                                     std::string name, std::vector<float> waveform,
+                                     std::string name, std::vector<WaveformRange> waveform,
                                      double durationSeconds, double sourceBpm)
 {
     auto clip = std::make_unique<AudioPlacement>();
@@ -198,7 +198,7 @@ int Track::splitAudioClip (int clipId, double beat)
     const double leftDuration = clip->durationSeconds * fraction;
     const double rightDuration = clip->durationSeconds - leftDuration;
     const double rightSourceOffset = clip->sourceOffsetSeconds + leftDuration;
-    std::vector<float> leftWaveform, rightWaveform;
+    std::vector<WaveformRange> leftWaveform, rightWaveform;
     if (clip->waveform.size() > 1)
     {
         const auto splitIndex = static_cast<std::size_t> (std::clamp (

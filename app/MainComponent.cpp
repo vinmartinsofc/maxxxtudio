@@ -2,6 +2,7 @@
 #include "WindowPlacement.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <set>
 #include <utility>
@@ -837,17 +838,25 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     data->samples = renderedSamples;
     data->sampleRate = outputSampleRate;
     data->durationSeconds = durationSeconds;
-    constexpr int waveformBins = 512;
-    data->waveform.resize (waveformBins, 0.0f);
+    constexpr int maxWaveformBins = 16384;
+    const int waveformBins = std::min (renderedSamples->getNumSamples(), maxWaveformBins);
+    data->waveform.resize (static_cast<std::size_t> (waveformBins));
     for (int bin = 0; bin < waveformBins; ++bin)
     {
-        const int from = bin * renderedSamples->getNumSamples() / waveformBins;
-        const int to = std::max (from + 1, (bin + 1) * renderedSamples->getNumSamples() / waveformBins);
-        float peak = 0.0f;
+        const int sampleCount = renderedSamples->getNumSamples();
+        const int from = static_cast<int> (static_cast<std::int64_t> (bin) * sampleCount / waveformBins);
+        const int to = std::max (from + 1, static_cast<int> (
+            static_cast<std::int64_t> (bin + 1) * sampleCount / waveformBins));
+        float minimum = 1.0f;
+        float maximum = -1.0f;
         for (int frame = from; frame < std::min (to, renderedSamples->getNumSamples()); ++frame)
             for (int channel = 0; channel < renderedSamples->getNumChannels(); ++channel)
-                peak = std::max (peak, std::abs (renderedSamples->getSample (channel, frame)));
-        data->waveform[static_cast<std::size_t> (bin)] = peak;
+            {
+                const float value = renderedSamples->getSample (channel, frame);
+                minimum = std::min (minimum, value);
+                maximum = std::max (maximum, value);
+            }
+        data->waveform[static_cast<std::size_t> (bin)] = { minimum, maximum };
     }
 
     const int trackId = track->id;
@@ -1039,19 +1048,11 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
         return true;
     }
     if (k == juce::KeyPress (juce::KeyPress::F6Key)) { cycleFocus(); return true; }
-    if (k.getModifiers().isCtrlDown() && k.getModifiers().isShiftDown())
+    if (ctrl && keyCode == 'T')
     {
-        const auto shiftedKey = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
-        if (shiftedKey == 'T')
-        {
-            project.addTrack();
-            return true;
-        }
-        if (shiftedKey == 'A')
-        {
-            project.addTrack (roll::TrackType::Audio);
-            return true;
-        }
+        project.addTrack (k.getModifiers().isShiftDown()
+            ? roll::TrackType::Midi : roll::TrackType::Audio);
+        return true;
     }
     return false;
 }

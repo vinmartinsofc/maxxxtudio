@@ -20,6 +20,14 @@ struct Placement
     double end() const { return start + clip.length(); }
 };
 
+struct WaveformRange
+{
+    float minimum = 0.0f;
+    float maximum = 0.0f;
+
+    friend bool operator== (const WaveformRange&, const WaveformRange&) = default;
+};
+
 struct AudioPlacement
 {
     int         id = 0;
@@ -31,7 +39,7 @@ struct AudioPlacement
     double      fadeOutBeats = 0.0;
     double      sourceBpm = 120.0;
     std::string name, filePath;
-    std::vector<float> waveform;
+    std::vector<WaveformRange> waveform;
 
     double end() const { return start + lengthBeats; }
 };
@@ -70,7 +78,7 @@ public:
     bool isFree (double start, double length, int ignoreId = -1) const;
 
     AudioPlacement* addAudioClip (double start, double length, std::string filePath,
-                                  std::string name, std::vector<float> waveform = {},
+                                  std::string name, std::vector<WaveformRange> waveform = {},
                                   double durationSeconds = 0.0, double sourceBpm = 120.0);
     AudioPlacement* findAudioClip (int clipId) const;
     AudioPlacement* copyAudioClip (const AudioPlacement& source, double start);

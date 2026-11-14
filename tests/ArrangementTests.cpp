@@ -95,14 +95,16 @@ TEST_CASE("Clips de audio preservam arquivo, waveform e limites de sobreposicao"
 {
     Track track;
     track.type = TrackType::Audio;
-    auto* a = track.addAudioClip (2.0, 3.0, "C:/audio/kick.wav", "kick.wav", { 0.2f, 0.8f }, 1.5, 120.0);
+    auto* a = track.addAudioClip (2.0, 3.0, "C:/audio/kick.wav", "kick.wav",
+                                  { { -0.2f, 0.2f }, { -0.8f, 0.8f } }, 1.5, 120.0);
 
     REQUIRE(a->end() == 5.0);
     REQUIRE(a->durationSeconds == 1.5);
     REQUIRE(a->sourceBpm == 120.0);
     REQUIRE(a->filePath == "C:/audio/kick.wav");
     REQUIRE(a->waveform.size() == 2);
-    REQUIRE(a->waveform[1] == 0.8f);
+    REQUIRE(a->waveform[1].minimum == -0.8f);
+    REQUIRE(a->waveform[1].maximum == 0.8f);
     REQUIRE(track.isAudioFree (5.0, 2.0));
     REQUIRE_FALSE(track.isAudioFree (4.0, 2.0));
     REQUIRE(track.isAudioFree (2.0, 3.0, a->id));
@@ -113,7 +115,8 @@ TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
     Track track;
     track.type = TrackType::Audio;
     auto* original = track.addAudioClip (2.0, 8.0, "C:/audio/loop.wav", "loop.wav",
-                                         { 0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f },
+                                         { { -0.1f, 0.1f }, { -0.2f, 0.2f }, { -0.3f, 0.3f }, { -0.4f, 0.4f },
+                                           { -0.5f, 0.5f }, { -0.6f, 0.6f }, { -0.7f, 0.7f }, { -0.8f, 0.8f } },
                                          4.0, 120.0);
     original->sourceOffsetSeconds = 1.5;
     original->fadeInBeats = 1.0;
@@ -125,6 +128,7 @@ TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
     REQUIRE(original->lengthBeats == 4.0);
     REQUIRE(original->durationSeconds == 2.0);
     REQUIRE(original->waveform.size() == 4);
+    REQUIRE(original->waveform.back().maximum == 0.4f);
 
     const auto* right = track.findAudioClip (rightId);
     REQUIRE(right != nullptr);
@@ -133,6 +137,7 @@ TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
     REQUIRE(right->durationSeconds == 2.0);
     REQUIRE(right->sourceOffsetSeconds == 3.5);
     REQUIRE(right->waveform.size() == 4);
+    REQUIRE(right->waveform.front().minimum == -0.5f);
     REQUIRE(right->filePath == original->filePath);
     REQUIRE(original->fadeInBeats == 1.0);
     REQUIRE(original->fadeOutBeats == 0.0);
@@ -145,7 +150,7 @@ TEST_CASE("Copiar clip de audio preserva offset e fades")
     Track track;
     track.type = TrackType::Audio;
     auto* original = track.addAudioClip (0.0, 4.0, "C:/audio/loop.wav", "loop.wav",
-                                         { 0.2f, 0.8f }, 2.0, 120.0);
+                                         { { -0.2f, 0.2f }, { -0.8f, 0.8f } }, 2.0, 120.0);
     original->sourceOffsetSeconds = 0.5;
     original->fadeInBeats = 0.75;
     original->fadeOutBeats = 1.25;
@@ -180,7 +185,8 @@ TEST_CASE("Dividir clips fora de seus limites nao altera a trilha")
 TEST_CASE("Mover clip de audio preserva seus metadados")
 {
     Track source, destination;
-    auto* clip = source.addAudioClip (1.0, 4.0, "C:/audio/voice.wav", "voice.wav", { 0.4f, 0.7f }, 2.0, 120.0);
+    auto* clip = source.addAudioClip (1.0, 4.0, "C:/audio/voice.wav", "voice.wav",
+                                      { { -0.4f, 0.4f }, { -0.7f, 0.7f } }, 2.0, 120.0);
     auto moved = source.takeAudioClip (clip->id);
 
     REQUIRE(source.audioClips.empty());
@@ -232,7 +238,7 @@ TEST_CASE("Copiar uma trilha preserva clips e IDs seguintes")
     Track original;
     original.id = 7;
     original.type = TrackType::Audio;
-    auto* audio = original.addAudioClip (1.0, 2.0, "C:/audio/a.wav", "a.wav", { 0.5f });
+    auto* audio = original.addAudioClip (1.0, 2.0, "C:/audio/a.wav", "a.wav", { { -0.5f, 0.5f } });
     audio->sourceOffsetSeconds = 0.25;
 
     Track snapshot (original);

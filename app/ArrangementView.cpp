@@ -1,5 +1,6 @@
 #include "ArrangementView.h"
 #include "Icons.h"
+#include "WaveformDisplay.h"
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -134,18 +135,11 @@ public:
                     const auto waveformArea = r.withY (r.getY() + 15.0f).withHeight (r.getHeight() - 15.0f);
                     g.setColour (juce::Colours::black.withAlpha (0.3f));
                     g.fillRect (waveformArea);
-                    const float center = r.getY() + 42.0f;
                     const float halfHeight = 24.0f;
                     g.setColour (juce::Colours::white.withAlpha (0.24f));
-                    g.drawHorizontalLine (static_cast<int> (center), waveformArea.getX(), waveformArea.getRight());
-                    g.setColour (base.brighter (0.7f).withAlpha (0.9f));
-                    for (size_t bin = 0; bin < clip->waveform.size(); ++bin)
-                    {
-                        const float x = r.getX() + static_cast<float> (bin) / static_cast<float> (clip->waveform.size())
-                                                    * r.getWidth();
-                        const float amplitude = std::clamp (clip->waveform[bin], 0.0f, 1.0f) * halfHeight;
-                        g.drawVerticalLine (static_cast<int> (x), center - amplitude, center + amplitude);
-                    }
+                    g.drawHorizontalLine (static_cast<int> (waveformArea.getCentreY()),
+                                          waveformArea.getX(), waveformArea.getRight());
+                    drawWaveformEnvelope (g, waveformArea, clip->waveform, base.brighter (0.7f), halfHeight);
 
                     const float fadeTop = waveformArea.getY() + 3.0f;
                     const float fadeBottom = waveformArea.getBottom() - 3.0f;
@@ -1702,7 +1696,7 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     addTrackButton.setMouseClickGrabsKeyboardFocus (false);
     addAudioTrackButton.setMouseClickGrabsKeyboardFocus (false);
     addTrackButton.setTooltip ("Adicionar trilha MIDI (Ctrl+Shift+T)");
-    addAudioTrackButton.setTooltip ("Adicionar trilha de audio (Ctrl+Shift+A)");
+    addAudioTrackButton.setTooltip ("Adicionar trilha de audio (Ctrl+T)");
     gridBox.setMouseClickGrabsKeyboardFocus (false);
     addTrackButton.onClick = [this] { project.addTrack(); };
     addAudioTrackButton.onClick = [this] { project.addTrack (roll::TrackType::Audio); };

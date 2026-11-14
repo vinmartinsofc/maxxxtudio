@@ -295,7 +295,7 @@ int ProjectModel::duplicateClip (int trackId, int clipId)
 
 roll::AudioPlacement* ProjectModel::addAudioClip (int trackId, double start, double length,
                                                    const std::string& filePath, const std::string& name,
-                                                   const std::vector<float>& waveform,
+                                                   const std::vector<roll::WaveformRange>& waveform,
                                                    double durationSeconds, double sourceBpm)
 {
     auto* t = track (trackId);

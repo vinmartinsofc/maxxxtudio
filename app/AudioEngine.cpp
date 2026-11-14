@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include <cstdint>
 #include <limits>
 
 namespace
@@ -45,17 +46,24 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
         return;
     }
 
-    constexpr int waveformResolution = 256;
-    data->waveform.resize (waveformResolution);
+    constexpr int maxWaveformResolution = 16384;
+    const int waveformResolution = std::min (numSamples, maxWaveformResolution);
+    data->waveform.resize (static_cast<std::size_t> (waveformResolution));
     for (int bin = 0; bin < waveformResolution; ++bin)
     {
-        const int start = bin * numSamples / waveformResolution;
-        const int end = std::max (start + 1, (bin + 1) * numSamples / waveformResolution);
-        float peak = 0.0f;
+        const int start = static_cast<int> (static_cast<std::int64_t> (bin) * numSamples / waveformResolution);
+        const int end = std::max (start + 1, static_cast<int> (
+            static_cast<std::int64_t> (bin + 1) * numSamples / waveformResolution));
+        float minimum = 1.0f;
+        float maximum = -1.0f;
         for (int channel = 0; channel < numChannels; ++channel)
             for (int sample = start; sample < std::min (end, numSamples); ++sample)
-                peak = std::max (peak, std::abs (data->samples->getSample (channel, sample)));
-        data->waveform[static_cast<std::size_t> (bin)] = peak;
+            {
+                const float value = data->samples->getSample (channel, sample);
+                minimum = std::min (minimum, value);
+                maximum = std::max (maximum, value);
+            }
+        data->waveform[static_cast<std::size_t> (bin)] = { minimum, maximum };
     }
 
     juce::MessageManager::callAsync ([callback = std::move (callback), data]

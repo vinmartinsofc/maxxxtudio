@@ -1,4 +1,5 @@
 #include "AudioClipEditor.h"
+#include "WaveformDisplay.h"
 #include <algorithm>
 #include <cmath>
 
@@ -82,22 +83,13 @@ void AudioClipEditor::paint (juce::Graphics& g)
         }
     }
 
-    const float center = static_cast<float> (waveformArea.getCentreY());
     const float halfHeight = static_cast<float> (waveformArea.getHeight()) * 0.42f;
     g.setColour (theme::accent().brighter (0.25f));
-    g.drawHorizontalLine (static_cast<int> (center), static_cast<float> (waveformArea.getX()),
+    g.drawHorizontalLine (waveformArea.getCentreY(), static_cast<float> (waveformArea.getX()),
                           static_cast<float> (waveformArea.getRight()));
     if (source != nullptr && ! source->waveform.empty())
-    {
-        const auto count = source->waveform.size();
-        for (size_t i = 0; i < count; ++i)
-        {
-            const float x = static_cast<float> (waveformArea.getX())
-                          + static_cast<float> (i) / static_cast<float> (count) * waveformArea.getWidth();
-            const float amplitude = std::clamp (source->waveform[i], 0.0f, 1.0f) * halfHeight;
-            g.drawVerticalLine (static_cast<int> (x), center - amplitude, center + amplitude);
-        }
-    }
+        drawWaveformEnvelope (g, waveformArea.toFloat(), source->waveform, theme::accent().brighter (0.25f),
+                              halfHeight);
     g.restoreState();
 }
 

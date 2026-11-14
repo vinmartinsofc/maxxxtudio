@@ -134,7 +134,7 @@ struct AudioFileData
 {
     juce::File file;
     std::shared_ptr<juce::AudioBuffer<float>> samples;
-    std::vector<float> waveform;
+    std::vector<roll::WaveformRange> waveform;
     double sampleRate = 0.0;
     double durationSeconds = 0.0;
 };

@@ -43,7 +43,7 @@ public:
     int splitClip (int trackId, int clipId, double beat);
     roll::AudioPlacement* addAudioClip (int trackId, double start, double length,
                                         const std::string& filePath, const std::string& name,
-                                        const std::vector<float>& waveform,
+                                        const std::vector<roll::WaveformRange>& waveform,
                                         double durationSeconds = 0.0, double sourceBpm = 120.0);
     void deleteAudioClip (int trackId, int clipId);
     int copyAudioClip (int fromTrack, int clipId, int toTrack, double start);
