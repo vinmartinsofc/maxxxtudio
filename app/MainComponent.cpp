@@ -99,12 +99,6 @@ public:
         const int horizontalMargin = std::min (16, std::max (0, (displayUserArea.getWidth() - 1) / 2));
         const int verticalMargin = std::min (60, std::max (0, (displayUserArea.getHeight() - 1) / 2));
         const auto available = displayUserArea.reduced (horizontalMargin, verticalMargin);
-        const auto scale = std::min ({ 1.0f,
-                                       static_cast<float> (available.getWidth()) / std::max (1, editor->getWidth()),
-                                       static_cast<float> (available.getHeight()) / std::max (1, editor->getHeight()) });
-
-        if (scale >= 0.6f && scale < 1.0f)
-            editor->setScaleFactor (scale);
 
         const bool needsViewport = editor->getWidth() > available.getWidth()
                                 || editor->getHeight() > available.getHeight();
