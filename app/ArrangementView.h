@@ -20,6 +20,7 @@ public:
     std::function<void (const juce::String& pluginIdentifier, int trackId, double beats)> onPluginDropped;
     std::function<bool (const juce::File&, int trackId)> canAcceptAudioDrop;
     std::function<void (const juce::File&, int trackId, double beats)> onAudioDropped;
+    std::function<void (const juce::File&)> onLocateAudioFileRequested;
     std::function<void (int trackId, int clipId)> onAudioClipDoubleClicked;
     std::function<void (double startBeat, double endBeat, int firstTrack, int lastTrack)> onConsolidateRequested;
     std::function<void()> onGridChanged;
@@ -53,6 +54,7 @@ private:
     void timerCallback() override;
     void syncPositions();
     void updateSizes();
+    void zoomAt (double factor, double anchorBeat, int anchorScreenX);
     static juce::Colour colourFor (int trackId);
 
     ProjectModel& project;

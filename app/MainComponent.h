@@ -31,7 +31,7 @@ private:
     class ActionIndicator;
     class PluginWindow;
 
-    void loadDevice (const juce::PluginDescription&);
+    void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
     void openDeviceEditor (int trackId, int deviceId);
     void updateActionIndicator();
     void setBrowserVisible (bool);

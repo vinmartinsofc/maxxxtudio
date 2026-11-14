@@ -17,6 +17,7 @@ public:
     std::function<void (float)> onPreviewGainChanged;
     std::function<bool (const juce::File&)> canDeleteFile;
     void setFavoritesMode (bool);
+    void revealFile (const juce::File&);
     void setStatus (const juce::String& text) { status.setText (text, juce::dontSendNotification); }
     void paint (juce::Graphics&) override;
     void resized() override;

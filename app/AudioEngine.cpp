@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include <chrono>
 #include <cstdint>
 #include <limits>
 
@@ -332,6 +333,7 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
 
 void SequencerGraph::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
+    const auto blockStart = std::chrono::steady_clock::now();
     shared.flush = false;
     const bool nowPlaying = playing.load();
 
@@ -357,6 +359,18 @@ void SequencerGraph::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 
     positionAtomic = clock.position();
     juce::AudioProcessorGraph::processBlock (buffer, midi);
+
+    const double sampleRate = getSampleRate();
+    if (sampleRate > 0.0 && buffer.getNumSamples() > 0)
+    {
+        const double blockDuration = static_cast<double> (buffer.getNumSamples()) / sampleRate;
+        const double elapsed = std::chrono::duration<double> (std::chrono::steady_clock::now() - blockStart).count();
+        const double current = std::clamp (elapsed / blockDuration, 0.0, 4.0);
+        const double alpha = std::clamp (blockDuration, 0.0, 1.0);
+        const double average = audioCpuAverageValue.load (std::memory_order_relaxed);
+        audioCpuCurrentValue.store (current, std::memory_order_relaxed);
+        audioCpuAverageValue.store (average + alpha * (current - average), std::memory_order_relaxed);
+    }
 }
 
 // ======================================================= PassThroughProcessor (Master Bus In)
@@ -717,7 +731,8 @@ bool AudioEngine::canAcceptPlugin (int trackId, const juce::PluginDescription& d
     return ! t->audioTrack || ! description.isInstrument;
 }
 
-void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc, std::function<void (const juce::String&, int)> onDone)
+void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
+                             std::function<void (const juce::String&, int)> onDone, int insertionIndex)
 {
     auto* track = find (trackId);
     if (track == nullptr) { onDone ("Trilha inexistente.", 0); return; }
@@ -748,7 +763,7 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc, s
     }
 
     formatManager.createPluginInstanceAsync (desc, sampleRate, blockSize,
-        [this, trackId, pluginIdentifier, pendingKey, onDone]
+        [this, trackId, pluginIdentifier, pendingKey, onDone, insertionIndex]
         (std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& error)
         {
             pendingPluginLoads.erase (pendingKey);
@@ -776,13 +791,24 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc, s
                 // um instrumento por trilha: o novo substitui o anterior
                 if (! t->devices.empty() && t->devices.front().instrument)
                 {
+                    d.groupId = t->devices.front().groupId;
                     seqGraph.removeNode (t->devices.front().node->nodeID);
                     t->devices.erase (t->devices.begin());
                 }
                 t->devices.insert (t->devices.begin(), d);
             }
             else
-                t->devices.push_back (d);
+            {
+                if (insertionIndex < 0)
+                    t->devices.push_back (d);
+                else
+                {
+                    const int firstEffect = ! t->devices.empty() && t->devices.front().instrument ? 1 : 0;
+                    const int index = std::clamp (insertionIndex, firstEffect,
+                                                  static_cast<int> (t->devices.size()));
+                    t->devices.insert (t->devices.begin() + index, d);
+                }
+            }
 
             rewire (*t);
             onDone ({}, d.id);
@@ -801,7 +827,142 @@ void AudioEngine::removeDevice (int trackId, int deviceId)
             t->devices.erase (it);
             break;
         }
+
+    std::map<int, int> groupSizes;
+    for (const auto& device : t->devices)
+        if (device.groupId > 0)
+            ++groupSizes[device.groupId];
+    for (auto& device : t->devices)
+        if (device.groupId > 0 && groupSizes[device.groupId] < 2)
+            device.groupId = 0;
+
     rewire (*t);
+}
+
+bool AudioEngine::moveDevice (int trackId, int deviceId, int direction)
+{
+    if (direction != -1 && direction != 1)
+        return false;
+
+    auto* t = find (trackId);
+    if (t == nullptr)
+        return false;
+
+    const auto device = std::find_if (t->devices.begin(), t->devices.end(),
+        [deviceId] (const Device& candidate) { return candidate.id == deviceId; });
+    if (device == t->devices.end())
+        return false;
+
+    const auto index = static_cast<std::ptrdiff_t> (device - t->devices.begin());
+    const auto targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= static_cast<std::ptrdiff_t> (t->devices.size()))
+        return false;
+
+    auto target = t->devices.begin() + targetIndex;
+    if (device->instrument || target->instrument || device->groupId > 0 || target->groupId > 0)
+        return false;
+
+    std::iter_swap (device, target);
+    rewire (*t);
+    return true;
+}
+
+bool AudioEngine::reorderDevice (int trackId, int deviceId, int targetDeviceId, bool afterTarget)
+{
+    auto* t = find (trackId);
+    if (t == nullptr || deviceId == targetDeviceId)
+        return false;
+
+    const auto source = std::find_if (t->devices.begin(), t->devices.end(),
+        [deviceId] (const Device& candidate) { return candidate.id == deviceId; });
+    const auto target = std::find_if (t->devices.begin(), t->devices.end(),
+        [targetDeviceId] (const Device& candidate) { return candidate.id == targetDeviceId; });
+    if (source == t->devices.end() || target == t->devices.end()
+        || source->instrument || target->instrument
+        || source->groupId > 0 || target->groupId > 0)
+        return false;
+
+    const auto sourceIndex = static_cast<std::ptrdiff_t> (source - t->devices.begin());
+    const auto targetIndex = static_cast<std::ptrdiff_t> (target - t->devices.begin());
+    auto insertIndex = targetIndex + (afterTarget ? 1 : 0);
+    if (sourceIndex < insertIndex)
+        --insertIndex;
+    if (insertIndex == sourceIndex)
+        return false;
+
+    auto device = std::move (*source);
+    t->devices.erase (source);
+    t->devices.insert (t->devices.begin() + insertIndex, std::move (device));
+    rewire (*t);
+    return true;
+}
+
+bool AudioEngine::groupDevices (int trackId, const std::vector<int>& deviceIds)
+{
+    auto* t = find (trackId);
+    if (t == nullptr || deviceIds.size() < 2)
+        return false;
+
+    const std::set<int> selected (deviceIds.begin(), deviceIds.end());
+    if (selected.size() != deviceIds.size())
+        return false;
+
+    std::vector<std::size_t> indices;
+    indices.reserve (deviceIds.size());
+    for (const auto id : selected)
+    {
+        const auto found = std::find_if (t->devices.begin(), t->devices.end(),
+            [id] (const Device& device) { return device.id == id; });
+        if (found == t->devices.end())
+            return false;
+        indices.push_back (static_cast<std::size_t> (found - t->devices.begin()));
+    }
+
+    std::sort (indices.begin(), indices.end());
+    if (indices.back() - indices.front() + 1 != indices.size())
+        return false;
+    if (std::any_of (indices.begin(), indices.end(),
+                     [t] (std::size_t index) { return t->devices[index].instrument && index != 0; }))
+        return false;
+
+    for (std::size_t i = 0; i < t->devices.size(); ++i)
+        if (indices.front() <= i && i <= indices.back()
+            && t->devices[i].groupId > 0 && ! selected.contains (t->devices[i].id))
+            return false;
+
+    for (const auto& device : t->devices)
+        if (device.groupId > 0 && selected.contains (device.id))
+            for (const auto& member : t->devices)
+                if (member.groupId == device.groupId && ! selected.contains (member.id))
+                    return false;
+
+    const int groupId = nextDeviceGroupId++;
+    for (const auto index : indices)
+        t->devices[index].groupId = groupId;
+
+    return true;
+}
+
+bool AudioEngine::ungroupDevices (int trackId, const std::vector<int>& deviceIds)
+{
+    auto* t = find (trackId);
+    if (t == nullptr || deviceIds.empty())
+        return false;
+
+    std::set<int> groupIds;
+    for (const auto id : deviceIds)
+        for (const auto& device : t->devices)
+            if (device.id == id && device.groupId > 0)
+                groupIds.insert (device.groupId);
+
+    if (groupIds.empty())
+        return false;
+
+    for (auto& device : t->devices)
+        if (groupIds.contains (device.groupId))
+            device.groupId = 0;
+
+    return true;
 }
 
 void AudioEngine::setDeviceBypassed (int trackId, int deviceId, bool bypassed)
@@ -820,7 +981,7 @@ std::vector<DeviceInfo> AudioEngine::devices (int trackId) const
     std::vector<DeviceInfo> out;
     if (auto* t = find (trackId))
         for (const auto& d : t->devices)
-            out.push_back ({ d.id, d.name, d.instrument, d.node->isBypassed() });
+            out.push_back ({ d.id, d.name, d.instrument, d.node->isBypassed(), d.groupId });
     return out;
 }
 

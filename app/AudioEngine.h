@@ -108,6 +108,8 @@ public:
     bool isLoop() const            { return loopEnabled; }
     void setLoopRegion (double s, double e) { loopStart = s; loopEnd = e; }
     double positionBeats() const   { return positionAtomic; }
+    double audioCpuCurrent() const { return audioCpuCurrentValue.load (std::memory_order_relaxed); }
+    double audioCpuAverage() const { return audioCpuAverageValue.load (std::memory_order_relaxed); }
     const BlockShared& sharedBlock() const { return shared; }
 
     // ---- áudio thread ----
@@ -120,6 +122,7 @@ private:
     bool wasPlaying = false;
     std::atomic<bool>   playing { false }, rewindRequested { false }, seekRequested { false }, loopEnabled { true };
     std::atomic<double> bpm { 120.0 }, loopStart { 0.0 }, loopEnd { 16.0 }, seekTarget { 0.0 }, positionAtomic { 0.0 };
+    std::atomic<double> audioCpuCurrentValue { 0.0 }, audioCpuAverageValue { 0.0 };
 };
 
 struct DeviceInfo
@@ -128,6 +131,7 @@ struct DeviceInfo
     juce::String name;
     bool isInstrument = false;
     bool isBypassed = false;
+    int groupId = 0;
 };
 
 struct AudioFileData
@@ -240,13 +244,19 @@ public:
     float masterPeak() const;
 
     // dispositivos (plugins) da trilha: o instrumento vem sempre primeiro, efeitos em seguida
-    void addDevice (int trackId, const juce::PluginDescription&, std::function<void (const juce::String& error, int deviceId)> onDone);
+    void addDevice (int trackId, const juce::PluginDescription&,
+                    std::function<void (const juce::String& error, int deviceId)> onDone,
+                    int insertionIndex = -1);
     void loadAudioFileAsync (const juce::File&, std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)>);
     void previewAudio (std::shared_ptr<const AudioFileData> source);
     void stopAudioPreview();
     void setAudioPreviewGain (float gain);
     bool canAcceptPlugin (int trackId, const juce::PluginDescription&) const;
     void removeDevice (int trackId, int deviceId);
+    bool moveDevice (int trackId, int deviceId, int direction);
+    bool reorderDevice (int trackId, int deviceId, int targetDeviceId, bool afterTarget);
+    bool groupDevices (int trackId, const std::vector<int>& deviceIds);
+    bool ungroupDevices (int trackId, const std::vector<int>& deviceIds);
     void setDeviceBypassed (int trackId, int deviceId, bool bypassed);
     std::vector<DeviceInfo> devices (int trackId) const;
     std::unique_ptr<juce::AudioProcessorEditor> createDeviceEditor (int trackId, int deviceId);
@@ -258,6 +268,7 @@ private:
         juce::AudioProcessorGraph::Node::Ptr node;
         juce::String name, pluginIdentifier;
         bool instrument;
+        int groupId = 0;
     };
     struct TrackNodes
     {
@@ -289,5 +300,5 @@ private:
     AudioPreviewSource* previewSourcePtr = nullptr;
     std::map<int, TrackNodes> tracks;
     std::set<std::pair<int, std::string>> pendingPluginLoads;
-    int nextDeviceId = 1;
+    int nextDeviceId = 1, nextDeviceGroupId = 1;
 };

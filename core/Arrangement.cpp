@@ -62,6 +62,7 @@ Placement* Track::copyClip (const Placement& source, double start)
 
     auto* copy = addClip (start, source.clip.length());
     copy->name = source.name;
+    copy->enabled = source.enabled;
     copy->clip.setNotes (source.clip.notes());
     return copy;
 }
@@ -103,10 +104,13 @@ int Track::splitClip (int clipId, double beat)
     }
 
     const std::string name = clip->name;
+    const bool enabled = clip->enabled;
     clip->clip.setLength (offset);
     clip->clip.setNotes (std::move (leftNotes));
     auto* right = addClip (beat, rightLength);
     right->name = name;
+    clip->enabled = enabled;
+    right->enabled = enabled;
     right->clip.setNotes (std::move (rightNotes));
     return right->id;
 }
@@ -178,6 +182,7 @@ AudioPlacement* Track::copyAudioClip (const AudioPlacement& source, double start
     copy->sourceOffsetSeconds = source.sourceOffsetSeconds;
     copy->fadeInBeats = source.fadeInBeats;
     copy->fadeOutBeats = source.fadeOutBeats;
+    copy->enabled = source.enabled;
     return copy;
 }
 
@@ -219,6 +224,7 @@ int Track::splitAudioClip (int clipId, double beat)
     const double sourceOffset = clip->sourceOffsetSeconds;
     const double fadeIn = clip->fadeInBeats;
     const double fadeOut = clip->fadeOutBeats;
+    const bool enabled = clip->enabled;
     clip->lengthBeats = offset;
     clip->durationSeconds = leftDuration;
     clip->waveform = std::move (leftWaveform);
@@ -230,6 +236,7 @@ int Track::splitAudioClip (int clipId, double beat)
     right->sourceOffsetSeconds = rightSourceOffset;
     right->fadeInBeats = std::max (0.0, fadeIn - offset);
     right->fadeOutBeats = std::min (fadeOut, rightLength);
+    right->enabled = enabled;
     return right->id;
 }
 
@@ -272,6 +279,9 @@ std::vector<Note> flatten (const Track& track)
     std::vector<Note> out;
     int id = 1;
     for (const auto& p : track.clips)
+    {
+        if (! p->enabled)
+            continue;
         for (const auto& n : p->clip.notes())
         {
             if (n.startBeats >= p->clip.length()) continue;
@@ -281,6 +291,7 @@ std::vector<Note> flatten (const Track& track)
             a.id = id++;
             out.push_back (a);
         }
+    }
     return out;
 }
 

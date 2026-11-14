@@ -24,7 +24,7 @@ public:
     enum class Kind
     {
         FileSystem, ComputerRoot, FavoritesRoot, FavoriteCategory, FavoriteEntry,
-        SearchResultsRoot, SearchResultEntry
+        SearchResultsRoot, SearchFolderEntry, SearchResultEntry
     };
 
     FileTreeItem (AudioFileBrowser& browser, juce::File path, Kind itemKind = Kind::FileSystem, int color = -1)
@@ -42,6 +42,7 @@ public:
         if (kind == Kind::ComputerRoot) return "computer";
         if (kind == Kind::FavoritesRoot) return "favorites";
         if (kind == Kind::SearchResultsRoot) return "search-results";
+        if (kind == Kind::SearchFolderEntry) return "search-folder:" + file.getFullPathName();
         if (kind == Kind::FavoriteCategory) return "favorite-" + juce::String (favoriteColor);
         return file.getFullPathName();
     }
@@ -50,7 +51,8 @@ public:
 
     juce::String getTooltip() override
     {
-        return kind == Kind::SearchResultEntry ? file.getFullPathName() : juce::String();
+        return kind == Kind::SearchResultEntry || kind == Kind::SearchFolderEntry
+            ? file.getFullPathName() : juce::String();
     }
 
     void itemSelectionChanged (bool isNowSelected) override
@@ -111,7 +113,12 @@ public:
             isBold = true;
         }
         else if (kind == Kind::SearchResultEntry)
-            label = file.getFileName() + "  [" + file.getParentDirectory().getFullPathName() + "]";
+            label = file.getFileName();
+        else if (kind == Kind::SearchFolderEntry)
+        {
+            label = file.getFullPathName();
+            isBold = true;
+        }
         else
         {
             label = file.getFileName();
@@ -276,6 +283,40 @@ void AudioFileBrowser::setFavoritesMode (bool showing)
     refreshTree();
 }
 
+void AudioFileBrowser::revealFile (const juce::File& file)
+{
+    if (! file.existsAsFile() || ! isAudioFile (file))
+    {
+        setStatus ("Arquivo de audio nao encontrado.");
+        return;
+    }
+
+    if (showingFavorites)
+        setFavoritesMode (false);
+
+    searchDirectory = file.getParentDirectory();
+    search.setText (file.getFileName(), juce::dontSendNotification);
+    searchGeneration->fetch_add (1);
+    searchResults = { file };
+    tree.setRootItem (new FileTreeItem (*this, {}, FileTreeItem::Kind::SearchResultsRoot));
+    if (auto* root = tree.getRootItem())
+    {
+        root->setOpen (true);
+        if (root->getNumSubItems() > 0)
+            if (auto* folder = root->getSubItem (0))
+            {
+                folder->setOpen (true);
+                if (folder->getNumSubItems() > 0)
+                    if (auto* item = folder->getSubItem (0))
+                    {
+                        item->setSelected (true, true);
+                        tree.scrollToKeepItemVisible (item);
+                    }
+            }
+    }
+    setStatus ("Localizado: " + file.getFileName());
+}
+
 bool AudioFileBrowser::isAudioFile (const juce::File& file)
 {
     const auto extension = file.getFileExtension().toLowerCase();
@@ -404,7 +445,13 @@ void AudioFileBrowser::refreshTree()
             safeThis->searchResults = std::move (results);
             safeThis->tree.setRootItem (new FileTreeItem (
                 *safeThis, {}, FileTreeItem::Kind::SearchResultsRoot));
-            safeThis->tree.getRootItem()->setOpen (true);
+            if (auto* root = safeThis->tree.getRootItem())
+            {
+                root->setOpen (true);
+                for (int i = 0; i < root->getNumSubItems(); ++i)
+                    if (auto* folder = root->getSubItem (i))
+                        folder->setOpen (true);
+            }
             const auto count = safeThis->searchResults.size();
             safeThis->setStatus (truncated
                 ? "Mais de " + juce::String (count) + " resultados; limite de exibicao atingido."
@@ -593,8 +640,29 @@ void AudioFileBrowser::populate (FileTreeItem& item)
 
     if (item.getUniqueName() == "search-results")
     {
+        std::vector<juce::File> folders;
+        std::set<juce::String> seenPaths;
         for (const auto& file : searchResults)
-            item.addSubItem (new FileTreeItem (*this, file, FileTreeItem::Kind::SearchResultEntry));
+        {
+            const auto folder = file.getParentDirectory();
+            if (seenPaths.insert (folder.getFullPathName()).second)
+                folders.push_back (folder);
+        }
+        std::sort (folders.begin(), folders.end(), [] (const juce::File& a, const juce::File& b)
+        {
+            return a.getFullPathName().compareIgnoreCase (b.getFullPathName()) < 0;
+        });
+        for (const auto& folder : folders)
+            item.addSubItem (new FileTreeItem (*this, folder, FileTreeItem::Kind::SearchFolderEntry));
+        return;
+    }
+
+    if (item.getUniqueName().startsWith ("search-folder:"))
+    {
+        const auto folderPath = item.getFile().getFullPathName();
+        for (const auto& file : searchResults)
+            if (file.getParentDirectory().getFullPathName().compareIgnoreCase (folderPath) == 0)
+                item.addSubItem (new FileTreeItem (*this, file, FileTreeItem::Kind::SearchResultEntry));
         return;
     }
 

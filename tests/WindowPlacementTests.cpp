@@ -77,3 +77,20 @@ TEST_CASE ("WindowPlacement cascades plugin windows and keeps them visible")
     CHECK (oversized.x == display.x);
     CHECK (oversized.y == display.y);
 }
+
+TEST_CASE ("WindowPlacement keeps plugin windows separate when display space allows")
+{
+    const Rect display { 100, 50, 1600, 900 };
+    const std::vector<Rect> openWindows { { 160, 110, 600, 400 } };
+    const auto next = WindowPlacement::placePluginWindow (
+        { 0, 0, 600, 400 }, display, 1, 28, openWindows);
+
+    CHECK (next.x >= display.x);
+    CHECK (next.y >= display.y);
+    CHECK (next.right() <= display.right());
+    CHECK (next.bottom() <= display.bottom());
+    const auto& occupied = openWindows.front();
+    const bool overlaps = next.x < occupied.right() && next.right() > occupied.x
+                       && next.y < occupied.bottom() && next.bottom() > occupied.y;
+    CHECK_FALSE (overlaps);
+}

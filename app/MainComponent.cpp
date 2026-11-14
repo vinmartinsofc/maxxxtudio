@@ -90,7 +90,8 @@ public:
     PluginWindow (const juce::String& name,
                   std::unique_ptr<juce::AudioProcessorEditor> editor,
                   const juce::Rectangle<int>& displayUserArea,
-                  int cascadeIndex)
+                  int cascadeIndex,
+                  const std::vector<roll::Rect>& occupiedWindows)
         : DocumentWindow (name, juce::Colours::darkgrey, DocumentWindow::minimiseButton | DocumentWindow::closeButton)
     {
         setUsingNativeTitleBar (true);
@@ -121,12 +122,12 @@ public:
             setContentOwned (editor.release(), true);
         }
 
-        const auto placeWindow = [this, &displayUserArea, cascadeIndex]
+        const auto placeWindow = [this, &displayUserArea, cascadeIndex, &occupiedWindows]
         {
             return roll::WindowPlacement::placePluginWindow (
                 { 0, 0, getWidth(), getHeight() },
                 { displayUserArea.getX(), displayUserArea.getY(), displayUserArea.getWidth(), displayUserArea.getHeight() },
-                cascadeIndex);
+                cascadeIndex, 64, occupiedWindows);
         };
         auto bounds = placeWindow();
         setBounds (bounds.x, bounds.y, bounds.width, bounds.height);
@@ -298,13 +299,13 @@ MainComponent::MainComponent()
     arrangement.deviceSummary = [this] (int id) { return deviceSummary (id); };
     arrangement.canAcceptPluginDrop = [this] (const juce::String& identifier, int trackId)
     {
-        const auto description = scanner.list().getTypeForFile (identifier);
+        const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr
             && (trackId != AudioEngine::masterTrackId || engine.canAcceptPlugin (trackId, *description));
     };
     arrangement.onPluginDropped = [this] (const juce::String& identifier, int trackId, double)
     {
-        if (auto description = scanner.list().getTypeForFile (identifier))
+        if (auto description = scanner.list().getTypeForIdentifierString (identifier))
         {
             auto* target = project.track (trackId);
             if (trackId == AudioEngine::masterTrackId && ! engine.canAcceptPlugin (trackId, *description))
@@ -347,6 +348,11 @@ MainComponent::MainComponent()
     arrangement.onAudioClipDoubleClicked = [this] (int trackId, int clipId)
     {
         openAudioClipEditor (trackId, clipId);
+    };
+    arrangement.onLocateAudioFileRequested = [this] (const juce::File& file)
+    {
+        setAudioBrowserVisible (true);
+        audioBrowser.revealFile (file);
     };
     arrangement.onConsolidateRequested = [this] (double startBeat, double endBeat, int firstTrack, int lastTrack)
     {
@@ -409,6 +415,58 @@ MainComponent::MainComponent()
     deviceView.onBypass = [this] (int trackId, int deviceId, bool bypassed)
     {
         engine.setDeviceBypassed (trackId, deviceId, bypassed);
+    };
+    deviceView.onMove = [this] (int trackId, int deviceId, int direction)
+    {
+        if (engine.moveDevice (trackId, deviceId, direction))
+        {
+            refreshDeviceView();
+            project.sendChangeMessage();
+        }
+    };
+    deviceView.onReorder = [this] (int trackId, int deviceId, int targetDeviceId, bool afterTarget)
+    {
+        if (engine.reorderDevice (trackId, deviceId, targetDeviceId, afterTarget))
+        {
+            refreshDeviceView();
+            project.sendChangeMessage();
+        }
+    };
+    deviceView.onGroupRequested = [this] (int trackId, const std::vector<int>& deviceIds)
+    {
+        if (engine.groupDevices (trackId, deviceIds))
+        {
+            refreshDeviceView();
+            project.sendChangeMessage();
+            browser.setStatus ("Plugins agrupados. Ctrl+Shift+G para desagrupar.");
+        }
+        else
+        {
+            browser.setStatus ("Selecione pelo menos dois plugins consecutivos para agrupar.");
+        }
+    };
+    deviceView.onUngroupRequested = [this] (int trackId, const std::vector<int>& deviceIds)
+    {
+        if (engine.ungroupDevices (trackId, deviceIds))
+        {
+            refreshDeviceView();
+            project.sendChangeMessage();
+            browser.setStatus ("Rack desagrupado.");
+        }
+        else
+        {
+            browser.setStatus ("Selecione um rack para desagrupar.");
+        }
+    };
+    deviceView.canAcceptPluginDrop = [this] (int trackId, const juce::String& identifier)
+    {
+        const auto description = scanner.list().getTypeForIdentifierString (identifier);
+        return description != nullptr && engine.canAcceptPlugin (trackId, *description);
+    };
+    deviceView.onPluginDropped = [this] (int trackId, const juce::String& identifier, int insertionIndex)
+    {
+        if (auto description = scanner.list().getTypeForIdentifierString (identifier))
+            loadDevice (*description, trackId, insertionIndex);
     };
     deviceView.onRemove = [this] (int trackId, int deviceId)
     {
@@ -747,6 +805,9 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     bool foundSource = false;
     for (const auto& clip : track->audioClips)
     {
+        if (! clip->enabled)
+            continue;
+
         const double overlapStart = std::max (startBeat, clip->start);
         const double overlapEnd = std::min (endBeat, clip->end());
         if (overlapEnd <= overlapStart)
@@ -916,10 +977,11 @@ void MainComponent::publishAudioTrack (int trackId)
     std::vector<AudioClipPlayback> clips;
     if (const auto* track = project.track (trackId); track != nullptr && track->type == roll::TrackType::Audio)
         for (const auto& clip : track->audioClips)
-            if (const auto asset = audioAssets.find (clip->filePath); asset != audioAssets.end())
-                clips.push_back ({ clip->start, clip->lengthBeats, clip->sourceBpm,
-                                   clip->sourceOffsetSeconds, clip->fadeInBeats,
-                                   clip->fadeOutBeats, asset->second });
+            if (clip->enabled)
+                if (const auto asset = audioAssets.find (clip->filePath); asset != audioAssets.end())
+                    clips.push_back ({ clip->start, clip->lengthBeats, clip->sourceBpm,
+                                       clip->sourceOffsetSeconds, clip->fadeInBeats,
+                                       clip->fadeOutBeats, asset->second });
     engine.publishAudioClips (trackId, clips);
 
     for (auto it = audioAssets.begin(); it != audioAssets.end();)
@@ -1204,9 +1266,9 @@ void MainComponent::timerCallback()
 
 // ------------------------------------------------------------ dispositivos
 
-void MainComponent::loadDevice (const juce::PluginDescription& desc)
+void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetTrackId, int insertionIndex)
 {
-    auto* t = project.selectedTrack();
+    auto* t = targetTrackId >= 0 ? project.track (targetTrackId) : project.selectedTrack();
     if (t == nullptr) return;
     const int trackId = t->id;
     if (! engine.canAcceptPlugin (trackId, desc))
@@ -1237,7 +1299,7 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc)
         refreshDeviceView();
         project.sendChangeMessage();
         openDeviceEditor (trackId, deviceId);
-    });
+    }, insertionIndex);
 }
 
 void MainComponent::updateActionIndicator()
@@ -1293,7 +1355,18 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
 
         const auto displayArea = display != nullptr ? display->userBounds.toNearestInt()
                                                     : juce::Rectangle<int> (0, 0, 1280, 720);
-        windows[deviceId] = std::make_unique<PluginWindow> (title, std::move (ed), displayArea, nextPluginCascadeIndex++);
+        std::vector<roll::Rect> occupiedWindows;
+        for (const auto& [openDeviceId, window] : windows)
+        {
+            juce::ignoreUnused (openDeviceId);
+            if (window != nullptr && window->isVisible())
+            {
+                const auto bounds = window->getScreenBounds();
+                occupiedWindows.push_back ({ bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight() });
+            }
+        }
+        windows[deviceId] = std::make_unique<PluginWindow> (
+            title, std::move (ed), displayArea, nextPluginCascadeIndex++, occupiedWindows);
         windows[deviceId]->toFront (true);
     }
     else

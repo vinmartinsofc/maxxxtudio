@@ -189,6 +189,10 @@ void TransportBar::updateButtons()
 void TransportBar::timerCallback()
 {
     updateButtons();
+    displayedCpuCurrent = graph.audioCpuCurrent();
+    displayedCpuAverage = graph.audioCpuAverage();
+    repaint (cpuMeterBounds);
+
     const double pos = graph.positionBeats();
     if (std::abs (pos - lastPosition) < 1.0e-9) return;
     lastPosition = pos;
@@ -204,6 +208,28 @@ void TransportBar::timerCallback()
 void TransportBar::paint (juce::Graphics& g)
 {
     g.fillAll (theme::panel());
+    if (! cpuMeterBounds.isEmpty())
+    {
+        const auto meter = cpuMeterBounds.toFloat().reduced (1.0f);
+        const auto bar = meter.withTrimmedLeft (3.0f).withTrimmedRight (3.0f)
+                             .withY (meter.getBottom() - 5.0f).withHeight (3.0f);
+        const auto loadColour = displayedCpuCurrent >= 1.0 ? juce::Colour (0xffe34b4b)
+                               : displayedCpuCurrent >= 0.75 ? juce::Colour (0xffe6a845)
+                                                             : theme::accent();
+
+        g.setColour (theme::control());
+        g.fillRoundedRectangle (meter, 4.0f);
+        g.setColour (theme::text());
+        g.setFont (juce::FontOptions (10.0f));
+        g.drawText ("CPU " + juce::String (static_cast<int> (std::lround (displayedCpuCurrent * 100.0)))
+                    + "%  med " + juce::String (static_cast<int> (std::lround (displayedCpuAverage * 100.0))) + "%",
+                    meter.toNearestInt().withTrimmedBottom (5), juce::Justification::centred, true);
+        g.setColour (theme::border());
+        g.fillRoundedRectangle (bar, 1.5f);
+        g.setColour (loadColour);
+        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * static_cast<float> (std::min (displayedCpuCurrent, 1.0))),
+                                1.5f);
+    }
     g.setColour (theme::border());
     g.drawHorizontalLine (getHeight() - 1, 0.0f, static_cast<float> (getWidth()));
 }
@@ -224,6 +250,16 @@ void TransportBar::resized()
     area.removeFromLeft (16);
     positionLabel.setBounds (area.removeFromLeft (120));
     area.removeFromLeft (12);
+    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - 394));
+    if (cpuWidth >= 100)
+    {
+        cpuMeterBounds = area.removeFromLeft (cpuWidth);
+        area.removeFromLeft (12);
+    }
+    else
+    {
+        cpuMeterBounds = {};
+    }
     browserButton.setBounds (area.removeFromRight (88));
     area.removeFromRight (6);
     fileBrowserButton.setBounds (area.removeFromRight (72));

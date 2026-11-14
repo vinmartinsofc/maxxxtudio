@@ -14,6 +14,7 @@ struct Placement
 {
     int         id = 0;
     double      start = 0.0;
+    bool        enabled = true;
     std::string name;
     Clip        clip { 4.0 };
 
@@ -38,6 +39,7 @@ struct AudioPlacement
     double      fadeInBeats = 0.0;
     double      fadeOutBeats = 0.0;
     double      sourceBpm = 120.0;
+    bool        enabled = true;
     std::string name, filePath;
     std::vector<WaveformRange> waveform;
 

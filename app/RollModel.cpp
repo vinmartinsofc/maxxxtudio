@@ -173,6 +173,13 @@ void RollModel::toggleMuteSelected()
 void RollModel::updateGrid()     { gridBeats = baseGrid * (triplet ? 2.0 / 3.0 : 1.0); }
 void RollModel::narrowGrid()     { baseGrid = std::max (1.0 / 16.0, baseGrid * 0.5); updateGrid(); sendChangeMessage(); }
 void RollModel::widenGrid()      { baseGrid = std::min (4.0, baseGrid * 2.0);        updateGrid(); sendChangeMessage(); }
+void RollModel::setGrid (double beats, bool useTriplet)
+{
+    baseGrid = std::clamp (beats, 1.0 / 16.0, 4.0);
+    triplet = useTriplet;
+    updateGrid();
+    sendChangeMessage();
+}
 void RollModel::toggleSnap()     { snap = ! snap;                                    sendChangeMessage(); }
 void RollModel::toggleTriplet()  { triplet = ! triplet;                              updateGrid(); sendChangeMessage(); }
 

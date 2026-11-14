@@ -16,7 +16,7 @@ public:
     juce::String getUniqueName() const override
     {
         return isFolder ? "folder:" + text
-                        : "plugin:" + description.fileOrIdentifier + ":" + description.name;
+                        : "plugin:" + description.createIdentifierString();
     }
 
     juce::String getTooltip() override
@@ -28,7 +28,7 @@ public:
     juce::var getDragSourceDescription() override
     {
         return isFolder ? juce::var()
-                        : juce::var ("plugin:" + description.fileOrIdentifier);
+                        : juce::var ("plugin:" + description.createIdentifierString());
     }
 
     void paintItem (juce::Graphics& g, int width, int height) override

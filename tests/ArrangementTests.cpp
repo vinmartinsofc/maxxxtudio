@@ -34,6 +34,32 @@ TEST_CASE("flatten corta notas que passam do fim do clip e descarta as de fora")
     REQUIRE(flat[0].lengthBeats == 0.5);
 }
 
+TEST_CASE("Clips desativados nao tocam e permanecem desativados ao copiar e dividir")
+{
+    Track midi;
+    auto* midiClip = midi.addClip (0.0, 4.0);
+    midiClip->enabled = false;
+    midiClip->clip.addNote ({ 60, 0.0, 1.0, 100 });
+    REQUIRE(flatten (midi).empty());
+    auto* midiCopy = midi.copyClip (*midiClip, 4.0);
+    REQUIRE(midiCopy != nullptr);
+    REQUIRE_FALSE (midiCopy->enabled);
+    const int rightMidiId = midi.splitClip (midiClip->id, 2.0);
+    REQUIRE(rightMidiId > 0);
+    REQUIRE_FALSE (midi.find (rightMidiId)->enabled);
+
+    Track audio;
+    audio.type = TrackType::Audio;
+    auto* audioClip = audio.addAudioClip (0.0, 4.0, "C:/audio/one.wav", "one.wav");
+    audioClip->enabled = false;
+    auto* audioCopy = audio.copyAudioClip (*audioClip, 4.0);
+    REQUIRE(audioCopy != nullptr);
+    REQUIRE_FALSE (audioCopy->enabled);
+    const int rightAudioId = audio.splitAudioClip (audioClip->id, 2.0);
+    REQUIRE(rightAudioId > 0);
+    REQUIRE_FALSE (audio.findAudioClip (rightAudioId)->enabled);
+}
+
 TEST_CASE("Mover clip entre trilhas preserva as notas")
 {
     Track a, b;

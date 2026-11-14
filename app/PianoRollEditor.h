@@ -37,6 +37,7 @@ private:
     int   yToRow (float y) const     { return static_cast<int> (std::floor (y / model.rowHeight)); }
     juce::Rectangle<float> noteRect (const roll::Note&) const;
     int  hitNote (juce::Point<float>) const;
+    void showContextMenu (juce::Point<int> screenPosition);
     void updateCursor (juce::Point<float>);
     void setPreview (int pitch);
     void flashPreview (int pitch);

@@ -76,10 +76,49 @@ Rect WindowPlacement::placePluginWindow (const Rect& pluginBounds,
                                          int cascadeIndex,
                                          int cascadeStep)
 {
+    return placePluginWindow (pluginBounds, displayUserArea, cascadeIndex, cascadeStep, {});
+}
+
+Rect WindowPlacement::placePluginWindow (const Rect& pluginBounds,
+                                         const Rect& displayUserArea,
+                                         int cascadeIndex,
+                                         int cascadeStep,
+                                         const std::vector<Rect>& occupiedWindows)
+{
     const int width = clampDimension (pluginBounds.width, 1, displayUserArea.width);
     const int height = clampDimension (pluginBounds.height, 1, displayUserArea.height);
     constexpr int baseMargin = 60;
     constexpr int cascadeSlots = 8;
+
+    if (! occupiedWindows.empty())
+    {
+        std::vector<Rect> candidates { { displayUserArea.x + baseMargin, displayUserArea.y + baseMargin, width, height } };
+        constexpr int gap = 12;
+        for (const auto& occupied : occupiedWindows)
+        {
+            candidates.push_back ({ occupied.right() + gap, occupied.y, width, height });
+            candidates.push_back ({ occupied.x, occupied.bottom() + gap, width, height });
+            candidates.push_back ({ occupied.x - width - gap, occupied.y, width, height });
+            candidates.push_back ({ occupied.x, occupied.y - height - gap, width, height });
+        }
+
+        for (const auto& candidate : candidates)
+        {
+            const bool insideDisplay = candidate.x >= displayUserArea.x
+                && candidate.y >= displayUserArea.y
+                && candidate.right() <= displayUserArea.right()
+                && candidate.bottom() <= displayUserArea.bottom();
+            const bool overlapsWindow = std::any_of (occupiedWindows.begin(), occupiedWindows.end(),
+                [&candidate] (const Rect& occupied)
+                {
+                    return candidate.x < occupied.right() && candidate.right() > occupied.x
+                        && candidate.y < occupied.bottom() && candidate.bottom() > occupied.y;
+                });
+            if (insideDisplay && ! overlapsWindow)
+                return candidate;
+        }
+    }
+
     const int slot = ((cascadeIndex % cascadeSlots) + cascadeSlots) % cascadeSlots;
     const int offset = slot * std::max (0, cascadeStep);
     const int x = std::clamp (displayUserArea.x + baseMargin + offset,

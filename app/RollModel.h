@@ -14,6 +14,8 @@
 class RollModel : public juce::ChangeBroadcaster
 {
 public:
+    enum class NoteSpelling { Auto, Sharps, Flats, Both };
+
     RollModel();
 
     int rowHeight = 16;                         // zoom vertical
@@ -34,6 +36,7 @@ public:
     bool   drawMode  = false;
     bool   snap      = true;
     bool   previewOn = true;     // ouvir as notas ao selecionar/mover
+    NoteSpelling noteSpelling = NoteSpelling::Auto;
     bool   triplet   = false;
     double baseGrid      = 0.25;   // 1/16
     double gridBeats     = 0.25;   // grade efetiva (baseGrid, ou 2/3 dela em tripleto)
@@ -82,11 +85,13 @@ public:
     void toggleMuteSelected();
     void narrowGrid();
     void widenGrid();
+    void setGrid (double beats, bool useTriplet);
     void toggleSnap();
     void toggleTriplet();
     void resizeSelected (double dBeats);
     void copySelected (bool cut);
     void paste();
+    bool hasClipboardContents() const { return ! clipboard.empty(); }
     void setInsertMarker (double beats);
     void resolveOverlaps (const std::set<int>& ids);
 

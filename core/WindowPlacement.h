@@ -35,6 +35,11 @@ public:
                                    const Rect& displayUserArea,
                                    int cascadeIndex = 0,
                                    int cascadeStep = 28);
+    static Rect placePluginWindow (const Rect& pluginBounds,
+                                   const Rect& displayUserArea,
+                                   int cascadeIndex,
+                                   int cascadeStep,
+                                   const std::vector<Rect>& occupiedWindows);
 };
 
 } // namespace roll

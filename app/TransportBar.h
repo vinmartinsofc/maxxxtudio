@@ -56,5 +56,7 @@ private:
                      favoritesButton { "Favoritos" },
                      pianoRollButton { "Piano Roll" };
     juce::Label bpmLabel, positionLabel, bpmCaption { {}, "BPM" };
+    juce::Rectangle<int> cpuMeterBounds;
+    double displayedCpuCurrent = 0.0, displayedCpuAverage = 0.0;
     double lastPosition = -1.0;
 };

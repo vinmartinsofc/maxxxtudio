@@ -168,6 +168,15 @@ public:
                     const float outRadius = editingFadeOut ? 3.0f + pulse : 3.0f;
                     g.fillEllipse (fadeInX - inRadius, fadeTop - inRadius, inRadius * 2.0f, inRadius * 2.0f);
                     g.fillEllipse (fadeOutX - outRadius, fadeTop - outRadius, outRadius * 2.0f, outRadius * 2.0f);
+                    if (! clip->enabled)
+                    {
+                        g.setColour (juce::Colours::black.withAlpha (0.62f));
+                        g.fillRect (r);
+                        g.setColour (juce::Colours::white.withAlpha (0.9f));
+                        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+                        g.drawText (theme::ui ("Desativado"), r.toNearestInt().reduced (3),
+                                    juce::Justification::centred, true);
+                    }
                     g.restoreState();
                     if (selected)
                     {
@@ -215,6 +224,15 @@ public:
                         g.fillRect (r.getX() + static_cast<float> (n.startBeats * ppb), y,
                                     std::max (1.5f, static_cast<float> (n.lengthBeats * ppb)), std::max (1.5f, area.getHeight() / static_cast<float> (range)));
                     }
+                }
+                if (! p->enabled)
+                {
+                    g.setColour (juce::Colours::black.withAlpha (0.62f));
+                    g.fillRect (r);
+                    g.setColour (juce::Colours::white.withAlpha (0.9f));
+                    g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+                    g.drawText (theme::ui ("Desativado"), r.toNearestInt().reduced (3),
+                                juce::Justification::centred, true);
                 }
                 g.restoreState();
 
@@ -493,12 +511,17 @@ public:
         if (clipId >= 0)
         {
             menu.addItem (1, theme::ui ("Loopar clipe"));
-            menu.addItem (2, theme::ui ("Apagar clipe"));
             const auto* selectedTrack = project.track (trackId);
             const auto* audioClip = isAudio && selectedTrack != nullptr
                 ? selectedTrack->findAudioClip (clipId) : nullptr;
             const auto* midiClip = ! isAudio && selectedTrack != nullptr
                 ? selectedTrack->find (clipId) : nullptr;
+            const bool enabled = isAudio ? (audioClip != nullptr && audioClip->enabled)
+                                         : (midiClip != nullptr && midiClip->enabled);
+            menu.addItem (4, theme::ui (enabled ? "Desativar clipe (0)" : "Ativar clipe (0)"));
+            if (isAudio)
+                menu.addItem (5, theme::ui ("Localizar no navegador"));
+            menu.addItem (2, theme::ui ("Apagar clipe"));
             const double clipStart = isAudio ? (audioClip != nullptr ? audioClip->start : 0.0)
                                              : (midiClip != nullptr ? midiClip->start : 0.0);
             const double clipEnd = isAudio ? (audioClip != nullptr ? audioClip->end() : 0.0)
@@ -519,7 +542,16 @@ public:
 
         juce::Component::SafePointer<Lanes> safeThis (this);
         const double splitBeat = owner.playhead;
-        menu.showMenuAsync ({}, [safeThis, trackId, clipId, isAudio, splitBeat] (int result)
+        const auto* selectedTrack = project.track (trackId);
+        const auto* currentAudioClip = isAudio && selectedTrack != nullptr
+            ? selectedTrack->findAudioClip (clipId) : nullptr;
+        const auto* currentMidiClip = ! isAudio && selectedTrack != nullptr
+            ? selectedTrack->find (clipId) : nullptr;
+        const bool enableClip = isAudio ? (currentAudioClip != nullptr && ! currentAudioClip->enabled)
+                                        : (currentMidiClip != nullptr && ! currentMidiClip->enabled);
+        const juce::File audioFile (currentAudioClip != nullptr
+            ? juce::String (currentAudioClip->filePath) : juce::String());
+        menu.showMenuAsync ({}, [safeThis, trackId, clipId, isAudio, splitBeat, enableClip, audioFile] (int result)
         {
             if (safeThis == nullptr) return;
 
@@ -536,7 +568,11 @@ public:
             }
 
             if (clipId < 0) return;
-            if (result == 1)
+            if (result == 4)
+                safeThis->project.setClipEnabled (trackId, clipId, isAudio, enableClip);
+            else if (result == 5 && isAudio && safeThis->owner.onLocateAudioFileRequested)
+                safeThis->owner.onLocateAudioFileRequested (audioFile);
+            else if (result == 1)
             {
                 double start = 0.0, end = 0.0;
                 if (const auto* track = safeThis->project.track (trackId))
@@ -720,7 +756,14 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
-        if (e.mods.isCtrlDown()) { owner.zoom (w.deltaY > 0 ? 1.15 : 1.0 / 1.15); return; }
+        if (e.mods.isCtrlDown())
+        {
+            const auto viewX = owner.viewport.getViewPosition().x;
+            owner.zoomAt (w.deltaY > 0 ? 1.15 : 1.0 / 1.15,
+                          e.position.x / owner.pixelsPerBeat,
+                          static_cast<int> (std::lround (e.position.x - viewX)));
+            return;
+        }
         Component::mouseWheelMove (e, w);
     }
 
@@ -729,6 +772,26 @@ public:
         const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
         const auto key = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
         auto* t = project.selectedTrack();
+
+        const auto modifiers = k.getModifiers();
+        if (k.getTextCharacter() == '0' && ! modifiers.isCtrlDown() && ! modifiers.isCommandDown()
+            && ! modifiers.isAltDown() && ! modifiers.isShiftDown())
+        {
+            if (t != nullptr && project.selectedAudioClipId >= 0)
+                if (auto* clip = t->findAudioClip (project.selectedAudioClipId))
+                {
+                    project.setClipEnabled (t->id, clip->id, true, ! clip->enabled);
+                    return true;
+                }
+
+            if (t != nullptr)
+                if (auto* clip = project.selectedClip())
+                {
+                    project.setClipEnabled (t->id, clip->id, false, ! clip->enabled);
+                    return true;
+                }
+            return false;
+        }
 
         if (k.isKeyCode (juce::KeyPress::deleteKey) || k.isKeyCode (juce::KeyPress::backspaceKey))
         {
@@ -1733,8 +1796,20 @@ void ArrangementView::grabFocus() { lanes->grabKeyboardFocus(); }
 
 void ArrangementView::zoom (double factor)
 {
-    pixelsPerBeat = std::clamp (pixelsPerBeat * factor, 4.0, 120.0);
+    const auto viewX = viewport.getViewPosition().x;
+    const auto anchorScreenX = viewport.getWidth() / 2;
+    zoomAt (factor, static_cast<double> (viewX + anchorScreenX) / pixelsPerBeat, anchorScreenX);
+}
+
+void ArrangementView::zoomAt (double factor, double anchorBeat, int anchorScreenX)
+{
+    pixelsPerBeat = std::clamp (pixelsPerBeat * factor, 4.0, 600.0);
     updateSizes();
+    const auto viewPosition = viewport.getViewPosition();
+    viewport.setViewPosition (std::max (0, static_cast<int> (std::lround (anchorBeat * pixelsPerBeat
+                                                                          - anchorScreenX))),
+                              viewPosition.y);
+    syncPositions();
     lanes->repaint();
     ruler->repaint();
 }

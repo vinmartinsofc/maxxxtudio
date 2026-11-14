@@ -11,10 +11,19 @@ bool isBlackKey (int pitch)
 }
 
 // Convenção do Live: nota 60 = C3.
-juce::String pitchName (int pitch)
+juce::String pitchName (int pitch, RollModel::NoteSpelling spelling, int root, bool scaleOn)
 {
-    static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    return juce::String (names[pitch % 12]) + juce::String (pitch / 12 - 2);
+    static const char* sharps[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    static const char* flats[]  = { "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" };
+    const int pitchClass = pitch % 12;
+    const bool automaticFlatKey = scaleOn
+        && (root == 1 || root == 3 || root == 5 || root == 6 || root == 8 || root == 10);
+    const bool useFlats = spelling == RollModel::NoteSpelling::Flats
+        || (spelling == RollModel::NoteSpelling::Auto && automaticFlatKey);
+    juce::String name (useFlats ? flats[pitchClass] : sharps[pitchClass]);
+    if (spelling == RollModel::NoteSpelling::Both && isBlackKey (pitch))
+        name = juce::String (sharps[pitchClass]) + "/" + flats[pitchClass];
+    return name + juce::String (pitch / 12 - 2);
 }
 
 bool isLetter (const juce::KeyPress& k, char c)
@@ -53,6 +62,130 @@ int NoteGrid::hitNote (juce::Point<float> p) const
     for (auto it = notes.rbegin(); it != notes.rend(); ++it)
         if (noteRect (*it).contains (p)) return it->id;
     return -1;
+}
+
+void NoteGrid::showContextMenu (juce::Point<int> screenPosition)
+{
+    const bool hasSelection = ! model.selection.empty();
+    const bool canSelectNotes = ! model.clip().notes().empty();
+    juce::PopupMenu editMenu, noteMenu, gridMenu, viewMenu, spellingMenu, menu;
+    editMenu.addItem (1, "Desfazer", model.history.canUndo());
+    editMenu.addItem (2, "Refazer", model.history.canRedo());
+    editMenu.addSeparator();
+    editMenu.addItem (3, "Recortar", hasSelection);
+    editMenu.addItem (4, "Copiar", hasSelection);
+    editMenu.addItem (5, "Colar", model.hasClipboardContents());
+    editMenu.addItem (6, "Duplicar", hasSelection);
+    editMenu.addItem (7, "Apagar", hasSelection);
+    editMenu.addItem (8, "Quantizar", hasSelection);
+    editMenu.addItem (9, "Selecionar todas as notas", canSelectNotes);
+
+    noteMenu.addItem (20, "Silenciar / reativar", hasSelection);
+    noteMenu.addSeparator();
+    noteMenu.addItem (21, "Mover para a esquerda", hasSelection);
+    noteMenu.addItem (22, "Mover para a direita", hasSelection);
+    noteMenu.addItem (23, "Subir um semitom", hasSelection);
+    noteMenu.addItem (24, "Descer um semitom", hasSelection);
+    noteMenu.addItem (25, "Subir uma oitava", hasSelection);
+    noteMenu.addItem (26, "Descer uma oitava", hasSelection);
+    noteMenu.addSeparator();
+    noteMenu.addItem (27, "Aumentar duração", hasSelection);
+    noteMenu.addItem (28, "Reduzir duração", hasSelection);
+
+    const auto addGridChoice = [&gridMenu, this] (int id, const juce::String& label, double beats, bool triplet)
+    {
+        const bool selected = std::abs (model.baseGrid - beats) < 1.0e-9 && model.triplet == triplet;
+        gridMenu.addItem (id, label, true, selected);
+    };
+    addGridChoice (101, "1/1", 4.0, false);
+    addGridChoice (102, "1/2", 2.0, false);
+    addGridChoice (103, "1/4", 1.0, false);
+    addGridChoice (104, "1/8", 0.5, false);
+    addGridChoice (105, "1/16", 0.25, false);
+    addGridChoice (106, "1/32", 0.125, false);
+    addGridChoice (107, "1/64", 0.0625, false);
+    gridMenu.addSeparator();
+    addGridChoice (108, "1/4T", 1.0, true);
+    addGridChoice (109, "1/8T", 0.5, true);
+    addGridChoice (110, "1/16T", 0.25, true);
+    addGridChoice (111, "1/32T", 0.125, true);
+    addGridChoice (112, "1/64T", 0.0625, true);
+
+    viewMenu.addItem (30, "Modo de desenho", true, model.drawMode);
+    viewMenu.addItem (31, "Destacar escala", true, model.highlight);
+    viewMenu.addItem (32, "Modo de escala", true, model.scaleOn);
+    viewMenu.addItem (33, "Fold", true, model.fold);
+    viewMenu.addItem (34, "Fold da escala", true, model.foldScale);
+    viewMenu.addItem (35, "Pré-escuta de notas", true, model.previewOn);
+    viewMenu.addSeparator();
+    viewMenu.addItem (36, "Snap à grade", true, model.snap);
+
+    spellingMenu.addItem (201, "Automática", true, model.noteSpelling == RollModel::NoteSpelling::Auto);
+    spellingMenu.addItem (202, "Sustenidos", true, model.noteSpelling == RollModel::NoteSpelling::Sharps);
+    spellingMenu.addItem (203, "Bemóis", true, model.noteSpelling == RollModel::NoteSpelling::Flats);
+    spellingMenu.addItem (204, "Sustenidos e bemóis", true, model.noteSpelling == RollModel::NoteSpelling::Both);
+
+    menu.addSubMenu ("Editar notas", editMenu);
+    menu.addSubMenu ("Ações das notas", noteMenu);
+    menu.addSubMenu ("Grade", gridMenu);
+    menu.addItem (10, "Grade tercinada", true, model.triplet);
+    menu.addSubMenu ("Visualização", viewMenu);
+    menu.addSubMenu ("Grafia das notas", spellingMenu);
+
+    juce::Component::SafePointer<NoteGrid> safeThis (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+        { screenPosition.x, screenPosition.y, 1, 1 }),
+        [safeThis] (int result)
+        {
+            if (safeThis == nullptr) return;
+            auto& m = safeThis->model;
+            switch (result)
+            {
+                case 1: m.undo(); break;
+                case 2: m.redo(); break;
+                case 3: m.copySelected (true); break;
+                case 4: m.copySelected (false); break;
+                case 5: m.paste(); break;
+                case 6: m.duplicateSelected(); break;
+                case 7: m.deleteSelected(); break;
+                case 8: m.quantizeSelected(); break;
+                case 9: m.selectAll(); break;
+                case 20: m.toggleMuteSelected(); break;
+                case 21: m.nudgeSelected (-m.gridBeats, 0); break;
+                case 22: m.nudgeSelected (m.gridBeats, 0); break;
+                case 23: m.nudgeSelected (0.0, 1); break;
+                case 24: m.nudgeSelected (0.0, -1); break;
+                case 25: m.nudgeSelected (0.0, 12); break;
+                case 26: m.nudgeSelected (0.0, -12); break;
+                case 27: m.resizeSelected (m.gridBeats); break;
+                case 28: m.resizeSelected (-m.gridBeats); break;
+                case 30: m.drawMode = ! m.drawMode; m.sendChangeMessage(); break;
+                case 31: m.highlight = ! m.highlight; m.sendChangeMessage(); break;
+                case 32: m.scaleOn = ! m.scaleOn; m.rebuildRows(); m.sendChangeMessage(); break;
+                case 33: m.fold = ! m.fold; m.rebuildRows(); m.sendChangeMessage(); break;
+                case 34: m.foldScale = ! m.foldScale; m.rebuildRows(); m.sendChangeMessage(); break;
+                case 35: m.previewOn = ! m.previewOn; m.sendChangeMessage(); break;
+                case 36: m.toggleSnap(); break;
+                case 10: m.toggleTriplet(); break;
+                case 101: m.setGrid (4.0, false); break;
+                case 102: m.setGrid (2.0, false); break;
+                case 103: m.setGrid (1.0, false); break;
+                case 104: m.setGrid (0.5, false); break;
+                case 105: m.setGrid (0.25, false); break;
+                case 106: m.setGrid (0.125, false); break;
+                case 107: m.setGrid (0.0625, false); break;
+                case 108: m.setGrid (1.0, true); break;
+                case 109: m.setGrid (0.5, true); break;
+                case 110: m.setGrid (0.25, true); break;
+                case 111: m.setGrid (0.125, true); break;
+                case 112: m.setGrid (0.0625, true); break;
+                case 201: m.noteSpelling = RollModel::NoteSpelling::Auto; m.sendChangeMessage(); break;
+                case 202: m.noteSpelling = RollModel::NoteSpelling::Sharps; m.sendChangeMessage(); break;
+                case 203: m.noteSpelling = RollModel::NoteSpelling::Flats; m.sendChangeMessage(); break;
+                case 204: m.noteSpelling = RollModel::NoteSpelling::Both; m.sendChangeMessage(); break;
+                default: break;
+            }
+        });
 }
 
 void NoteGrid::paint (juce::Graphics& g)
@@ -173,6 +306,18 @@ void NoteGrid::mouseDown (const juce::MouseEvent& e)
     if (! model.hasClip()) return;
     const auto p = e.position;
     const int id = hitNote (p);
+    if (e.mods.isPopupMenu())
+    {
+        if (id >= 0 && ! model.isSelected (id))
+        {
+            if (! e.mods.isShiftDown()) model.selection.clear();
+            model.selection.insert (id);
+            model.sendChangeMessage();
+        }
+        showContextMenu (e.getScreenPosition());
+        return;
+    }
+
     drag = Drag::None;
     editBegun = false;
     copied = false;
@@ -526,12 +671,13 @@ void KeyColumn::paint (juce::Graphics& g)
             g.fillRect (getWidth() - 5, y, 5, model.rowHeight - 1);
         }
 
-        if (pitch % 12 == 0 || model.fold)
-        {
-            g.setColour (black ? theme::textDim() : juce::Colour (0xff4a5058));
-            g.setFont (juce::FontOptions (11.0f));
-            g.drawText (pitchName (pitch), 4, y, getWidth() - 10, model.rowHeight, juce::Justification::centredRight);
-        }
+        const float fontSize = std::min (11.0f, std::max (7.0f, static_cast<float> (model.rowHeight - 1)));
+        g.setColour (lit ? juce::Colours::black
+                         : black ? theme::textDim() : juce::Colour (0xff4a5058));
+        g.setFont (juce::FontOptions (fontSize, pitch % 12 == 0 ? juce::Font::bold : juce::Font::plain));
+        g.drawFittedText (pitchName (pitch, model.noteSpelling, model.scale.root(), model.scaleOn),
+                          juce::Rectangle<int> (4, y, getWidth() - 10, model.rowHeight),
+                          juce::Justification::centredRight, 1);
     }
 }
 

@@ -363,6 +363,35 @@ void ProjectModel::deleteAudioClip (int trackId, int clipId)
     sendChangeMessage();
 }
 
+bool ProjectModel::setClipEnabled (int trackId, int clipId, bool audio, bool enabled)
+{
+    auto* t = track (trackId);
+    if (t == nullptr)
+        return false;
+
+    if (audio)
+    {
+        auto* clip = t->type == roll::TrackType::Audio ? t->findAudioClip (clipId) : nullptr;
+        if (clip == nullptr || clip->enabled == enabled)
+            return false;
+        recordUndo();
+        clip->enabled = enabled;
+        if (onAudioClipsChanged) onAudioClipsChanged (trackId);
+    }
+    else
+    {
+        auto* clip = t->type == roll::TrackType::Midi ? t->find (clipId) : nullptr;
+        if (clip == nullptr || clip->enabled == enabled)
+            return false;
+        recordUndo();
+        clip->enabled = enabled;
+        notifyTrackNotes (trackId);
+    }
+
+    sendChangeMessage();
+    return true;
+}
+
 int ProjectModel::copyAudioClip (int fromTrack, int clipId, int toTrack, double start)
 {
     auto* sourceTrack = track (fromTrack);

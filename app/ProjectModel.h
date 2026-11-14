@@ -52,6 +52,7 @@ public:
     bool resizeAudioClip (int trackId, int clipId, double length);
     bool setAudioClipFades (int trackId, int clipId, double fadeInBeats, double fadeOutBeats);
     bool setAudioClipSourceBpm (int trackId, int clipId, double sourceBpm);
+    bool setClipEnabled (int trackId, int clipId, bool audio, bool enabled);
     // move para outra trilha/posição; devolve o novo id do clip (ou -1 se não coube)
     int  moveClip (int fromTrack, int clipId, int toTrack, double newStart);
     int  moveAudioClip (int fromTrack, int clipId, int toTrack, double newStart);
