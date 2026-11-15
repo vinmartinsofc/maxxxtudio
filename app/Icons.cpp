@@ -56,7 +56,6 @@ const juce::Drawable* get (Icon icon, juce::Colour colour, int size)
     const auto* data = BinaryData::getNamedResource (resourceNames[index], dataSize);
     if (data == nullptr || dataSize <= 0)
         return nullptr;
-
     std::string svg (data, static_cast<std::size_t> (dataSize));
     replaceAll (svg, "currentColor", colour.toDisplayString (false).toStdString());
     auto drawable = juce::Drawable::createFromImageData (svg.data(), svg.size());

@@ -75,12 +75,14 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     fileBrowserButton.setMouseClickGrabsKeyboardFocus (false);
     favoritesButton.setMouseClickGrabsKeyboardFocus (false);
     pianoRollButton.setMouseClickGrabsKeyboardFocus (false);
+    computerKeyboardButton.setMouseClickGrabsKeyboardFocus (false);
     rewindButton.onClick = [this] { rewind(); };
     addAndMakeVisible (loopButton);
     addAndMakeVisible (browserButton);
     addAndMakeVisible (fileBrowserButton);
     addAndMakeVisible (favoritesButton);
     addAndMakeVisible (pianoRollButton);
+    addAndMakeVisible (computerKeyboardButton);
     addAndMakeVisible (bpmLabel);
     addAndMakeVisible (bpmCaption);
     addAndMakeVisible (positionLabel);
@@ -137,6 +139,16 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     {
         if (onPianoRollToggled)
             onPianoRollToggled (pianoRollButton.getToggleState());
+    };
+
+    computerKeyboardButton.setTooltip ("Teclado MIDI do computador (M; Z/X oitava; C/V velocidade)");
+    computerKeyboardButton.setClickingTogglesState (true);
+    computerKeyboardButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
+    computerKeyboardButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    computerKeyboardButton.onClick = [this]
+    {
+        if (onComputerMidiKeyboardToggled)
+            onComputerMidiKeyboardToggled (computerKeyboardButton.getToggleState());
     };
 
     bpmLabel.setEditable (false, true, false);
@@ -206,6 +218,11 @@ void TransportBar::setFavoritesVisible (bool visible)
 void TransportBar::setPianoRollVisible (bool visible)
 {
     pianoRollButton.setToggleState (visible, juce::dontSendNotification);
+}
+
+void TransportBar::setComputerMidiKeyboardEnabled (bool enabled)
+{
+    computerKeyboardButton.setToggleState (enabled, juce::dontSendNotification);
 }
 
 void TransportBar::setBpm (double bpm)
@@ -278,6 +295,7 @@ void TransportBar::paint (juce::Graphics& g)
 void TransportBar::resized()
 {
     auto area = getLocalBounds().reduced (8, 4);
+    const bool compact = getWidth() < 1120;
     projectButton.setBounds (area.removeFromLeft (72));
     area.removeFromLeft (8);
     bpmCaption.setBounds (area.removeFromLeft (34));
@@ -297,7 +315,7 @@ void TransportBar::resized()
     area.removeFromLeft (12);
     positionLabel.setBounds (area.removeFromLeft (120));
     area.removeFromLeft (12);
-    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - 482));
+    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - (compact ? 424 : 438)));
     if (cpuWidth >= 100)
     {
         cpuMeterBounds = area.removeFromLeft (cpuWidth);
@@ -307,7 +325,6 @@ void TransportBar::resized()
     {
         cpuMeterBounds = {};
     }
-    const bool compact = getWidth() < 1120;
     browserButton.setBounds (area.removeFromRight (compact ? 74 : 88));
     area.removeFromRight (compact ? 4 : 6);
     fileBrowserButton.setBounds (area.removeFromRight (compact ? 58 : 72));
@@ -315,4 +332,6 @@ void TransportBar::resized()
     favoritesButton.setBounds (area.removeFromRight (compact ? 88 : 100));
     area.removeFromRight (compact ? 4 : 6);
     pianoRollButton.setBounds (area.removeFromRight (compact ? 94 : 104));
+    area.removeFromRight (compact ? 4 : 6);
+    computerKeyboardButton.setBounds (area.removeFromRight (38));
 }

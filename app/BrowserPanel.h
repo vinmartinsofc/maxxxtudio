@@ -3,7 +3,7 @@
 #include "PluginScanner.h"
 #include "Theme.h"
 #include <functional>
-#include <vector>
+#include <memory>
 
 // Lista de instrumentos detectados. Duplo clique (ou Enter) carrega na trilha.
 class BrowserPanel : public juce::Component,

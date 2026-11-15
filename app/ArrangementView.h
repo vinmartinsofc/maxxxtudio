@@ -34,6 +34,7 @@ public:
     void setPlayhead (double beats);
     void setLoopEnabled (bool on);
     void setGridBeat (double beats);
+    bool getTimeSelectionStart (double& startBeat) const;
     void refresh();                       // recria os cabeçalhos
     void grabFocus();
     void zoom (double factor);
@@ -43,15 +44,17 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int headerWidth = 210, rulerHeight = 28, trackHeight = 94;
+    static constexpr int headerWidth = 210, overviewHeight = 20, rulerHeight = 28, trackHeight = 94;
 
 private:
     class Lanes;
     class Ruler;
+    class Overview;
     class Header;
     class MasterHeader;
     friend class Lanes;
     friend class Ruler;
+    friend class Overview;
     friend class Header;
     friend class MasterHeader;
 
@@ -73,12 +76,13 @@ private:
 
     std::unique_ptr<Lanes> lanes;
     std::unique_ptr<Ruler> ruler;
+    std::unique_ptr<Overview> overview;
     std::vector<std::unique_ptr<Header>> headers;
     std::unique_ptr<MasterHeader> masterHeader;
     juce::Viewport viewport;
     juce::Component headerHolder, rulerHolder;
     juce::TextButton addTrackButton { "+ MIDI" }, addAudioTrackButton { "+ Audio" };
-    juce::TextButton locatorPreviousButton { "<" }, locatorSetButton { "+" },
-                     locatorNextButton { ">" }, locatorDeleteButton { "Del" };
+    juce::TextButton locatorPreviousButton { "<" }, locatorSetButton { "+" }, locatorNextButton { ">" },
+                     locatorDeleteButton { "Del" };
     juce::ComboBox gridBox;
 };

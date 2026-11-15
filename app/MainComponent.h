@@ -14,6 +14,7 @@
 #include "TaskRegistry.h"
 #include "TaskStatusBar.h"
 #include "TransportBar.h"
+#include <array>
 #include <map>
 #include <thread>
 
@@ -27,6 +28,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
+    bool keyStateChanged (bool isKeyDown) override;
     void openProjectFromFile (const juce::File&);
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -35,6 +37,7 @@ public:
 
 private:
     class ActionIndicator;
+    class ComputerMidiIndicator;
     class PluginWindow;
 
     void startSimulatedTask();
@@ -71,6 +74,11 @@ private:
     void onSelectionChanged();
     void showDetail (bool devices);
     void cycleFocus();
+    void updateComputerMidiKeyboard();
+    void setComputerMidiKeyboardEnabled (bool);
+    void showComputerMidiStatus (const juce::String&, const juce::String&, bool noteHeld);
+    void hideComputerMidiStatus();
+    void releaseComputerMidiNotes();
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     juce::String deviceSummary (int trackId) const;
@@ -114,6 +122,7 @@ private:
     bool waitingForProjectPluginScan = false, restoringProjectPlugins = false;
     std::shared_ptr<std::atomic<bool>> lifetimeToken { std::make_shared<std::atomic<bool>> (true) };
     std::unique_ptr<ActionIndicator> actionIndicator;
+    std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
     std::jthread taskSimulationThread;
     int nextPluginCascadeIndex = 0;
     int previewLoadToken = 0;
@@ -136,6 +145,12 @@ private:
     int rightTop = 0, rightHeight = 1;
     bool draggingSplitter = false, draggingBrowserSplitter = false;
     std::uint64_t lastLo = 0, lastHi = 0;
+    std::array<bool, 15> computerMidiKeyDown {}, computerMidiNoteActive {};
+    std::array<int, 15> computerMidiKeyPitch {}, computerMidiTrackIds {};
+    std::array<bool, 4> computerMidiControlKeyDown {};
+    juce::String lastComputerMidiNote;
+    bool computerMidiModeKeyDown = false, computerMidiKeyboardEnabled = false;
+    int computerMidiOctaveOffset = 0, computerMidiVelocity = 100;
     int browserWidth = 300;
     juce::Rectangle<int> browserSplitterRect;
 

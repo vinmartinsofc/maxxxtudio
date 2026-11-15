@@ -96,11 +96,12 @@ void TrackSource::publishNotes (const std::vector<roll::Note>& notes)
     ++notesVersion;
 }
 
-void TrackSource::preview (int pitch, bool on)
+void TrackSource::preview (int pitch, bool on, float velocity)
 {
     const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
     previewCollector.addMessageToQueue (
-        (on ? juce::MidiMessage::noteOn (1, pitch, 0.8f) : juce::MidiMessage::noteOff (1, pitch)).withTimeStamp (now));
+        (on ? juce::MidiMessage::noteOn (1, pitch, std::clamp (velocity, 0.0f, 1.0f))
+            : juce::MidiMessage::noteOff (1, pitch)).withTimeStamp (now));
 }
 
 void TrackSource::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -764,9 +765,9 @@ void AudioEngine::setMixer (int trackId, float gain, float pan, bool muted)
     if (auto* t = find (trackId)) t->mixerPtr->set (gain, pan, muted);
 }
 
-void AudioEngine::previewNote (int trackId, int pitch, bool on)
+void AudioEngine::previewNote (int trackId, int pitch, bool on, float velocity)
 {
-    if (auto* t = find (trackId)) t->sourcePtr->preview (pitch, on);
+    if (auto* t = find (trackId)) t->sourcePtr->preview (pitch, on, velocity);
 }
 
 void AudioEngine::activeMask (int trackId, std::uint64_t& lo, std::uint64_t& hi) const

@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.8 (gestos de zoom/navegação e sessões `.pfs`)
+- **Versão do documento:** 1.14 (zoom da visão geral e melhoria visual/remoção de locators)
 - **⚠️ Ordem de trabalho vigente:** `PLANO_DE_ACAO_FASE_4.md` (feedback do Marco 3: correções críticas, layout, groove, automação, áudio). **Em caso de conflito com o §14 deste documento, vale o plano.**
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -70,7 +70,7 @@ O dono do projeto produz música há 13+ anos no Ableton Live e estuda programa�
 
 ### 1.4 Não-objetivos (por enquanto)
 
-Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch de áudio, gravação de áudio, automação (até o §14 chegar lá), VST2, AU, CLAP, suporte a macOS (o código é portável, mas **não é testado** lá).
+Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch de áudio, gravação de áudio, automação (até o §14 chegar lá), AU, CLAP, suporte a macOS (o código é portável, mas **não é testado** lá). VST2 é planejado, mas depende de um SDK compatível e licenciado.
 
 ### 1.5 Restrições
 
@@ -176,19 +176,25 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Plugins | Scan automático VST3 em segundo plano + lista persistida em XML | ✅ (lista) / 🟡 (scan em Windows real) |
 | Plugins | Navegador com busca e filtros Todos/Instrumentos/Efeitos; duplo clique carrega | ✅ UI / 🟡 carregamento |
 | Plugins | Cadeia por trilha (1 instrumento + N efeitos), UI do plugin em janela (minimizar+fechar) | 🟡 |
+| Plugins | Favoritos de plugins | ⬜ (favoritos atuais são arquivos/pastas de áudio) |
+| Plugins | Host VST2 e diretórios customizados | ⬜ (depende de SDK compatível/licenciado; diretórios customizados serão exclusivos do VST2) |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
 | Áudio | Mixer por trilha: volume, pan (sem UI), mute, solo, medidor de pico | 🟡 |
 | Transporte | Play/Pause (Espaço), Stop, Voltar ao início (Home), Loop, BPM, posição | ✅ UI / 🟡 áudio |
 | Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar), régua, brace de loop | ✅ |
+| Arranjo | Clique no fundo posiciona o cursor na grade; arrastar seleciona intervalo e Espaço inicia do começo da seleção | 🟡 |
+| Arranjo | Visão geral no topo, navegação horizontal e cores customizáveis por trilha | 🟡 visão geral implementada nesta versão / ⬜ cores customizáveis |
+| Arranjo | Visão geral com zoom vertical e enquadramento do arrangement; bandeiras de locator destacadas e botão Del remove o mais recente sem seleção | 🟡 |
 | Piano roll | Notas, seleção, mover/redimensionar, rubber band, copiar/colar, duplicar, quantizar | ✅ |
 | Piano roll | Escala: Scale mode, Destacar (K), Fold, Fold escala, tônica enfatizada | ✅ |
 | Piano roll | Régua, teclas (C3 = nota 60) que **acendem** ao clicar e durante playback, velocity lane | ✅ |
 | Piano roll | Zoom H/V (botões, Ctrl+roda, Alt+roda, arrastar régua, +/−), grade 1/64–1 compasso + tripleto | ✅ |
 | Piano roll | Marcador de inserção (clique no fundo), Preview on/off | ✅ |
-| Projeto | **Salvar/abrir** | ⬜ (próxima tarefa, §14 M4) |
+| Projeto | **Salvar/abrir** (`.pfs`, leitura legada `.freedom`, progresso global) | ✅ |
 | Projeto | **Desfazer global** (arranjo/mixer/dispositivos) | ⬜ |
-| Entrada | MIDI de teclado/controlador, teclado do computador, gravação | ⬜ |
-| Exportação | MIDI / áudio (render) | ⬜ |
+| Entrada | Teclado do computador: modo M; notas A–L com teclas pretas; Z/X oitava; C/V velocidade | ✅ (pendente teste sonoro manual) |
+| Entrada | MIDI de teclado/controlador, gravação | ⬜ |
+| Exportação | MIDI / áudio (render Master em WAV) | ⬜ |
 | Config. | Seleção de dispositivo de áudio, buffer, taxa de amostragem | ⬜ (usa o padrão do sistema) |
 | Acessibilidade | Anel de foco, F6 alterna painéis, setas selecionam trilha | 🟡 parcial |
 | Tarefas em background | `TaskRegistry`/`TaskScope`, indicador por target e barra global; carregamento por faixa; scan com progresso/cancelamento; progresso ao abrir/salvar projetos | ✅ etapas a–b e d / 🟡 etapa c (falta QA com plugins reais) |
@@ -365,6 +371,8 @@ Project
 | Zoom | Ctrl+roda, `+` / `-` |
 | Loop | Arrastar bordas/corpo do brace (faixa fina no topo da régua) |
 | Seek | Clique na régua |
+| Zoom na régua | Arrastar para baixo aproxima; para cima afasta, mantendo o ponto de ancoragem |
+| Visão geral no topo | Mostra clips e região visível; clique/arraste para navegar horizontalmente |
 | Cabeçalho | Duplo clique no nome = renomear; M, S, slider de volume (duplo clique = 0.8); clique direito = nova/apagar trilha |
 
 ### 8.3 Piano roll
@@ -669,6 +677,12 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.14** | Zoom vertical e enquadramento pela visão geral; bandeiras de locator mais visíveis; Del remove o locator mais recente quando nenhum está selecionado |
+| **Doc 1.13** | Ao pressionar Espaço com um intervalo temporal selecionado, a reprodução inicia no começo da seleção |
+| **Doc 1.12** | Clique no fundo do Arrangement posiciona o cursor na grade; arrastar seleciona um intervalo com feedback visual, conforme o manual do Live |
+| **Doc 1.11** | Teclado MIDI do computador conforme Live: modo M, notas A–L, oitava Z/X e velocidade C/V; removida a configuração incorreta de caminhos customizados VST3 |
+| **Doc 1.10** | Visão geral navegável no topo do Arrangement; a configuração de caminhos VST3 customizados desta versão foi retirada na 1.11 por estar fora do requisito |
+| **Doc 1.9** | Visão geral navegável no topo do Arrangement, rolagem inferior removida, gesto vertical de zoom com direção revisada e marcador de locator com ícone de bandeira |
 | **Doc 1.6 / Etapa c** | Escaneamento VST3 em `ThreadPool`, progresso no registry, cancelamento e encerramento seguro do worker |
 | **Doc 1.7 / Etapa d** | Parse/serialização de projeto no worker, progresso global e tarefa mantida até restaurar áudio/plugins |
 | **Doc 1.8** | Zoom e navegação por arrasto nas réguas do Arrangement e Piano Roll; sessões salvas como `.pfs`, com leitura legada de `.freedom` |
@@ -758,11 +772,12 @@ Observações de acessibilidade: o **vermelho** passa no mínimo de 3:1 para **�
 | Ligado/ativo | `#66A3FF` **+** fundo/contorno distinto | `#242628` com borda `#66A3FF` |
 | Gravando | `#E85B5B` **+** forma preenchida | `#242628` |
 
-### 19.3 Biblioteca entregue (24 ícones, viewBox 24×24, traço 1,8, `currentColor`)
+### 19.3 Biblioteca entregue (28 ícones, viewBox 24×24, traço 1,8, `currentColor`)
 
 - **Transporte:** play, stop, pause, record, rewind, fast-forward, loop, metronome
 - **Edição:** pointer, pencil, eraser, cut, copy, move, select-region, split
 - **Mixer/produção:** mixer, volume, mute, pan, level-meter, automation, keyboard, waveform
+- **Marcadores:** flag (locator)
 
 **Ícones que a UI atual precisa e ainda não existem (pedir na próxima rodada):** solo; armar gravação (arm); adicionar trilha; apagar; plugin/dispositivo; instrumento vs efeito; bypass; zoom in / zoom out; escala (scale); fold; destacar escala; grade/snap; quantizar; pré-escuta (preview); desfazer / refazer; abrir / salvar / novo; configurações; buscar; atualizar/rescan; setas/chevrons (expandir/recolher); minimizar / fechar; ir ao início (go-to-start: pode reaproveitar `rewind` com barra).
 

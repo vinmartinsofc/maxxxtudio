@@ -26,7 +26,7 @@ public:
     explicit TrackSource (const BlockShared& s);
 
     void publishNotes (const std::vector<roll::Note>& notes);
-    void preview (int pitch, bool on);
+    void preview (int pitch, bool on, float velocity = 0.8f);
     void activeMask (std::uint64_t& lo, std::uint64_t& hi) const { lo = maskLo; hi = maskHi; }
 
     const juce::String getName() const override { return "Track MIDI"; }
@@ -264,7 +264,7 @@ public:
     void setTrackRouting (int trackId, roll::TrackOutputRouting routing);
     void setMasterMixer (float gain, float pan, bool muted = false);
     void resetPeak (int trackId);
-    void previewNote (int trackId, int pitch, bool on);
+    void previewNote (int trackId, int pitch, bool on, float velocity = 0.8f);
     void activeMask (int trackId, std::uint64_t& lo, std::uint64_t& hi) const;
     float peak (int trackId) const;
     float masterPeak() const;

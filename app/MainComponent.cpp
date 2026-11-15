@@ -39,6 +39,29 @@ bool isProjectFile (const juce::File& file)
     return extension.equalsIgnoreCase (".pfs") || extension.equalsIgnoreCase (".freedom");
 }
 
+// A fileira central começa em C3; a fileira superior preenche as teclas pretas.
+constexpr std::array<std::pair<int, int>, 15> computerMidiKeyboardMap {{
+    { 'A', 0 }, { 'W', 1 }, { 'S', 2 }, { 'E', 3 }, { 'D', 4 },
+    { 'F', 5 }, { 'T', 6 }, { 'G', 7 }, { 'Y', 8 }, { 'H', 9 },
+    { 'U', 10 }, { 'J', 11 }, { 'K', 12 }, { 'O', 13 }, { 'L', 14 }
+}};
+
+bool isTextEditorFocused()
+{
+    auto* focused = juce::Component::getCurrentlyFocusedComponent();
+    return focused != nullptr
+        && (dynamic_cast<juce::TextEditor*> (focused) != nullptr
+            || focused->findParentComponentOfClass<juce::TextEditor>() != nullptr);
+}
+
+juce::String midiNoteName (int pitch)
+{
+    static constexpr std::array<const char*, 12> names {{
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
+    }};
+    return names[static_cast<std::size_t> (pitch % 12)] + juce::String (pitch / 12 - 2);
+}
+
 }
 
 class MainComponent::ActionIndicator final : public juce::Component, private juce::Timer
@@ -193,6 +216,89 @@ private:
     juce::Label message;
 };
 
+class MainComponent::ComputerMidiIndicator final : public juce::Component, private juce::Timer
+{
+public:
+    explicit ComputerMidiIndicator (bool alignToParentTopRight = false)
+        : alignToParentTopRight (alignToParentTopRight)
+    {
+        setInterceptsMouseClicks (false, false);
+    }
+
+    void showStatus (const juce::String& noteText, const juce::String& detailText, bool noteHeld)
+    {
+        const bool wasVisible = isVisible();
+        const bool changed = primaryText != noteText || secondaryText != detailText || ! wasVisible;
+        primaryText = noteText;
+        secondaryText = detailText;
+        held = noteHeld;
+        setVisible (true);
+        if (! wasVisible)
+            toFront (false);
+
+        if (held)
+            stopTimer();
+        else if (changed)
+            startTimer (1100);
+
+        if (changed)
+            repaint();
+    }
+
+    void hide()
+    {
+        stopTimer();
+        held = false;
+        setVisible (false);
+    }
+
+    void alignWithParent() { parentSizeChanged(); }
+    const juce::String& getPrimaryText() const { return primaryText; }
+    const juce::String& getSecondaryText() const { return secondaryText; }
+    bool isHeld() const { return held; }
+
+    void parentSizeChanged() override
+    {
+        if (! alignToParentTopRight)
+            return;
+
+        if (auto* parent = getParentComponent())
+        {
+            const int width = std::min (224, std::max (0, parent->getWidth() - 16));
+            setBounds (std::max (8, parent->getWidth() - width - 8), 8, width, 44);
+        }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto bounds = getLocalBounds().toFloat();
+        g.setColour (theme::panel().withAlpha (0.97f));
+        g.fillRoundedRectangle (bounds, 7.0f);
+        g.setColour (theme::accent());
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 7.0f, 1.2f);
+
+        auto textBounds = getLocalBounds().reduced (12, 4);
+        g.setColour (theme::text());
+        g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        g.drawText (primaryText, textBounds.removeFromTop (18), juce::Justification::centredLeft, true);
+        g.setColour (theme::textDim());
+        g.setFont (juce::FontOptions (11.5f));
+        g.drawText (secondaryText, textBounds, juce::Justification::centredLeft, true);
+    }
+
+private:
+    void timerCallback() override
+    {
+        stopTimer();
+        if (! held)
+            setVisible (false);
+    }
+
+    juce::String primaryText, secondaryText;
+    bool held = false;
+    bool alignToParentTopRight = false;
+};
+
 // Janela de plugin: mantém o editor visível e oferece rolagem como fallback.
 class MainComponent::PluginWindow : public juce::DocumentWindow
 {
@@ -229,6 +335,11 @@ public:
             setContentOwned (editor.release(), true);
         }
 
+        computerMidiIndicator = std::make_unique<ComputerMidiIndicator> (true);
+        addAndMakeVisible (*computerMidiIndicator);
+        computerMidiIndicator->setVisible (false);
+        computerMidiIndicator->alignWithParent();
+
         const auto placeWindow = [this, &displayUserArea, cascadeIndex, &occupiedWindows]
         {
             return roll::WindowPlacement::placePluginWindow (
@@ -242,7 +353,20 @@ public:
         bounds = placeWindow();
         setBounds (bounds.x, bounds.y, bounds.width, bounds.height);
     }
+
+    void showComputerMidiStatus (const juce::String& primary,
+                                const juce::String& secondary,
+                                bool noteHeld)
+    {
+        computerMidiIndicator->showStatus (primary, secondary, noteHeld);
+    }
+
+    void hideComputerMidiStatus() { computerMidiIndicator->hide(); }
+
     void closeButtonPressed() override { setVisible (false); }
+
+private:
+    std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
 };
 
 MainComponent::MainComponent()
@@ -262,6 +386,9 @@ MainComponent::MainComponent()
     addAndMakeVisible (deviceTab);
     actionIndicator = std::make_unique<ActionIndicator>();
     addAndMakeVisible (*actionIndicator);
+    computerMidiIndicator = std::make_unique<ComputerMidiIndicator>();
+    addAndMakeVisible (*computerMidiIndicator);
+    computerMidiIndicator->setVisible (false);
 
     clipControls = { &scaleCaption, &lengthCaption, &gridCaption, &zoomCaption, &rootBox, &modeBox, &lengthBox, &scaleButton,
                      &highlightButton, &foldButton, &foldScaleButton, &drawButton, &snapButton, &previewButton,
@@ -403,7 +530,8 @@ MainComponent::MainComponent()
 
     arrangement.onSeek = [this] (double g)
     {
-        pendingArrangementSeek = false;
+        pendingArrangementSeek = true;
+        pendingArrangementSeekBeat = g;
         transportPosition = g;
         engine.graph().seek (g);
         arrangement.setPlayhead (g);
@@ -542,6 +670,17 @@ MainComponent::MainComponent()
     };
     transport.onBeforePlay = [this]
     {
+        double selectionStart = 0.0;
+        if (arrangement.getTimeSelectionStart (selectionStart))
+        {
+            pendingArrangementSeek = false;
+            transportPosition = selectionStart;
+            engine.graph().seek (selectionStart);
+            arrangement.setPlayhead (selectionStart);
+            editor.setPlayhead (selectionStart - model.clipStartBeats);
+            return;
+        }
+
         if (pendingArrangementSeek)
         {
             const bool stillAtSeek = std::abs (transportPosition - pendingArrangementSeekBeat) < 1.0e-6;
@@ -570,6 +709,10 @@ MainComponent::MainComponent()
     transport.onFileBrowserToggled = [this] (bool visible) { setAudioBrowserVisible (visible); };
     transport.onFavoritesToggled = [this] (bool visible) { setFavoritesVisible (visible); };
     transport.onPianoRollToggled = [this] (bool visible) { setPianoRollVisible (visible); };
+    transport.onComputerMidiKeyboardToggled = [this] (bool enabled)
+    {
+        setComputerMidiKeyboardEnabled (enabled);
+    };
 
     deviceView.onOpen = [this] (int trackId, int deviceId) { openDeviceEditor (trackId, deviceId); };
     deviceView.onBypass = [this] (int trackId, int deviceId, bool bypassed)
@@ -685,6 +828,8 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    releaseComputerMidiNotes();
+
     // O registry é membro desta classe; encerre primeiro qualquer worker que o utilize.
     if (taskSimulationThread.joinable())
     {
@@ -722,6 +867,8 @@ void MainComponent::resized()
     taskStatusBar.setBounds (area.removeFromBottom (30));
     if (actionIndicator != nullptr)
         actionIndicator->setBounds ((getWidth() - 320) / 2, 50, 320, 52);
+    if (computerMidiIndicator != nullptr)
+        computerMidiIndicator->setBounds (std::max (8, getWidth() - 240), 50, 224, 44);
 
     auto right = area.reduced (8);
     if (browser.isVisible() || audioBrowser.isVisible())
@@ -1222,6 +1369,19 @@ void MainComponent::playSelectedTrack()
         return;
     }
 
+    double selectionStart = 0.0;
+    if (arrangement.getTimeSelectionStart (selectionStart))
+    {
+        pendingArrangementSeek = true;
+        pendingArrangementSeekBeat = selectionStart;
+        transportPosition = selectionStart;
+        engine.graph().seek (selectionStart);
+        arrangement.setPlayhead (selectionStart);
+        editor.setPlayhead (selectionStart - model.clipStartBeats);
+        transport.togglePlay();
+        return;
+    }
+
     if (pendingArrangementSeek
         && std::abs (transportPosition - pendingArrangementSeekBeat) < 1.0e-6)
     {
@@ -1302,6 +1462,30 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
 
     const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
+
+    if (juce::Process::isForegroundProcess() && ! isTextEditorFocused()
+        && ! ctrl && ! k.getModifiers().isAltDown() && keyCode == 'M')
+    {
+        if (! computerMidiModeKeyDown)
+        {
+            computerMidiModeKeyDown = true;
+            setComputerMidiKeyboardEnabled (! computerMidiKeyboardEnabled);
+        }
+        return true;
+    }
+
+    if (computerMidiKeyboardEnabled && juce::Process::isForegroundProcess() && ! isTextEditorFocused()
+        && ! ctrl && ! k.getModifiers().isAltDown())
+    {
+        const bool isMappedKey = std::any_of (computerMidiKeyboardMap.begin(), computerMidiKeyboardMap.end(),
+            [keyCode] (const auto& mapping) { return mapping.first == static_cast<int> (keyCode); });
+        if (isMappedKey || keyCode == 'Z' || keyCode == 'X' || keyCode == 'C' || keyCode == 'V')
+        {
+            updateComputerMidiKeyboard();
+            return true;
+        }
+    }
+
     if (ctrl && keyCode == 'S')
     {
         if (currentProjectFile.existsAsFile())
@@ -1346,6 +1530,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
             ? roll::TrackType::Midi : roll::TrackType::Audio);
         return true;
     }
+    return false;
+}
+
+bool MainComponent::keyStateChanged (bool)
+{
+    updateComputerMidiKeyboard();
     return false;
 }
 
@@ -1880,8 +2070,21 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* src)
 
 void MainComponent::timerCallback()
 {
+    updateComputerMidiKeyboard();
+
     std::uint64_t lo, hi;
     engine.activeMask (project.selectedTrackId, lo, hi);
+    for (std::size_t i = 0; i < computerMidiNoteActive.size(); ++i)
+    {
+        if (! computerMidiNoteActive[i] || computerMidiTrackIds[i] != project.selectedTrackId)
+            continue;
+
+        const int pitch = computerMidiKeyPitch[i];
+        if (pitch < 64)
+            lo |= std::uint64_t { 1 } << pitch;
+        else
+            hi |= std::uint64_t { 1 } << (pitch - 64);
+    }
     if (lo != lastLo || hi != lastHi)                     // teclas acendem com as notas tocando
     {
         lastLo = lo; lastHi = hi;
@@ -1889,6 +2092,148 @@ void MainComponent::timerCallback()
         editor.repaintKeys();
     }
     updateActionIndicator();
+}
+
+void MainComponent::setComputerMidiKeyboardEnabled (bool enabled)
+{
+    if (computerMidiKeyboardEnabled == enabled)
+        return;
+
+    computerMidiKeyboardEnabled = enabled;
+    transport.setComputerMidiKeyboardEnabled (enabled);
+    if (! enabled)
+    {
+        releaseComputerMidiNotes();
+        hideComputerMidiStatus();
+    }
+    else
+    {
+        showComputerMidiStatus ("Teclado MIDI ativo",
+            "Vel " + juce::String (computerMidiVelocity) + " | Oitava "
+                + (computerMidiOctaveOffset > 0 ? "+" : "") + juce::String (computerMidiOctaveOffset),
+            false);
+    }
+    startTimerHz (enabled ? 60 : 30);
+}
+
+void MainComponent::releaseComputerMidiNotes()
+{
+    for (std::size_t i = 0; i < computerMidiNoteActive.size(); ++i)
+    {
+        if (computerMidiNoteActive[i])
+            engine.previewNote (computerMidiTrackIds[i], computerMidiKeyPitch[i], false);
+
+        computerMidiKeyDown[i] = false;
+        computerMidiNoteActive[i] = false;
+    }
+}
+
+void MainComponent::updateComputerMidiKeyboard()
+{
+    // O timer cobre também teclas focadas em outros painéis; keyStateChanged reduz a latência.
+    const auto modifiers = juce::ModifierKeys::getCurrentModifiers();
+    const bool hasShortcutModifier = modifiers.isCtrlDown() || modifiers.isCommandDown() || modifiers.isAltDown();
+    const bool textFocused = isTextEditorFocused();
+    const bool appForeground = juce::Process::isForegroundProcess();
+
+    const bool modeKeyDown = appForeground && ! textFocused && ! hasShortcutModifier
+                          && juce::KeyPress::isKeyCurrentlyDown ('M');
+    if (modeKeyDown && ! computerMidiModeKeyDown)
+        setComputerMidiKeyboardEnabled (! computerMidiKeyboardEnabled);
+    computerMidiModeKeyDown = modeKeyDown;
+
+    const bool acceptKeys = computerMidiKeyboardEnabled && appForeground && ! textFocused && ! hasShortcutModifier;
+    // Z/X mudam a oitava e C/V ajustam a velocity em passos de 20, como no Live.
+    const std::array<int, 4> controlKeys { 'Z', 'X', 'C', 'V' };
+    bool statusChanged = false;
+    bool noteChanged = false;
+    for (std::size_t i = 0; i < controlKeys.size(); ++i)
+    {
+        const bool down = acceptKeys && juce::KeyPress::isKeyCurrentlyDown (controlKeys[i]);
+        if (down && ! computerMidiControlKeyDown[i])
+        {
+            const int oldOctave = computerMidiOctaveOffset;
+            const int oldVelocity = computerMidiVelocity;
+            if (i == 0) computerMidiOctaveOffset = std::max (-5, computerMidiOctaveOffset - 1);
+            if (i == 1) computerMidiOctaveOffset = std::min (5, computerMidiOctaveOffset + 1);
+            if (i == 2) computerMidiVelocity = std::max (20, computerMidiVelocity - 20);
+            if (i == 3) computerMidiVelocity = std::min (120, computerMidiVelocity + 20);
+            statusChanged |= oldOctave != computerMidiOctaveOffset || oldVelocity != computerMidiVelocity;
+        }
+        computerMidiControlKeyDown[i] = down;
+    }
+
+    const auto* selectedTrack = project.track (project.selectedTrackId);
+    const int midiTrackId = selectedTrack != nullptr && selectedTrack->type == roll::TrackType::Midi
+                          ? selectedTrack->id : -1;
+
+    for (std::size_t i = 0; i < computerMidiKeyboardMap.size(); ++i)
+    {
+        const auto [keyCode, semitone] = computerMidiKeyboardMap[i];
+        const bool down = acceptKeys && juce::KeyPress::isKeyCurrentlyDown (keyCode);
+
+        if (down && ! computerMidiKeyDown[i] && midiTrackId >= 0)
+        {
+            const int pitch = 60 + semitone + computerMidiOctaveOffset * 12;
+            if (pitch >= 0 && pitch <= 127)
+            {
+                engine.previewNote (midiTrackId, pitch, true,
+                                    static_cast<float> (computerMidiVelocity) / 127.0f);
+                computerMidiKeyPitch[i] = pitch;
+                computerMidiTrackIds[i] = midiTrackId;
+                computerMidiNoteActive[i] = true;
+                lastComputerMidiNote = midiNoteName (pitch);
+                statusChanged = noteChanged = true;
+            }
+        }
+        else if (! down && computerMidiKeyDown[i] && computerMidiNoteActive[i])
+        {
+            engine.previewNote (computerMidiTrackIds[i], computerMidiKeyPitch[i], false);
+            computerMidiNoteActive[i] = false;
+            lastComputerMidiNote = midiNoteName (computerMidiKeyPitch[i]);
+            statusChanged = noteChanged = true;
+        }
+
+        computerMidiKeyDown[i] = down;
+    }
+
+    if (statusChanged)
+    {
+        juce::StringArray activeNotes;
+        for (std::size_t i = 0; i < computerMidiNoteActive.size(); ++i)
+            if (computerMidiNoteActive[i])
+                activeNotes.add (midiNoteName (computerMidiKeyPitch[i]));
+
+        const auto primary = activeNotes.isEmpty()
+            ? (noteChanged ? "Soltou " + lastComputerMidiNote : "Teclado MIDI")
+            : activeNotes.joinIntoString (" + ");
+        const auto details = "Vel " + juce::String (computerMidiVelocity) + " | Oitava "
+                           + (computerMidiOctaveOffset > 0 ? "+" : "")
+                           + juce::String (computerMidiOctaveOffset);
+        showComputerMidiStatus (primary, details, ! activeNotes.isEmpty());
+    }
+}
+
+void MainComponent::showComputerMidiStatus (const juce::String& primary,
+                                           const juce::String& secondary,
+                                           bool noteHeld)
+{
+    computerMidiIndicator->showStatus (primary, secondary, noteHeld);
+    for (auto& [deviceId, window] : windows)
+    {
+        juce::ignoreUnused (deviceId);
+        window->showComputerMidiStatus (primary, secondary, noteHeld);
+    }
+}
+
+void MainComponent::hideComputerMidiStatus()
+{
+    computerMidiIndicator->hide();
+    for (auto& [deviceId, window] : windows)
+    {
+        juce::ignoreUnused (deviceId);
+        window->hideComputerMidiStatus();
+    }
 }
 
 void MainComponent::startSimulatedTask()
@@ -2034,6 +2379,11 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
         auto window = std::make_unique<PluginWindow> (
             title, std::move (ed), displayArea, nextPluginCascadeIndex++, occupiedWindows);
         windows[deviceId] = std::move (window);
+        if (computerMidiIndicator->isVisible())
+            windows[deviceId]->showComputerMidiStatus (
+                computerMidiIndicator->getPrimaryText(),
+                computerMidiIndicator->getSecondaryText(),
+                computerMidiIndicator->isHeld());
         windows[deviceId]->toFront (true);
     }
     else

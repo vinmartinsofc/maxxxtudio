@@ -35,12 +35,14 @@ public:
     std::function<void (bool)> onFileBrowserToggled;
     std::function<void (bool)> onFavoritesToggled;
     std::function<void (bool)> onPianoRollToggled;
+    std::function<void (bool)> onComputerMidiKeyboardToggled;
     std::function<void (double beats)> onPosition;   // chamado ~30x/s com o playhead
     std::function<void()> onBeforePlay;
     void setBrowserVisible (bool);
     void setFileBrowserVisible (bool);
     void setFavoritesVisible (bool);
     void setPianoRollVisible (bool);
+    void setComputerMidiKeyboardEnabled (bool);
     void setBpm (double);
     void setMetronomeState (bool enabled, float gain);
 
@@ -61,7 +63,7 @@ private:
     juce::Slider metronomeVolumeSlider;
     juce::TextButton loopButton { "Loop" }, browserButton { "Plugins" }, fileBrowserButton { "Audio" },
                      favoritesButton { "Favoritos" },
-                     pianoRollButton { "Piano Roll" };
+                     pianoRollButton { "Piano Roll" }, computerKeyboardButton { "MIDI" };
     juce::Label bpmLabel, positionLabel, bpmCaption { {}, "BPM" };
     juce::Rectangle<int> cpuMeterBounds;
     double displayedCpuCurrent = 0.0, displayedCpuAverage = 0.0;
