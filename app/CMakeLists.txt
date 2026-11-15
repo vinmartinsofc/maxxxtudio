@@ -21,6 +21,9 @@ target_sources(ProjectFreedom PRIVATE
     PluginScanner.cpp
     BrowserPanel.cpp
     TransportBar.cpp
+    TaskRegistry.cpp
+    ActivityIndicator.cpp
+    TaskStatusBar.cpp
     RollModel.cpp
     PianoRollEditor.cpp
     MainComponent.cpp
@@ -45,3 +48,24 @@ target_link_libraries(ProjectFreedom
     PRIVATE
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+if(ROLL_BUILD_TESTS)
+    add_executable(task_registry_tests
+        ../tests/TaskRegistryTests.cpp
+        ActivityIndicator.cpp
+        DeviceView.cpp
+        TaskRegistry.cpp)
+    target_include_directories(task_registry_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(task_registry_tests PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(task_registry_tests
+        PRIVATE
+            roll_core
+            Catch2::Catch2WithMain
+            juce::juce_gui_basics
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    add_test(NAME TaskRegistryTests COMMAND task_registry_tests)
+endif()

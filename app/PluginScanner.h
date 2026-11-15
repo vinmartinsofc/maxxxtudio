@@ -1,32 +1,45 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <vector>
 
-// Detecta plugins VST3 nas pastas padrão do sistema, em segundo plano, e guarda a lista
-// em disco para a próxima abertura ser instantânea. Plugins que travam o scan são
-// colocados numa lista de bloqueio automaticamente (arquivo "dead man's pedal").
-class PluginScanner : private juce::Thread
+class TaskRegistry;
+class TaskScope;
+
+// Detecta plugins VST3 nas pastas padrao do sistema e persiste a lista em disco.
+// O trabalho pesado roda em um worker, enquanto o progresso vai para o TaskRegistry.
+class PluginScanner
 {
 public:
-    explicit PluginScanner (juce::AudioPluginFormatManager&);
-    ~PluginScanner() override;
+    PluginScanner (juce::AudioPluginFormatManager&, TaskRegistry&);
+    ~PluginScanner();
 
     juce::KnownPluginList& list() { return knownList; }
     std::vector<juce::File> searchRoots() const;
     void startScan();
-    bool isScanning() const { return isThreadRunning(); }
+    void cancelScan();
+    void stopScan();
+    bool isScanning() const { return activeScan != nullptr; }
 
-    std::function<void (const juce::String& currentPlugin)> onProgress;   // thread principal
-    std::function<void()> onFinished;                                     // thread principal
+    std::function<void()> onStarted;                                  // message thread
+    std::function<void (const juce::String& currentPlugin)> onProgress; // message thread
+    std::function<void (bool cancelled)> onFinished;                  // message thread
 
 private:
-    void run() override;
+    struct ScanState;
+
+    void runScan (const std::shared_ptr<ScanState>&,
+                  const std::shared_ptr<TaskScope>&,
+                  const std::shared_ptr<std::atomic<bool>>&);
     static juce::File dataDirectory();
     void saveList();
 
     juce::AudioPluginFormatManager& formatManager;
+    TaskRegistry& taskRegistry;
     juce::KnownPluginList knownList;
+    juce::ThreadPool scanPool { 1 };
+    std::shared_ptr<ScanState> activeScan;
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
 };

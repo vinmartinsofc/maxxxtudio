@@ -1,17 +1,21 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "ActivityIndicator.h"
 #include "AudioEngine.h"
 #include "Theme.h"
 #include <functional>
+#include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <vector>
 
 // Cadeia de dispositivos (plugins) da trilha selecionada: instrumento primeiro, efeitos depois.
-class DeviceView : public juce::Component, public juce::DragAndDropTarget
+class DeviceView : public juce::Component, public juce::DragAndDropTarget,
+                   private TaskRegistry::Listener
 {
 public:
-    DeviceView();
+    explicit DeviceView (TaskRegistry&);
     ~DeviceView() override;
 
     std::function<void (int trackId, int deviceId)> onOpen, onRemove;
@@ -46,10 +50,21 @@ private:
     bool canUngroupSelection() const;
     void showDeviceContextMenu (int deviceId, juce::Point<int> screenPosition);
     void toggleGroupCollapse (int groupId);
+    void taskRegistryChanged() override;
+    void refreshLoadingIndicators();
+    void positionLoadingIndicators();
 
+    struct LoadingIndicator
+    {
+        int slot = 0;
+        std::unique_ptr<ActivityIndicator> indicator;
+    };
+
+    TaskRegistry& registry;
     int trackId = -1;
     juce::String trackName;
     std::vector<std::unique_ptr<Box>> boxes;
+    std::map<std::string, LoadingIndicator> loadingIndicators;
     std::set<int> selectedDeviceIds, collapsedGroupIds;
     bool pluginDragOver = false, popupMenuRequested = false;
     int pluginDropIndex = -1;

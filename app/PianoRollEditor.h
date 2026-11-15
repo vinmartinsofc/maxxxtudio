@@ -58,18 +58,31 @@ private:
 };
 
 // Coluna de teclas à esquerda (clique para pré-escutar).
-class KeyColumn : public juce::Component
+class KeyColumn : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    explicit KeyColumn (RollModel& m) : model (m) {}
+    explicit KeyColumn (RollModel& m) : model (m)
+    {
+        setTooltip ("Na régua de notas: arraste verticalmente para rolar e horizontalmente para ajustar a altura das notas.");
+    }
+
+    std::function<void (int screenY)> onZoomStart;
+    std::function<void (float dx, float dy, int screenY)> onZoomDrag;
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
 private:
     void setPitch (int pitch);
+    bool isZoomRegion (juce::Point<float>) const;
+    static constexpr int zoomStripWidth = 8;
     RollModel& model;
     int current = -1;
+    juce::Point<int> lastZoomScreenPosition;
+    bool zoomDragging = false, zoomHovered = false;
+    juce::Point<int> zoomStartScreenPosition;
 };
 
 // Régua com compassos/beats e a faixa do clip. Clique reposiciona o playhead.
@@ -163,4 +176,6 @@ private:
     Holder keyHolder, rulerHolder, velocityHolder;
     bool scrolledOnce = false;
     int  lastCenterPitch = 60;      // mantém a posição vertical ao ligar/desligar o fold
+    int noteRulerStartRowHeight = 16, noteRulerStartViewY = 0;
+    int noteRulerAnchorPitch = 60, noteRulerAnchorScreenY = 0;
 };

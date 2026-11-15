@@ -17,6 +17,7 @@ inline juce::Colour border()       { return juce::Colour (0xff45484a); }
 inline juce::Colour text()         { return juce::Colour (0xffe6e6e6); }
 inline juce::Colour textDim()      { return juce::Colour (0xffa5a7a8); }
 inline juce::Colour accent()       { return juce::Colour (0xff66a3ff); }
+inline juce::Colour taskActive()   { return juce::Colour (0xff55c982); }
 inline juce::Colour recording()    { return juce::Colour (0xffe85b5b); }
 inline juce::Colour warning()      { return juce::Colour (0xfff2bd50); }
 inline juce::Colour noteFill()     { return accent(); }

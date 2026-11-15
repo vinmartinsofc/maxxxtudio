@@ -86,7 +86,8 @@ private:
         for (const auto& argument : arguments)
         {
             const juce::File file (argument.unquoted());
-            if (file.getFileExtension().equalsIgnoreCase (".freedom"))
+            const auto extension = file.getFileExtension();
+            if (extension.equalsIgnoreCase (".pfs") || extension.equalsIgnoreCase (".freedom"))
             {
                 if (window != nullptr)
                     window->openProject (file);

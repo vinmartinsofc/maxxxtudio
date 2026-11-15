@@ -1,6 +1,7 @@
 #include "ArrangementView.h"
 #include "Icons.h"
 #include "WaveformDisplay.h"
+#include "ZoomCursor.h"
 #include <algorithm>
 #include <cmath>
 #include <iterator>
@@ -355,7 +356,14 @@ public:
         return description.startsWith ("plugin:") || description.startsWith ("audio:");
     }
 
-    void itemDragEnter (const SourceDetails& details) override { updateDragTarget (details); }
+    void itemDragEnter (const SourceDetails& details) override
+    {
+        updateDragTarget (details);
+        const auto description = details.description.toString();
+        const bool audio = description.startsWith ("audio:");
+        notifyAction (audio ? "Arrastando audio para o arrangement" : "Arrastando plugin para o arrangement",
+                     audio ? icons::Icon::Waveform : icons::Icon::Mixer, true, 0);
+    }
     void itemDragMove (const SourceDetails& details) override  { updateDragTarget (details); }
     void itemDragExit (const SourceDetails&) override
     {
@@ -363,6 +371,7 @@ public:
         dragDropAllowed = false;
         dragDropIsAudio = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
+        notifyAction (juce::String(), icons::Icon::Pointer, false, 0);
         repaint();
     }
 
@@ -381,6 +390,7 @@ public:
         if (audioDrop)
         {
             const juce::File file (description.substring (6));
+            notifyAction ("Audio solto no arrangement", icons::Icon::Waveform, false, 650);
             if (owner.canAcceptAudioDrop && owner.canAcceptAudioDrop (file, trackId) && owner.onAudioDropped)
                 owner.onAudioDropped (file, trackId, beat);
             return;
@@ -388,7 +398,10 @@ public:
 
         if (description.startsWith ("plugin:") && owner.canAcceptPluginDrop
             && owner.canAcceptPluginDrop (description.substring (7), trackId) && owner.onPluginDropped)
+        {
+            notifyAction ("Plugin solto no arrangement", icons::Icon::Mixer, false, 650);
             owner.onPluginDropped (description.substring (7), trackId, beat);
+        }
     }
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override
@@ -396,7 +409,11 @@ public:
         return files.size() == 1 && isAudioFile (juce::File (files[0]));
     }
 
-    void fileDragEnter (const juce::StringArray& files, int x, int y) override { updateFileDragTarget (files, x, y); }
+    void fileDragEnter (const juce::StringArray& files, int x, int y) override
+    {
+        updateFileDragTarget (files, x, y);
+        notifyAction ("Arrastando audio para o arrangement", icons::Icon::Waveform, true, 0);
+    }
     void fileDragMove  (const juce::StringArray& files, int x, int y) override { updateFileDragTarget (files, x, y); }
 
     void fileDragExit (const juce::StringArray&) override
@@ -405,6 +422,7 @@ public:
         dragDropAllowed = false;
         dragDropIsAudio = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
+        notifyAction (juce::String(), icons::Icon::Pointer, false, 0);
         repaint();
     }
 
@@ -416,11 +434,13 @@ public:
             dragTrackIndex = -1;
             dragDropAllowed = false;
             dragDropIsAudio = false;
+            notifyAction ("Solte um arquivo de audio", icons::Icon::Waveform, false, 650);
             repaint();
             return;
         }
         const juce::File file (files[0]);
         const int trackId = trackIdAt (trackIndex);
+        notifyAction ("Audio solto no arrangement", icons::Icon::Waveform, false, 650);
         if (owner.canAcceptAudioDrop && owner.canAcceptAudioDrop (file, trackId) && owner.onAudioDropped)
             owner.onAudioDropped (file, trackId, owner.snapBeat (static_cast<double> (x) / owner.pixelsPerBeat));
         dragTrackIndex = -1;
@@ -474,6 +494,7 @@ public:
                                      clicked.audioClip != nullptr };
                 selectionDownPosition = e.position;
                 mode = Mode::ShiftPending;
+                notifyInteraction (true);
                 return;
             }
 
@@ -486,6 +507,7 @@ public:
             hasRangeSelection = true;
             const int trackId = project.tracks[static_cast<std::size_t> (row)]->id;
             project.selectClip (trackId, -1);
+            notifyInteraction (true);
             repaint();
             return;
         }
@@ -496,6 +518,7 @@ public:
             selectedClips.clear();
             selectionAnchor = {};
             project.selectTrack (0);
+            notifyAction ("Barramento selecionado", icons::Icon::Pointer, false, 700);
             return;
         }
 
@@ -523,6 +546,7 @@ public:
                 project.selectClip (trackId, -1);
 
             showContextMenu (h, trackId);
+            notifyAction ("Menu do clipe", icons::Icon::Pointer, false, 700);
             return;
         }
 
@@ -531,6 +555,7 @@ public:
             selectedClips.clear();
             selectionAnchor = {};
             project.selectClip (trackId, -1);
+            notifyAction ("Cursor posicionado", icons::Icon::Pointer, false, 900);
             return;
         }
 
@@ -556,6 +581,7 @@ public:
             downBeat = e.position.x / owner.pixelsPerBeat;
             mode = Mode::CtrlPending;
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            notifyInteraction (true);
             return;
         }
 
@@ -598,6 +624,7 @@ public:
             setMouseCursor (mode == Mode::Resize || mode == Mode::FadeIn || mode == Mode::FadeOut
                                 ? juce::MouseCursor::LeftRightResizeCursor
                                 : juce::MouseCursor::DraggingHandCursor);
+        notifyInteraction (true);
     }
 
     void showContextMenu (const Hit& h, int trackId)
@@ -753,6 +780,7 @@ public:
             rangeEndTrack = std::clamp (
                 static_cast<int> (std::floor (e.position.y / trackHeight)),
                 0, static_cast<int> (project.tracks.size()) - 1);
+            notifyInteraction (true, 0, true);
             repaint();
             return;
         }
@@ -773,6 +801,7 @@ public:
             rangeEndBeat = std::max (0.0, noSnap ? beat : owner.snapBeat (beat));
             rangeEndTrack = std::clamp (static_cast<int> (std::floor (e.position.y / trackHeight)),
                                         0, static_cast<int> (project.tracks.size()) - 1);
+            notifyInteraction (true, 0, true);
             repaint();
             return;
         }
@@ -886,6 +915,7 @@ public:
             project.setAudioClipFadeCurves (curTrack, curAudioClipId, fadeInCurve, fadeOutCurve);
         }
 
+        notifyInteraction (true, 0, true);
         repaint();
     }
 
@@ -894,6 +924,7 @@ public:
         if (mode == Mode::ShiftPending)
         {
             extendClipSelection (pendingSelection);
+            notifyAction ("Clipe selecionado", icons::Icon::Pointer, false, 650);
             mode = Mode::None;
             curAudioClipId = -1;
             repaint();
@@ -902,11 +933,16 @@ public:
         if (mode == Mode::CtrlPending)
         {
             toggleClipSelection (pendingSelection);
+            notifyAction ("Selecao atualizada", icons::Icon::SelectRegion, false, 650);
             mode = Mode::None;
             curAudioClipId = -1;
             repaint();
             return;
         }
+        if (mode != Mode::RangeSelect && e.getDistanceFromDragStart() < 4.0f)
+            notifyAction ("Clipe selecionado", icons::Icon::Pointer, false, 650);
+        else
+            notifyInteraction (false, 700);
         project.endEdit();
         mode = Mode::None;
         updateCursor (e.position);
@@ -1144,6 +1180,32 @@ public:
     }
 
 private:
+    void notifyAction (const juce::String& message, icons::Icon icon, bool active, int holdMilliseconds)
+    {
+        if (owner.onInteractionChanged)
+            owner.onInteractionChanged (message, icon, active, holdMilliseconds);
+    }
+
+    void notifyInteraction (bool active, int holdMilliseconds = 0, bool dragging = false)
+    {
+        juce::String message;
+        auto icon = icons::Icon::Pointer;
+        switch (mode)
+        {
+            case Mode::Move:          message = active ? (dragging ? "Arrastando clipe" : "Segurando clipe") : "Clipe reposicionado"; icon = icons::Icon::Move; break;
+            case Mode::Resize:        message = active ? (dragging ? "Redimensionando clipe" : "Segurando borda do clipe") : "Clipe redimensionado"; icon = icons::Icon::Resize; break;
+            case Mode::FadeIn:        message = active ? (dragging ? "Ajustando fade de entrada" : "Segurando fade de entrada") : "Fade de entrada ajustado"; icon = icons::Icon::FadeIn; break;
+            case Mode::FadeOut:       message = active ? (dragging ? "Ajustando fade de saida" : "Segurando fade de saida") : "Fade de saida ajustado"; icon = icons::Icon::FadeOut; break;
+            case Mode::FadeInCurve:   message = active ? (dragging ? "Ajustando curva do fade" : "Segurando curva do fade") : "Curva do fade ajustada"; icon = icons::Icon::FadeIn; break;
+            case Mode::FadeOutCurve:  message = active ? (dragging ? "Ajustando curva do fade" : "Segurando curva do fade") : "Curva do fade ajustada"; icon = icons::Icon::FadeOut; break;
+            case Mode::RangeSelect:   message = active ? "Selecionando regiao" : "Regiao selecionada"; icon = icons::Icon::SelectRegion; break;
+            case Mode::ShiftPending:  message = active ? "Segurando selecao de clipe" : "Clipe selecionado"; break;
+            case Mode::CtrlPending:   message = active ? "Segurando selecao de clipe" : "Selecao atualizada"; break;
+            case Mode::None:          return;
+        }
+        notifyAction (message, icon, active, holdMilliseconds);
+    }
+
     struct ClipSelection
     {
         int trackId = -1;
@@ -1687,10 +1749,13 @@ private:
 
 // ============================================================ Ruler (régua + brace de loop)
 
-class ArrangementView::Ruler : public juce::Component
+class ArrangementView::Ruler : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    Ruler (ProjectModel& p, ArrangementView& o) : project (p), owner (o) {}
+    Ruler (ProjectModel& p, ArrangementView& o) : project (p), owner (o)
+    {
+        setTooltip ("Na régua: arraste verticalmente para ajustar o zoom e horizontalmente para navegar.");
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -1700,7 +1765,9 @@ public:
 
         // brace de loop
         const float lx0 = static_cast<float> (project.loopStart * ppb), lx1 = static_cast<float> (project.loopEnd * ppb);
-        const auto braceColour = mode != Mode::Seek || hoverMode != Mode::Seek
+        const bool loopInteraction = mode == Mode::LoopLeft || mode == Mode::LoopRight || mode == Mode::LoopMove
+                                  || hoverMode == Mode::LoopLeft || hoverMode == Mode::LoopRight || hoverMode == Mode::LoopMove;
+        const auto braceColour = loopInteraction
                                ? theme::accent().brighter (0.2f)
                                : owner.loopEnabled ? theme::accent() : theme::textDim().withAlpha (0.6f);
         g.setColour (braceColour);
@@ -1784,6 +1851,7 @@ public:
     void mouseDown (const juce::MouseEvent& e) override
     {
         mode = Mode::Seek;
+        navigationPending = false;
         lastMouseX = e.position.x;
         if (e.mods.isPopupMenu())
         {
@@ -1804,6 +1872,7 @@ public:
             if (owner.onArrangementSeekRequested)
                 owner.onArrangementSeekRequested (marker->beat);
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            notifyInteraction (true);
             repaint();
             return;
         }
@@ -1820,11 +1889,24 @@ public:
         updateCursor (e.position);
         if (mode == Mode::Seek)
         {
-            const double beat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
-            if (owner.onSeek) owner.onSeek (beat);
-            if (owner.onArrangementSeekRequested)
-                owner.onArrangementSeekRequested (beat);
+            navigationPending = e.position.y > 10.0f;
+            if (navigationPending)
+            {
+                navigationStartScreenPosition = e.getScreenPosition();
+                navigationLastScreenPosition = navigationStartScreenPosition;
+                navigationStartViewX = owner.viewport.getViewPositionX();
+                navigationAnchorBeat = e.position.x / owner.pixelsPerBeat;
+                navigationAnchorScreenX = static_cast<int> (std::lround (e.position.x - navigationStartViewX));
+            }
+            else
+            {
+                const double beat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
+                if (owner.onSeek) owner.onSeek (beat);
+                if (owner.onArrangementSeekRequested)
+                    owner.onArrangementSeekRequested (beat);
+            }
         }
+        notifyInteraction (true);
         repaint();
     }
 
@@ -1855,6 +1937,17 @@ public:
     void mouseDrag (const juce::MouseEvent& e) override
     {
         lastMouseX = e.position.x;
+        const auto screenPosition = e.getScreenPosition();
+        if (mode == Mode::Seek && navigationPending)
+        {
+            if (e.getDistanceFromDragStart() < 4.0f)
+                return;
+
+            const auto delta = screenPosition - navigationStartScreenPosition;
+            mode = std::abs (delta.x) > std::abs (delta.y) ? Mode::PanView : Mode::ZoomView;
+            updateCursor (e.position);
+        }
+
         const double rawBeat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
         const double beat = std::max (0.0, e.mods.isAltDown() ? rawBeat : owner.snapBeat (rawBeat));
         switch (mode)
@@ -1865,6 +1958,23 @@ public:
                 if (owner.onSeek) owner.onSeek (seekBeat);
                 if (owner.onArrangementSeekRequested)
                     owner.onArrangementSeekRequested (seekBeat);
+                break;
+            }
+            case Mode::PanView:
+            {
+                const int dx = screenPosition.x - navigationStartScreenPosition.x;
+                owner.viewport.setViewPosition (std::max (0, navigationStartViewX + dx),
+                                                owner.viewport.getViewPositionY());
+                owner.syncPositions();
+                break;
+            }
+            case Mode::ZoomView:
+            {
+                const int dy = screenPosition.y - navigationLastScreenPosition.y;
+                navigationLastScreenPosition = screenPosition;
+                if (dy != 0)
+                    owner.zoomAt (std::exp (-static_cast<double> (dy) * 0.012),
+                                  navigationAnchorBeat, navigationAnchorScreenX);
                 break;
             }
             case Mode::LoopLeft:  project.setLoop (std::min (beat, project.loopEnd - 1.0), project.loopEnd); break;
@@ -1889,16 +1999,26 @@ public:
                 break;
             }
         }
+        notifyInteraction (true, 0, true);
         repaint();
     }
 
     void mouseUp (const juce::MouseEvent& e) override
     {
+        if (mode == Mode::Seek && navigationPending)
+        {
+            const double beat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
+            if (owner.onSeek) owner.onSeek (beat);
+            if (owner.onArrangementSeekRequested)
+                owner.onArrangementSeekRequested (beat);
+        }
+        navigationPending = false;
         if (locatorEditStarted)
         {
             project.endEdit();
             locatorEditStarted = false;
         }
+        notifyInteraction (false, 650);
         mode = Mode::Seek;
         hoverMode = modeAt (e.position);
         updateCursor (e.position);
@@ -1917,7 +2037,27 @@ public:
     }
 
 private:
-    enum class Mode { Seek, LoopLeft, LoopRight, LoopMove, LocatorMove };
+    enum class Mode { Seek, PanView, ZoomView, LoopLeft, LoopRight, LoopMove, LocatorMove };
+    void notifyInteraction (bool active, int holdMilliseconds = 0, bool dragging = false)
+    {
+        if (! owner.onInteractionChanged)
+            return;
+
+        juce::String message;
+        auto icon = icons::Icon::Pointer;
+        switch (mode)
+        {
+            case Mode::Seek:       message = active ? (dragging ? "Arrastando playhead" : "Segurando playhead") : "Cursor posicionado"; break;
+            case Mode::PanView:    message = active ? "Navegando no arranjo" : "Navegacao concluida"; icon = icons::Icon::Move; break;
+            case Mode::ZoomView:   message = active ? "Ajustando zoom do arranjo" : "Zoom ajustado"; icon = icons::Icon::Resize; break;
+            case Mode::LoopLeft:
+            case Mode::LoopRight:  message = active ? (dragging ? "Ajustando loop" : "Segurando limite do loop") : "Loop ajustado"; icon = icons::Icon::SelectRegion; break;
+            case Mode::LoopMove:   message = active ? (dragging ? "Movendo loop" : "Segurando loop") : "Loop movido"; icon = icons::Icon::Loop; break;
+            case Mode::LocatorMove:message = active ? (dragging ? "Movendo marcador" : "Segurando marcador") : "Marcador movido"; icon = icons::Icon::Move; break;
+        }
+        owner.onInteractionChanged (message, icon, active, holdMilliseconds);
+    }
+
     ProjectModel& project;
     ArrangementView& owner;
     Mode mode = Mode::Seek;
@@ -1926,6 +2066,10 @@ private:
     float lastMouseX = 0.0f;
     int draggedLocatorId = -1;
     bool locatorEditStarted = false;
+    bool navigationPending = false;
+    juce::Point<int> navigationStartScreenPosition, navigationLastScreenPosition;
+    int navigationStartViewX = 0, navigationAnchorScreenX = 0;
+    double navigationAnchorBeat = 0.0;
     juce::String hoveredInfo;
 
     ArrangementLocator* locatorAt (juce::Point<float> position) const
@@ -2082,6 +2226,11 @@ private:
             setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
         else if (target == Mode::LoopMove || target == Mode::LocatorMove)
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        else if (target == Mode::PanView)
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+        else if (target == Mode::ZoomView
+                 || (target == Mode::Seek && position.y > 10.0f && locatorAt (position) == nullptr))
+            setMouseCursor (ui::zoomCursor());
         else
             setMouseCursor (juce::MouseCursor::NormalCursor);
     }

@@ -1,6 +1,7 @@
 #include "MainComponent.h"
 #include "WindowPlacement.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -32,18 +33,19 @@ double sourceBpmFromFileName (const juce::File& file, double fallback)
     return bpm >= 20.0 && bpm <= 300.0 ? bpm : fallback;
 }
 
+bool isProjectFile (const juce::File& file)
+{
+    const auto extension = file.getFileExtension();
+    return extension.equalsIgnoreCase (".pfs") || extension.equalsIgnoreCase (".freedom");
 }
 
-class MainComponent::ActionIndicator final : public juce::Component
+}
+
+class MainComponent::ActionIndicator final : public juce::Component, private juce::Timer
 {
 public:
-    ActionIndicator() : spinner (progress, juce::ProgressBar::Style::circular)
+    ActionIndicator()
     {
-        spinner.setPercentageDisplay (false);
-        spinner.setColour (juce::ProgressBar::backgroundColourId, theme::border());
-        spinner.setColour (juce::ProgressBar::foregroundColourId, theme::accent());
-        addAndMakeVisible (spinner);
-
         message.setColour (juce::Label::textColourId, theme::text());
         message.setFont (juce::FontOptions (13.5f, juce::Font::bold));
         message.setJustificationType (juce::Justification::centredLeft);
@@ -51,17 +53,34 @@ public:
         setInterceptsMouseClicks (false, false);
     }
 
-    void showMessage (const juce::String& text)
+    void showMessage (const juce::String& text, icons::Icon icon, bool busy)
     {
         message.setText (text, juce::dontSendNotification);
         const bool wasVisible = isVisible();
+        if (busy != loading)
+        {
+            loading = busy;
+            if (loading)
+                startTimerHz (30);
+            else
+                stopTimer();
+        }
+        currentIcon = icon;
         setVisible (true);
         if (! wasVisible)
             toFront (false);
         repaint();
     }
 
-    void hide() { setVisible (false); }
+    void hide()
+    {
+        if (loading)
+        {
+            loading = false;
+            stopTimer();
+        }
+        setVisible (false);
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -69,17 +88,108 @@ public:
         g.fillRoundedRectangle (getLocalBounds().toFloat(), 7.0f);
         g.setColour (theme::border());
         g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (0.5f), 7.0f, 1.0f);
+        if (loading)
+        {
+            drawLoadingCube (g, juce::Rectangle<float> (4.0f, 4.0f, 44.0f, 44.0f));
+        }
+        else
+            if (const auto* icon = icons::get (currentIcon, theme::accent(), 24))
+                icon->drawWithin (g, juce::Rectangle<float> (12.0f, 12.0f, 24.0f, 24.0f),
+                                  juce::RectanglePlacement::centred, 1.0f);
     }
 
     void resized() override
     {
-        spinner.setBounds (10, 10, 24, 24);
-        message.setBounds (42, 0, getWidth() - 50, getHeight());
+        message.setBounds (52, 0, getWidth() - 60, getHeight());
     }
 
 private:
-    double progress = -1.0;
-    juce::ProgressBar spinner;
+    struct Point3D { float x, y, z; };
+
+    void timerCallback() override
+    {
+        angle = std::fmod (angle + 0.075f, juce::MathConstants<float>::twoPi);
+        repaint();
+    }
+
+    void drawLoadingCube (juce::Graphics& g, juce::Rectangle<float> bounds) const
+    {
+        constexpr std::array<Point3D, 8> vertices
+        {{
+            { -1, -1, -1 }, { 1, -1, -1 }, { 1, 1, -1 }, { -1, 1, -1 },
+            { -1, -1, 1 }, { 1, -1, 1 }, { 1, 1, 1 }, { -1, 1, 1 }
+        }};
+        constexpr std::array<std::array<int, 4>, 6> faces
+        {{
+            {{ 0, 3, 2, 1 }}, {{ 4, 5, 6, 7 }}, {{ 0, 4, 7, 3 }},
+            {{ 1, 2, 6, 5 }}, {{ 0, 1, 5, 4 }}, {{ 3, 7, 6, 2 }}
+        }};
+        constexpr std::array<Point3D, 6> normals
+        {{
+            { 0, 0, -1 }, { 0, 0, 1 }, { -1, 0, 0 },
+            { 1, 0, 0 }, { 0, -1, 0 }, { 0, 1, 0 }
+        }};
+        const float cosineY = std::cos (angle);
+        const float sineY = std::sin (angle);
+        const float cosineX = std::cos (angle * 0.72f + 0.35f);
+        const float sineX = std::sin (angle * 0.72f + 0.35f);
+        std::array<juce::Point<float>, 8> projected;
+        std::array<float, 8> depth;
+
+        const auto rotate = [=] (Point3D point)
+        {
+            const float x = point.x * cosineY + point.z * sineY;
+            const float z = -point.x * sineY + point.z * cosineY;
+            return Point3D { x, point.y * cosineX - z * sineX,
+                             point.y * sineX + z * cosineX };
+        };
+        const float scale = std::min (bounds.getWidth(), bounds.getHeight()) * 0.36f;
+        const auto centre = bounds.getCentre();
+        for (std::size_t i = 0; i < vertices.size(); ++i)
+        {
+            const auto point = rotate (vertices[i]);
+            depth[i] = point.z;
+            const float perspective = 1.0f / (1.0f - point.z * 0.12f);
+            projected[i] = { centre.x + point.x * scale * perspective,
+                             centre.y + point.y * scale * perspective };
+        }
+
+        std::array<int, 6> faceOrder { 0, 1, 2, 3, 4, 5 };
+        const auto averageDepth = [&] (int face)
+        {
+            float value = 0.0f;
+            for (const int vertex : faces[static_cast<std::size_t> (face)])
+                value += depth[static_cast<std::size_t> (vertex)];
+            return value * 0.25f;
+        };
+        std::sort (faceOrder.begin(), faceOrder.end(),
+                   [&] (int first, int second) { return averageDepth (first) < averageDepth (second); });
+
+        for (const int faceIndex : faceOrder)
+        {
+            const auto index = static_cast<std::size_t> (faceIndex);
+            juce::Path face;
+            for (int corner = 0; corner < 4; ++corner)
+            {
+                const auto point = projected[static_cast<std::size_t> (faces[index][static_cast<std::size_t> (corner)])];
+                if (corner == 0) face.startNewSubPath (point);
+                else face.lineTo (point);
+            }
+            face.closeSubPath();
+
+            const auto normal = rotate (normals[index]);
+            const float lighting = std::max (0.0f, -0.45f * normal.x - 0.55f * normal.y + 0.70f * normal.z);
+            const auto colour = theme::accent().withMultipliedBrightness (0.48f + lighting * 0.52f);
+            g.setColour (colour);
+            g.fillPath (face);
+            g.setColour (theme::accent().brighter (0.25f).withAlpha (0.85f));
+            g.strokePath (face, juce::PathStrokeType (0.8f));
+        }
+    }
+
+    icons::Icon currentIcon = icons::Icon::Pointer;
+    float angle = 0.0f;
+    bool loading = false;
     juce::Label message;
 };
 
@@ -137,6 +247,7 @@ public:
 
 MainComponent::MainComponent()
 {
+    addAndMakeVisible (taskStatusBar);
     addAndMakeVisible (transport);
     transport.onProjectMenu = [this] { showProjectMenu(); };
     addAndMakeVisible (browser);
@@ -389,12 +500,18 @@ MainComponent::MainComponent()
     audioBrowser.onPreviewRequested = [this] (const juce::File& file)
     {
         const int request = ++previewLoadToken;
+        ++pendingPreviewLoads;
+        updateActionIndicator();
         const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
         engine.loadAudioFileAsync (file, [this, token, file, request]
             (const juce::String& error, std::shared_ptr<const AudioFileData> data)
         {
             const auto alive = token.lock();
-            if (alive == nullptr || ! alive->load() || request != previewLoadToken)
+            if (alive == nullptr || ! alive->load())
+                return;
+            pendingPreviewLoads = std::max (0, pendingPreviewLoads - 1);
+            updateActionIndicator();
+            if (request != previewLoadToken)
                 return;
             if (error.isNotEmpty() || data == nullptr)
             {
@@ -520,19 +637,26 @@ MainComponent::MainComponent()
     };
 
     browser.onLoadRequested = [this] (const juce::PluginDescription& d) { loadDevice (d); };
-    scanner.onProgress = [this] (const juce::String& n)
+    scanner.onStarted = [this]
     {
         scanningPlugins = true;
-        scanMessage = "Verificando: " + juce::File (n).getFileName();
+        scanMessage = "Procurando plugins...";
         browser.setStatus (scanMessage);
         updateActionIndicator();
     };
-    scanner.onFinished = [this]
+    scanner.onProgress = [this] (const juce::String& n)
+    {
+        scanMessage = "Verificando: " + juce::File (n).getFileName();
+        browser.setStatus (scanMessage);
+    };
+    scanner.onFinished = [this] (bool cancelled)
     {
         scanningPlugins = false;
         scanMessage.clear();
         browser.refresh();
-        browser.setStatus (juce::String (scanner.list().getNumTypes()) + " plugins encontrados");
+        browser.setStatus (cancelled
+            ? theme::ui ("Escaneamento cancelado. ") + juce::String (scanner.list().getNumTypes()) + " plugins encontrados"
+            : juce::String (scanner.list().getNumTypes()) + " plugins encontrados");
         updateActionIndicator();
         if (waitingForProjectPluginScan)
         {
@@ -556,16 +680,26 @@ MainComponent::MainComponent()
     setSize (1360, 800);
     startTimerHz (30);
 
-    scanningPlugins = true;
-    scanMessage = "Procurando plugins...";
-    browser.setStatus ("Procurando plugins...");
-    updateActionIndicator();
     scanner.startScan();
 }
 
 MainComponent::~MainComponent()
 {
+    // O registry é membro desta classe; encerre primeiro qualquer worker que o utilize.
+    if (taskSimulationThread.joinable())
+    {
+        taskSimulationThread.request_stop();
+        taskSimulationThread.join();
+    }
+
     lifetimeToken->store (false);
+    scanner.stopScan();
+    projectFilePool.removeAllJobs (true, -1);
+    if (projectLoadTask != nullptr)
+    {
+        projectLoadTask->end();
+        projectLoadTask.reset();
+    }
     stopTimer();
     project.removeChangeListener (this);
     model.removeChangeListener (this);
@@ -585,8 +719,9 @@ void MainComponent::resized()
 {
     auto area = getLocalBounds();
     transport.setBounds (area.removeFromTop (44));
+    taskStatusBar.setBounds (area.removeFromBottom (30));
     if (actionIndicator != nullptr)
-        actionIndicator->setBounds ((getWidth() - 280) / 2, 50, 280, 44);
+        actionIndicator->setBounds ((getWidth() - 320) / 2, 50, 320, 52);
 
     auto right = area.reduced (8);
     if (browser.isVisible() || audioBrowser.isVisible())
@@ -698,6 +833,11 @@ void MainComponent::mouseDrag (const juce::MouseEvent& e)
         resized();
         repaint();
     }
+}
+
+void MainComponent::mouseUp (const juce::MouseEvent&)
+{
+    draggingBrowserSplitter = draggingSplitter = false;
 }
 
 void MainComponent::mouseMove (const juce::MouseEvent& e)
@@ -1151,6 +1291,15 @@ void MainComponent::loopSelectedTrack()
 
 bool MainComponent::keyPressed (const juce::KeyPress& k)
 {
+#if JUCE_DEBUG
+    if (k.getKeyCode() == juce::KeyPress::F10Key
+        && k.getModifiers().isCtrlDown() && k.getModifiers().isAltDown())
+    {
+        startSimulatedTask();
+        return true;
+    }
+#endif
+
     const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
     if (ctrl && keyCode == 'S')
@@ -1241,7 +1390,7 @@ void MainComponent::showProjectMenu()
     menu.addItem (3, "Salvar como...");
 #if JUCE_WINDOWS
     menu.addSeparator();
-    menu.addItem (4, "Associar arquivos .freedom ao Project Freedom");
+    menu.addItem (4, "Associar arquivos .pfs ao Project Freedom");
 #endif
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transport),
         [this] (int result)
@@ -1253,22 +1402,22 @@ void MainComponent::showProjectMenu()
             {
                 const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
                 const bool registered = juce::WindowsRegistry::registerFileAssociation (
-                    ".freedom", "ProjectFreedomProject", "Project Freedom Project",
+                    ".pfs", "ProjectFreedomProject", "Project Freedom Session",
                     executable, 0, true);
                 const auto command = "\"" + executable.getFullPathName() + "\" \"%1\"";
                 const bool quotedCommandSet = registered && juce::WindowsRegistry::setValue (
                     "HKEY_CURRENT_USER\\Software\\Classes\\ProjectFreedomProject\\shell\\open\\command",
                     command);
                 setProjectStatus (quotedCommandSet
-                    ? "Arquivos .freedom associados ao Project Freedom."
-                    : "Nao foi possivel associar arquivos .freedom.");
+                    ? "Arquivos .pfs associados ao Project Freedom."
+                    : "Nao foi possivel associar arquivos .pfs.");
             }
         });
 }
 
 void MainComponent::openProjectFromFile (const juce::File& file)
 {
-    if (file.existsAsFile() && file.getFileExtension().equalsIgnoreCase (".freedom"))
+    if (file.existsAsFile() && isProjectFile (file))
         loadProject (file);
 }
 
@@ -1278,7 +1427,7 @@ void MainComponent::chooseProjectFile (bool open)
         ? currentProjectFile : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
     projectFileChooser = std::make_unique<juce::FileChooser> (
         open ? "Abrir projeto" : "Salvar projeto",
-        start, "*.freedom");
+        start, open ? "*.pfs;*.freedom" : "*.pfs");
     const auto chooserFlags = open ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                                    : juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles;
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
@@ -1301,42 +1450,129 @@ void MainComponent::chooseProjectFile (bool open)
 
 void MainComponent::saveProject (const juce::File& requestedFile)
 {
-    if (! pendingPluginLoads.empty() || restoringProjectPlugins || pendingAudioLoads > 0)
+    if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
+        || pendingAudioLoads > 0 || projectFileOperationInProgress)
     {
         setProjectStatus ("Aguarde o fim dos carregamentos antes de salvar.");
         return;
     }
 
     auto file = requestedFile;
-    if (file.getFileExtension().compareIgnoreCase (".freedom") != 0)
-        file = file.withFileExtension (".freedom");
+    if (file.getFileExtension().compareIgnoreCase (".pfs") != 0)
+        file = file.withFileExtension (".pfs");
 
-    const auto result = ProjectFile::save (file, project, engine, engine.graph().positionBeats());
-    if (result.failed())
+    projectFileOperationInProgress = true;
+    auto task = std::make_shared<TaskScope> (
+        taskRegistry, theme::ui ("Salvando projeto: ") + file.getFileName(), "global");
+    auto snapshot = std::make_shared<ProjectFileData>();
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    if (! juce::MessageManager::callAsync ([this, token, file, task, snapshot]
     {
-        setProjectStatus ("Falha ao salvar projeto: " + result.getErrorMessage());
-        return;
-    }
+        const auto alive = token.lock();
+        if (alive == nullptr || ! alive->load())
+            return;
 
-    currentProjectFile = file;
-    setProjectStatus ("Projeto salvo: " + file.getFileName());
+        snapshot->project = project.createState();
+        snapshot->plugins = engine.getPluginStates();
+        snapshot->bpm = engine.graph().getBpm();
+        snapshot->transportPosition = engine.graph().positionBeats();
+        snapshot->loopEnabled = engine.graph().isLoop();
+        snapshot->metronomeEnabled = engine.graph().isMetronomeEnabled();
+        snapshot->metronomeGain = engine.graph().getMetronomeGain();
+
+        projectFilePool.addJob ([this, token, file, task, snapshot]
+        {
+            const auto result = ProjectFile::save (file, *snapshot, [task] (double progress)
+            {
+                task->setProgress (progress);
+            });
+
+            if (! juce::MessageManager::callAsync ([this, token, file, task, result]
+            {
+                task->end();
+                const auto alive = token.lock();
+                if (alive == nullptr || ! alive->load())
+                    return;
+
+                projectFileOperationInProgress = false;
+                if (result.failed())
+                {
+                    setProjectStatus ("Falha ao salvar projeto: " + result.getErrorMessage());
+                    return;
+                }
+
+                currentProjectFile = file;
+                setProjectStatus ("Projeto salvo: " + file.getFileName());
+            }))
+            {
+                juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado do salvamento.");
+            }
+        });
+    }))
+    {
+        task->end();
+        projectFileOperationInProgress = false;
+        juce::Logger::writeToLog ("MainComponent: nao foi possivel iniciar o salvamento do projeto.");
+        setProjectStatus ("Falha ao iniciar o salvamento do projeto.");
+    }
 }
 
 void MainComponent::loadProject (const juce::File& file)
 {
-    if (! pendingPluginLoads.empty() || restoringProjectPlugins)
+    if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
+        || pendingAudioLoads > 0 || projectFileOperationInProgress)
     {
-        setProjectStatus ("Aguarde o fim do carregamento de plugins antes de abrir outro projeto.");
+        setProjectStatus ("Aguarde o fim dos carregamentos antes de abrir outro projeto.");
         return;
     }
 
-    ProjectFileData data;
-    const auto result = ProjectFile::load (file, data);
-    if (result.failed())
+    projectFileOperationInProgress = true;
+    auto task = std::make_shared<TaskScope> (
+        taskRegistry, theme::ui ("Abrindo projeto: ") + file.getFileName(), "global", -1.0);
+    auto data = std::make_shared<ProjectFileData>();
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    projectFilePool.addJob ([this, token, file, task, data]
     {
-        setProjectStatus ("Falha ao abrir projeto: " + result.getErrorMessage());
-        return;
-    }
+        const auto result = ProjectFile::load (file, *data, [task] (double progress)
+        {
+            task->setProgress (progress < 0.0 ? -1.0 : progress * 0.25);
+        });
+
+        if (! juce::MessageManager::callAsync ([this, token, file, task, data, result]
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+                return;
+
+            if (result.failed())
+            {
+                task->end();
+                projectFileOperationInProgress = false;
+                setProjectStatus ("Falha ao abrir projeto: " + result.getErrorMessage());
+                return;
+            }
+
+            applyLoadedProject (file, std::move (*data), task);
+        }))
+        {
+            juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado da abertura.");
+        }
+    });
+}
+
+void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData data,
+                                       const std::shared_ptr<TaskScope>& task)
+{
+    projectLoadTask = task;
+    projectLoadWorkDone = 0;
+    projectLoadWorkTotal = data.plugins.size();
+    std::set<std::string> audioPaths;
+    for (const auto& track : data.project.tracks)
+        if (track.type == roll::TrackType::Audio)
+            for (const auto& clip : track.audioClips)
+                audioPaths.insert (clip->filePath);
+    projectLoadWorkTotal += audioPaths.size();
+    task->setProgress (0.25);
 
     transport.stop();
     engine.stopAudioPreview();
@@ -1370,10 +1606,39 @@ void MainComponent::loadProject (const juce::File& file)
     pendingProjectPlugins = std::move (data.plugins);
     loadProjectAudio (data);
     setProjectStatus ("Projeto aberto: " + file.getFileName());
-    if (scanningPlugins)
+    if (scanningPlugins && ! pendingProjectPlugins.empty())
         waitingForProjectPluginScan = true;
     else
         restoreNextProjectPlugin();
+
+    advanceProjectLoadTask();
+}
+
+void MainComponent::advanceProjectLoadTask()
+{
+    if (projectLoadTask == nullptr)
+        return;
+
+    const auto completed = std::min (projectLoadWorkDone, projectLoadWorkTotal);
+    const auto fraction = projectLoadWorkTotal > 0
+        ? static_cast<double> (completed) / static_cast<double> (projectLoadWorkTotal) : 1.0;
+    projectLoadTask->setProgress (0.25 + 0.75 * fraction);
+
+    if (projectLoadWorkDone >= projectLoadWorkTotal && pendingAudioLoads == 0
+        && ! restoringProjectPlugins && ! waitingForProjectPluginScan)
+        finishProjectLoadTask();
+}
+
+void MainComponent::finishProjectLoadTask()
+{
+    if (projectLoadTask != nullptr)
+    {
+        projectLoadTask->setProgress (1.0);
+        projectLoadTask->end();
+        projectLoadTask.reset();
+    }
+    projectFileOperationInProgress = false;
+    projectLoadWorkTotal = projectLoadWorkDone = 0;
 }
 
 void MainComponent::restoreNextProjectPlugin()
@@ -1389,6 +1654,8 @@ void MainComponent::restoreNextProjectPlugin()
         if (description == nullptr)
         {
             ++missingProjectPlugins;
+            ++projectLoadWorkDone;
+            advanceProjectLoadTask();
             continue;
         }
 
@@ -1406,6 +1673,8 @@ void MainComponent::restoreNextProjectPlugin()
                 {
                     ++missingProjectPlugins;
                     setProjectStatus ("Nao foi possivel carregar " + plugin.identifier + ": " + error);
+                    ++projectLoadWorkDone;
+                    advanceProjectLoadTask();
                     restoreNextProjectPlugin();
                     return;
                 }
@@ -1415,6 +1684,8 @@ void MainComponent::restoreNextProjectPlugin()
                 engine.setDeviceBypassed (plugin.trackId, deviceId, plugin.bypassed);
                 loadedProjectPlugins.emplace_back (plugin, deviceId);
                 refreshDeviceView();
+                ++projectLoadWorkDone;
+                advanceProjectLoadTask();
                 restoreNextProjectPlugin();
             }, plugin.order);
         return;
@@ -1434,6 +1705,7 @@ void MainComponent::restoreNextProjectPlugin()
     if (missingProjectPlugins > 0)
         setProjectStatus ("Projeto aberto; " + juce::String (missingProjectPlugins)
                           + " plugin(s) nao encontrados ou nao carregados.");
+    advanceProjectLoadTask();
 }
 
 void MainComponent::loadProjectAudio (const ProjectFileData& data)
@@ -1472,6 +1744,8 @@ void MainComponent::loadProjectAudio (const ProjectFileData& data)
             {
                 setProjectStatus ("Audio ausente ou invalido: " + juce::File (
                     juce::String::fromUTF8 (path.c_str())).getFileName());
+                ++projectLoadWorkDone;
+                advanceProjectLoadTask();
                 return;
             }
 
@@ -1492,6 +1766,8 @@ void MainComponent::loadProjectAudio (const ProjectFileData& data)
                 }
             refreshAudioClipEditor();
             project.sendChangeMessage();
+            ++projectLoadWorkDone;
+            advanceProjectLoadTask();
         });
     }
 }
@@ -1612,6 +1888,33 @@ void MainComponent::timerCallback()
         model.activeLo = lo; model.activeHi = hi;
         editor.repaintKeys();
     }
+    updateActionIndicator();
+}
+
+void MainComponent::startSimulatedTask()
+{
+    if (taskSimulationThread.joinable())
+    {
+        taskSimulationThread.request_stop();
+        taskSimulationThread.join();
+    }
+
+    auto cancelled = std::make_shared<std::atomic<bool>> (false);
+    auto* registry = &taskRegistry;
+    taskSimulationThread = std::jthread ([registry, cancelled] (std::stop_token stopToken)
+    {
+        // A tarefa simulada roda fora da UI e publica apenas progresso no registry.
+        TaskScope task (*registry, theme::ui ("Tarefa simulada"), "global", 0.0, true,
+                        [cancelled] { cancelled->store (true, std::memory_order_relaxed); });
+        constexpr int steps = 30;
+        for (int step = 1; step <= steps; ++step)
+        {
+            std::this_thread::sleep_for (std::chrono::milliseconds (100));
+            if (stopToken.stop_requested() || cancelled->load (std::memory_order_relaxed))
+                break;
+            task.setProgress (static_cast<double> (step) / steps);
+        }
+    });
 }
 
 // ------------------------------------------------------------ dispositivos
@@ -1632,14 +1935,30 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
         for (const auto& d : engine.devices (trackId))
             if (d.isInstrument) windows.erase (d.id);
 
-    const int loadToken = ++nextPluginLoadToken;
-    pendingPluginLoads.emplace (loadToken, desc.name);
-    updateActionIndicator();
-    browser.setStatus ("Carregando " + desc.name + "...");
-    engine.addDevice (trackId, desc, [this, trackId, loadToken] (const juce::String& error, int deviceId)
+    // Use the same slot index that AudioEngine will use when it inserts the plugin.
+    const auto existingDevices = engine.devices (trackId);
+    int pluginSlot = 0;
+    if (! desc.isInstrument)
     {
-        pendingPluginLoads.erase (loadToken);
-        updateActionIndicator();
+        const int firstEffect = ! existingDevices.empty() && existingDevices.front().isInstrument ? 1 : 0;
+        pluginSlot = insertionIndex < 0
+            ? static_cast<int> (existingDevices.size())
+            : std::clamp (insertionIndex, firstEffect, static_cast<int> (existingDevices.size()));
+    }
+
+    const auto target = "track:" + juce::String (trackId) + ":plugin:" + juce::String (pluginSlot);
+    // Keep the scope alive in the async callback so every success/error path ends the task.
+    auto pluginTask = std::make_shared<TaskScope> (
+        taskRegistry, theme::ui ("Carregando ") + desc.name, target);
+    browser.setStatus ("Carregando " + desc.name + "...");
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    engine.addDevice (trackId, desc,
+        [this, token, pluginTask, trackId] (const juce::String& error, int deviceId)
+    {
+        const auto alive = token.lock();
+        if (alive == nullptr || ! alive->load())
+            return;
+
         if (error.isNotEmpty())
         {
             browser.setStatus ("Erro: " + error);
@@ -1662,18 +1981,15 @@ void MainComponent::updateActionIndicator()
         const auto text = pendingAudioLoads == 1
             ? "Carregando audio..."
             : "Carregando " + juce::String (pendingAudioLoads) + " arquivos de audio...";
-        actionIndicator->showMessage (text);
+        actionIndicator->showMessage (text, icons::Icon::Waveform, true);
     }
-    else if (! pendingPluginLoads.empty())
+    else if (pendingPreviewLoads > 0)
     {
-        const auto text = pendingPluginLoads.size() == 1
-            ? "Carregando " + pendingPluginLoads.begin()->second + "..."
-            : "Carregando " + juce::String (static_cast<int> (pendingPluginLoads.size())) + " plugins...";
-        actionIndicator->showMessage (text);
+        actionIndicator->showMessage ("Carregando preview de audio...", icons::Icon::Waveform, true);
     }
-    else if (scanningPlugins)
+    else if (restoringProjectPlugins)
     {
-        actionIndicator->showMessage (scanMessage.isNotEmpty() ? scanMessage : "Verificando plugins...");
+        actionIndicator->showMessage ("Restaurando plugins do projeto...", icons::Icon::Mixer, true);
     }
     else
     {
@@ -1715,8 +2031,9 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 occupiedWindows.push_back ({ bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight() });
             }
         }
-        windows[deviceId] = std::make_unique<PluginWindow> (
+        auto window = std::make_unique<PluginWindow> (
             title, std::move (ed), displayArea, nextPluginCascadeIndex++, occupiedWindows);
+        windows[deviceId] = std::move (window);
         windows[deviceId]->toFront (true);
     }
     else

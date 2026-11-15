@@ -1,4 +1,5 @@
 #include "PianoRollEditor.h"
+#include "ZoomCursor.h"
 #include <algorithm>
 #include <cmath>
 
@@ -668,7 +669,7 @@ void KeyColumn::paint (juce::Graphics& g)
         if (model.scaleOn && model.highlight && model.scale.contains (pitch))
         {
             g.setColour (theme::accent().withAlpha (0.55f));
-            g.fillRect (getWidth() - 5, y, 5, model.rowHeight - 1);
+            g.fillRect (getWidth() - zoomStripWidth - 5, y, 5, model.rowHeight - 1);
         }
 
         const float fontSize = std::min (11.0f, std::max (7.0f, static_cast<float> (model.rowHeight - 1)));
@@ -676,9 +677,15 @@ void KeyColumn::paint (juce::Graphics& g)
                          : black ? theme::textDim() : juce::Colour (0xff4a5058));
         g.setFont (juce::FontOptions (fontSize, pitch % 12 == 0 ? juce::Font::bold : juce::Font::plain));
         g.drawFittedText (pitchName (pitch, model.noteSpelling, model.scale.root(), model.scaleOn),
-                          juce::Rectangle<int> (4, y, getWidth() - 10, model.rowHeight),
+                          juce::Rectangle<int> (4, y, getWidth() - zoomStripWidth - 10, model.rowHeight),
                           juce::Justification::centredRight, 1);
     }
+
+    g.setColour (theme::accent().withAlpha (zoomHovered ? 0.28f : 0.10f));
+    g.fillRect (getWidth() - zoomStripWidth, clipBox.getY(), zoomStripWidth, clipBox.getHeight());
+    g.setColour (theme::border());
+    g.drawVerticalLine (getWidth() - zoomStripWidth, static_cast<float> (clipBox.getY()),
+                        static_cast<float> (clipBox.getBottom()));
 }
 
 void KeyColumn::setPitch (int pitch)
@@ -691,9 +698,73 @@ void KeyColumn::setPitch (int pitch)
     repaint();
 }
 
-void KeyColumn::mouseDown (const juce::MouseEvent& e) { setPitch (model.rowToPitch (e.y / model.rowHeight)); }
-void KeyColumn::mouseDrag (const juce::MouseEvent& e) { setPitch (model.rowToPitch (e.y / model.rowHeight)); }
-void KeyColumn::mouseUp (const juce::MouseEvent&)     { setPitch (-1); }
+bool KeyColumn::isZoomRegion (juce::Point<float> position) const
+{
+    return position.x >= getWidth() - zoomStripWidth;
+}
+
+void KeyColumn::mouseDown (const juce::MouseEvent& e)
+{
+    if (isZoomRegion (e.position))
+    {
+        zoomDragging = true;
+        zoomStartScreenPosition = e.getScreenPosition();
+        if (onZoomStart)
+            onZoomStart (zoomStartScreenPosition.y);
+        setMouseCursor (ui::zoomCursor());
+        return;
+    }
+
+    setPitch (model.rowToPitch (e.y / model.rowHeight));
+}
+
+void KeyColumn::mouseMove (const juce::MouseEvent& e)
+{
+    const bool hovering = isZoomRegion (e.position);
+    if (zoomHovered != hovering)
+    {
+        zoomHovered = hovering;
+        repaint (getWidth() - zoomStripWidth, 0, zoomStripWidth, getHeight());
+    }
+    setMouseCursor (hovering ? ui::zoomCursor() : juce::MouseCursor::NormalCursor);
+}
+
+void KeyColumn::mouseExit (const juce::MouseEvent&)
+{
+    zoomHovered = false;
+    repaint (getWidth() - zoomStripWidth, 0, zoomStripWidth, getHeight());
+    if (! zoomDragging)
+        setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
+void KeyColumn::mouseDrag (const juce::MouseEvent& e)
+{
+    if (zoomDragging)
+    {
+        if (onZoomDrag)
+        {
+            const auto screenPosition = e.getScreenPosition();
+            onZoomDrag (static_cast<float> (screenPosition.x - zoomStartScreenPosition.x),
+                        static_cast<float> (screenPosition.y - zoomStartScreenPosition.y),
+                        screenPosition.y);
+        }
+        return;
+    }
+
+    setPitch (model.rowToPitch (e.y / model.rowHeight));
+}
+
+void KeyColumn::mouseUp (const juce::MouseEvent& e)
+{
+    if (zoomDragging)
+    {
+        zoomDragging = false;
+        mouseMove (e);
+        return;
+    }
+
+    setPitch (-1);
+}
 
 // ============================================================ RulerBar
 
@@ -880,6 +951,44 @@ PianoRollEditor::PianoRollEditor (RollModel& m) : model (m)
     ruler.onZoom = [this] (double factor) { zoomHorizontal (factor); };
     grid.onZoomHorizontal = [this] (double factor) { zoomHorizontal (factor); };
     grid.onFocusChange = [this] { repaint(); };
+    keys.onZoomStart = [this] (int screenY)
+    {
+        noteRulerStartRowHeight = model.rowHeight;
+        noteRulerStartViewY = viewport.getViewPositionY();
+        noteRulerAnchorScreenY = screenY - viewport.localPointToGlobal (juce::Point<int> { 0, 0 }).y;
+        if (! model.rows().empty())
+        {
+            const int row = std::clamp ((noteRulerStartViewY + noteRulerAnchorScreenY)
+                                        / noteRulerStartRowHeight,
+                                        0, static_cast<int> (model.rows().size()) - 1);
+            noteRulerAnchorPitch = model.rowToPitch (row);
+        }
+    };
+    keys.onZoomDrag = [this] (float dx, float dy, int)
+    {
+        if (model.rows().empty())
+            return;
+
+        const int rowHeight = std::clamp (
+            noteRulerStartRowHeight + static_cast<int> (std::lround (dx * 0.12f)), 8, 32);
+        const int anchorRow = model.pitchToRow (noteRulerAnchorPitch);
+        const int targetViewY = anchorRow >= 0
+            ? anchorRow * rowHeight - noteRulerAnchorScreenY - static_cast<int> (std::lround (dy))
+            : noteRulerStartViewY - static_cast<int> (std::lround (dy));
+        const bool changed = model.rowHeight != rowHeight;
+
+        if (changed)
+        {
+            model.rowHeight = rowHeight;
+            grid.updateSize();
+        }
+        viewport.setViewPosition (viewport.getViewPositionX(), std::max (0, targetViewY));
+        syncPositions();
+        keys.repaint();
+        grid.repaint();
+        if (changed)
+            model.sendChangeMessage();
+    };
 
     grid.updateSize();
     model.addChangeListener (this);

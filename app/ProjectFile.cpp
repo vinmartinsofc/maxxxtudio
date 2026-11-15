@@ -1,4 +1,5 @@
 #include "ProjectFile.h"
+#include <algorithm>
 #include <cmath>
 #include <map>
 #include <set>
@@ -11,10 +12,86 @@ juce::String stringFromUtf8 (const std::string& value)
     return juce::String::fromUTF8 (value.c_str());
 }
 
+class ProgressReporter
+{
+public:
+    ProgressReporter (ProjectFile::ProgressCallback callback, std::size_t total)
+        : update (std::move (callback)), totalWork (std::max<std::size_t> (1, total))
+    {
+        report (0.0);
+    }
+
+    void completeUnit()
+    {
+        ++completedWork;
+        const auto progress = static_cast<double> (completedWork) / static_cast<double> (totalWork);
+        if (progress - lastReported >= 0.01 || completedWork >= totalWork)
+            report (std::min (1.0, progress));
+    }
+
+private:
+    void report (double progress)
+    {
+        lastReported = progress;
+        if (update)
+            update (progress);
+    }
+
+    ProjectFile::ProgressCallback update;
+    std::size_t totalWork = 1, completedWork = 0;
+    double lastReported = -1.0;
+};
+
+std::size_t trackWorkUnits (const roll::Track& track)
+{
+    std::size_t count = 1;
+    for (const auto& clip : track.clips)
+        count += 1 + clip->clip.notes().size();
+    count += track.audioClips.size();
+    return count;
+}
+
+std::size_t xmlWorkUnits (const juce::XmlElement& xml)
+{
+    std::size_t count = 1;
+    if (const auto* tracks = xml.getChildByName ("Tracks"))
+    {
+        for (auto* track = tracks->getFirstChildElement(); track != nullptr; track = track->getNextElement())
+        {
+            if (! track->hasTagName ("Track"))
+                continue;
+            ++count;
+            for (auto* child = track->getFirstChildElement(); child != nullptr; child = child->getNextElement())
+            {
+                if (child->hasTagName ("MidiClip"))
+                {
+                    ++count;
+                    for (auto* note = child->getFirstChildElement(); note != nullptr; note = note->getNextElement())
+                        if (note->hasTagName ("Note"))
+                            ++count;
+                }
+                else if (child->hasTagName ("AudioClip"))
+                {
+                    ++count;
+                }
+            }
+        }
+    }
+    if (const auto* locators = xml.getChildByName ("Locators"))
+        for (auto* node = locators->getFirstChildElement(); node != nullptr; node = node->getNextElement())
+            if (node->hasTagName ("Locator"))
+                ++count;
+    if (const auto* plugins = xml.getChildByName ("Plugins"))
+        for (auto* node = plugins->getFirstChildElement(); node != nullptr; node = node->getNextElement())
+            if (node->hasTagName ("Plugin"))
+                ++count;
+    return count;
+}
+
 void writeTrack (juce::XmlElement& parent, const roll::Track& track,
                  const juce::File& projectFolder, const juce::File& assetFolder,
                  std::map<std::string, juce::String>& copiedAssets,
-                 std::set<std::string>& assetNames)
+                 std::set<std::string>& assetNames, ProgressReporter& progress)
 {
     auto* node = parent.createNewChildElement ("Track");
     node->setAttribute ("id", track.id);
@@ -43,7 +120,9 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
             noteNode->setAttribute ("length", note.lengthBeats);
             noteNode->setAttribute ("velocity", note.velocity);
             noteNode->setAttribute ("muted", note.muted);
+            progress.completeUnit();
         }
+        progress.completeUnit();
     }
 
     for (const auto& clip : track.audioClips)
@@ -85,7 +164,9 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
         audioNode->setAttribute ("warpEnabled", clip->warpEnabled);
         audioNode->setAttribute ("name", stringFromUtf8 (clip->name));
         audioNode->setAttribute ("file", asset->second);
+        progress.completeUnit();
     }
+    progress.completeUnit();
 }
 
 bool validNumber (double value)
@@ -95,7 +176,7 @@ bool validNumber (double value)
 
 bool readTrack (const juce::XmlElement& node, roll::Track& track,
                 const juce::File& projectFolder, std::set<int>& trackIds,
-                std::vector<juce::File>& missingAudioFiles)
+                std::vector<juce::File>& missingAudioFiles, ProgressReporter& progress)
 {
     track.id = node.getIntAttribute ("id", -1);
     const auto type = node.getStringAttribute ("type");
@@ -152,8 +233,10 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
                     || note.velocity < 1 || note.velocity > 127)
                     return false;
                 notes.push_back (note);
+                progress.completeUnit();
             }
             clip->clip.setNotes (std::move (notes));
+            progress.completeUnit();
         }
         else if (child->hasTagName ("AudioClip"))
         {
@@ -197,14 +280,16 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
             clip->warpEnabled = child->getBoolAttribute ("warpEnabled", true);
             if (! source.existsAsFile())
                 missingAudioFiles.push_back (source);
+            progress.completeUnit();
         }
     }
+    progress.completeUnit();
     return true;
 }
 }
 
-juce::Result ProjectFile::save (const juce::File& file, const ProjectModel& project,
-                                AudioEngine& engine, double transportPosition)
+juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& data,
+                                ProgressCallback onProgress)
 {
     try
     {
@@ -217,14 +302,20 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectModel& proj
         if (! assetFolder.createDirectory())
             return juce::Result::fail ("Unable to create the project audio folder.");
 
-        auto state = project.createState();
+        const auto& state = data.project;
+        std::size_t totalWork = 1 + trackWorkUnits (state.master) + state.locators.size();
+        for (const auto& track : state.tracks)
+            totalWork += trackWorkUnits (track);
+        totalWork += data.plugins.size();
+        ProgressReporter progress (std::move (onProgress), totalWork);
+
         auto xml = std::make_unique<juce::XmlElement> ("ProjectFreedom");
         xml->setAttribute ("version", 1);
-        xml->setAttribute ("bpm", engine.graph().getBpm());
-        xml->setAttribute ("transportPosition", transportPosition);
-        xml->setAttribute ("loopEnabled", engine.graph().isLoop());
-        xml->setAttribute ("metronomeEnabled", engine.graph().isMetronomeEnabled());
-        xml->setAttribute ("metronomeGain", engine.graph().getMetronomeGain());
+        xml->setAttribute ("bpm", data.bpm);
+        xml->setAttribute ("transportPosition", data.transportPosition);
+        xml->setAttribute ("loopEnabled", data.loopEnabled);
+        xml->setAttribute ("metronomeEnabled", data.metronomeEnabled);
+        xml->setAttribute ("metronomeGain", data.metronomeGain);
         xml->setAttribute ("loopStart", state.loopStart);
         xml->setAttribute ("loopEnd", state.loopEnd);
         xml->setAttribute ("totalBeats", state.totalBeats);
@@ -237,9 +328,9 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectModel& proj
         auto* tracksNode = xml->createNewChildElement ("Tracks");
         std::map<std::string, juce::String> copiedAssets;
         std::set<std::string> assetNames;
-        writeTrack (*tracksNode, state.master, projectFolder, assetFolder, copiedAssets, assetNames);
+        writeTrack (*tracksNode, state.master, projectFolder, assetFolder, copiedAssets, assetNames, progress);
         for (const auto& track : state.tracks)
-            writeTrack (*tracksNode, track, projectFolder, assetFolder, copiedAssets, assetNames);
+            writeTrack (*tracksNode, track, projectFolder, assetFolder, copiedAssets, assetNames, progress);
 
         auto* locatorsNode = xml->createNewChildElement ("Locators");
         for (const auto& marker : state.locators)
@@ -249,10 +340,11 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectModel& proj
             node->setAttribute ("beat", marker.beat);
             node->setAttribute ("name", stringFromUtf8 (marker.name));
             node->setAttribute ("info", stringFromUtf8 (marker.info));
+            progress.completeUnit();
         }
 
         auto* pluginsNode = xml->createNewChildElement ("Plugins");
-        for (const auto& plugin : engine.getPluginStates())
+        for (const auto& plugin : data.plugins)
         {
             auto* pluginNode = pluginsNode->createNewChildElement ("Plugin");
             pluginNode->setAttribute ("trackId", plugin.trackId);
@@ -261,10 +353,12 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectModel& proj
             pluginNode->setAttribute ("bypassed", plugin.bypassed);
             pluginNode->setAttribute ("groupId", plugin.groupId);
             pluginNode->setAttribute ("state", plugin.state.toBase64Encoding());
+            progress.completeUnit();
         }
 
         if (! xml->writeTo (file))
             return juce::Result::fail ("Unable to write the project file.");
+        progress.completeUnit();
         return juce::Result::ok();
     }
     catch (const std::exception& e)
@@ -273,8 +367,11 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectModel& proj
     }
 }
 
-juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data)
+juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
+                                ProgressCallback onProgress)
 {
+    if (onProgress)
+        onProgress (-1.0);
     const auto xml = juce::XmlDocument::parse (file);
     if (xml == nullptr || ! xml->hasTagName ("ProjectFreedom")
         || xml->getIntAttribute ("version", 0) != 1)
@@ -305,6 +402,8 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data)
     auto* tracksNode = xml->getChildByName ("Tracks");
     if (tracksNode == nullptr)
         return juce::Result::fail ("The project has no tracks.");
+    ProgressReporter progress (std::move (onProgress), xmlWorkUnits (*xml));
+    progress.completeUnit();
     std::set<int> trackIds;
     bool foundMaster = false;
     for (auto* node = tracksNode->getFirstChildElement(); node != nullptr; node = node->getNextElement())
@@ -312,7 +411,8 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data)
         if (! node->hasTagName ("Track"))
             continue;
         roll::Track track;
-        if (! readTrack (*node, track, file.getParentDirectory(), trackIds, loaded.missingAudioFiles))
+        if (! readTrack (*node, track, file.getParentDirectory(), trackIds,
+                         loaded.missingAudioFiles, progress))
             return juce::Result::fail ("A track or clip contains invalid data.");
         if (track.id == AudioEngine::masterTrackId)
         {
@@ -343,6 +443,7 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data)
                 || ! validNumber (marker.beat) || marker.beat < 0.0)
                 return juce::Result::fail ("A locator contains invalid data.");
             loaded.project.locators.push_back (std::move (marker));
+            progress.completeUnit();
         }
     }
     const auto hasLocator = [&locatorIds] (int id) { return id == -1 || locatorIds.contains (id); };
@@ -367,6 +468,7 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data)
                 || (encodedState.isNotEmpty() && ! plugin.state.fromBase64Encoding (encodedState)))
                 return juce::Result::fail ("A plugin state contains invalid data.");
             loaded.plugins.push_back (std::move (plugin));
+            progress.completeUnit();
         }
     }
 

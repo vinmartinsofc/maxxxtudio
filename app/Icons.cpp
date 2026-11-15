@@ -12,12 +12,13 @@ namespace icons
 {
 namespace
 {
-constexpr std::array<const char*, 24> resourceNames
+constexpr std::array<const char*, 27> resourceNames
 {
     "play_svg", "pause_svg", "stop_svg", "record_svg", "rewind_svg", "fastforward_svg",
     "loop_svg", "metronome_svg", "pointer_svg", "pencil_svg", "eraser_svg", "cut_svg",
     "copy_svg", "move_svg", "selectregion_svg", "split_svg", "mixer_svg", "volume_svg",
-    "mute_svg", "pan_svg", "levelmeter_svg", "automation_svg", "keyboard_svg", "waveform_svg"
+    "mute_svg", "pan_svg", "levelmeter_svg", "automation_svg", "keyboard_svg", "waveform_svg",
+    "fadein_svg", "fadeout_svg", "resize_svg"
 };
 
 using CacheKey = std::tuple<Icon, std::uint32_t, int>;

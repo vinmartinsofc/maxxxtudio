@@ -2,6 +2,7 @@
 
 #include "AudioEngine.h"
 #include "ProjectModel.h"
+#include <functional>
 
 struct ProjectFileData
 {
@@ -18,7 +19,10 @@ struct ProjectFileData
 class ProjectFile
 {
 public:
-    static juce::Result save (const juce::File&, const ProjectModel&, AudioEngine&,
-                              double transportPosition);
-    static juce::Result load (const juce::File&, ProjectFileData&);
+    using ProgressCallback = std::function<void (double)>;
+
+    static juce::Result save (const juce::File&, const ProjectFileData&,
+                              ProgressCallback = {});
+    static juce::Result load (const juce::File&, ProjectFileData&,
+                              ProgressCallback = {});
 };

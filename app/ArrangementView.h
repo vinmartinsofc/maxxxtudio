@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "Icons.h"
 #include "ProjectModel.h"
 #include "Theme.h"
 #include <functional>
@@ -28,6 +29,7 @@ public:
     std::function<void (bool)> onLoopToggleRequested;
     std::function<void (double beats)> onLocatorLaunchRequested;
     std::function<void (double beats)> onArrangementSeekRequested;
+    std::function<void (const juce::String&, icons::Icon, bool active, int holdMilliseconds)> onInteractionChanged;
 
     void setPlayhead (double beats);
     void setLoopEnabled (bool on);

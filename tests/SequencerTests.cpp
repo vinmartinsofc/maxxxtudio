@@ -9,7 +9,7 @@ namespace
 {
 struct Abs { long long sample; bool on; int pitch; };
 
-// Relógio + sequenciador em blocos de 512; devolve eventos com tempo absoluto em amostras.
+// Relogio + sequenciador em blocos de 512; devolve eventos com tempo absoluto em amostras.
 std::vector<Abs> run(Sequencer& s, TransportClock& clock, const std::vector<Note>& notes,
                      const TransportSettings& t, double sr, long long totalSamples, int block = 512)
 {
@@ -28,27 +28,27 @@ std::vector<Abs> run(Sequencer& s, TransportClock& clock, const std::vector<Note
 bool near(long long a, long long b, long long tol = 2) { return std::llabs(a - b) <= tol; }
 }
 
-TEST_CASE("Nota toca e para nos instantes certos (120 BPM, 44.1k)")
+TEST_CASE("Note turns on and off at the correct instants (120 BPM, 44.1k)")
 {
     Sequencer s; TransportClock c;
     TransportSettings t; t.loop = false;
-    std::vector<Note> notes { { 60, 1.0, 1.0, 100 } };      // beat 1 a 2
+    std::vector<Note> notes { { 60, 1.0, 1.0, 100 } };      // beat 1 to 2
 
     auto ev = run(s, c, notes, t, 44100.0, 66150);           // 3 beats = 1.5 s
     REQUIRE(ev.size() == 2);
     REQUIRE(ev[0].on);
-    REQUIRE(near(ev[0].sample, 22050));                     // 1 beat = 22050 amostras
+    REQUIRE(near(ev[0].sample, 22050));                     // 1 beat = 22050 samples
     REQUIRE_FALSE(ev[1].on);
     REQUIRE(near(ev[1].sample, 44100));
 }
 
-TEST_CASE("Loop corta a nota no fim e dispara de novo na volta")
+TEST_CASE("Loop cuts a note at the end and retriggers on the wrap")
 {
     Sequencer s; TransportClock c;
     TransportSettings t; t.loop = true; t.loopStart = 0.0; t.loopEnd = 4.0;
-    std::vector<Note> notes { { 62, 3.0, 2.0, 100 } };       // passa do fim do loop
+    std::vector<Note> notes { { 62, 3.0, 2.0, 100 } };       // crosses the loop end
 
-    auto ev = run(s, c, notes, t, 44100.0, 176400 + 4096);   // 4 beats = 88200 amostras
+    auto ev = run(s, c, notes, t, 44100.0, 176400 + 4096);   // 4 beats = 88200 samples
     int ons = 0, offs = 0;
     for (auto& e : ev) { e.on ? ++ons : ++offs; }
     REQUIRE(ons == 2);
@@ -56,7 +56,7 @@ TEST_CASE("Loop corta a nota no fim e dispara de novo na volta")
     for (auto& e : ev) if (!e.on) { REQUIRE(near(e.sample, 88200, 600)); break; }
 }
 
-TEST_CASE("Duas trilhas compartilham o mesmo relogio e ficam sincronizadas")
+TEST_CASE("Two tracks share the same clock and stay synchronized")
 {
     Sequencer s1, s2; TransportClock c;
     TransportSettings t; t.loop = false;
@@ -79,7 +79,7 @@ TEST_CASE("Duas trilhas compartilham o mesmo relogio e ficam sincronizadas")
     REQUIRE(first1 == first2);
 }
 
-TEST_CASE("flush solta todas as notas ativas")
+TEST_CASE("flush releases all active notes")
 {
     Sequencer s; TransportClock c;
     TransportSettings t; t.loop = false;
@@ -98,7 +98,7 @@ TEST_CASE("flush solta todas as notas ativas")
     REQUIRE_FALSE(s.hasActiveNotes());
 }
 
-TEST_CASE("Nota desativada nao toca")
+TEST_CASE("Muted note does not play")
 {
     Sequencer s; TransportClock c;
     TransportSettings t; t.loop = false;

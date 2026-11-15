@@ -29,7 +29,10 @@ enum class Icon
     LevelMeter,
     Automation,
     Keyboard,
-    Waveform
+    Waveform,
+    FadeIn,
+    FadeOut,
+    Resize
 };
 
 const juce::Drawable* get (Icon icon, juce::Colour colour, int size = 24);

@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.3 (corresponde ao código do *Marco 3*; inclui a trilha visual V)
+- **Versão do documento:** 1.8 (gestos de zoom/navegação e sessões `.pfs`)
 - **⚠️ Ordem de trabalho vigente:** `PLANO_DE_ACAO_FASE_4.md` (feedback do Marco 3: correções críticas, layout, groove, automação, áudio). **Em caso de conflito com o §14 deste documento, vale o plano.**
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -191,6 +191,7 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Exportação | MIDI / áudio (render) | ⬜ |
 | Config. | Seleção de dispositivo de áudio, buffer, taxa de amostragem | ⬜ (usa o padrão do sistema) |
 | Acessibilidade | Anel de foco, F6 alterna painéis, setas selecionam trilha | 🟡 parcial |
+| Tarefas em background | `TaskRegistry`/`TaskScope`, indicador por target e barra global; carregamento por faixa; scan com progresso/cancelamento; progresso ao abrir/salvar projetos | ✅ etapas a–b e d / 🟡 etapa c (falta QA com plugins reais) |
 
 ---
 
@@ -224,9 +225,11 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 
 | Thread | O que roda | Regras |
 |---|---|---|
-| **Message thread** (UI) | Toda a UI, `ProjectModel`, `RollModel`, `AudioEngine` (API pública), criação/remoção de nós do grafo | Pode alocar e bloquear brevemente |
+| **Message thread** (UI) | Toda a UI, estado/listeners do `TaskRegistry`, `ProjectModel`, `RollModel`, `AudioEngine` (API pública), criação/remoção de nós do grafo | Pode alocar e bloquear brevemente |
 | **Thread de áudio** | `SequencerGraph::processBlock` → `TrackSource::processBlock` → plugins → `TrackMixer::processBlock` | **Tempo real** (§10) |
 | **Thread de scan** | `PluginScanner::run` | Comunica com a UI via `MessageManager::callAsync` + flag `alive` |
+| **Workers de tarefas** | Operações demoradas fora da UI | Atualizam o registry, que encaminha mutações/listeners à message thread; nunca usar no áudio |
+| **Worker de arquivos de projeto** | Parse e serialização XML/cópia de samples | Um worker; snapshot e aplicação do projeto ficam na message thread; encerrado antes do `TaskRegistry` |
 
 ### 5.3 Fluxo de dados das notas (UI → áudio)
 
@@ -312,6 +315,9 @@ TrackSource(MIDI) ──midi──► [instrumento] ──audio──► [efeito
 - `DeviceView`: caixas de dispositivos com Abrir/remover.
 - `TransportBar`: `IconButton` desenhado à mão (sem fontes/emoji); posição em "compasso . beat . 16avo".
 - `MainComponent`: monta tudo; atalhos globais; divisor arrastável entre arranjo e detalhe; abas Clip/Dispositivos; mapeia posição global ↔ local do clip.
+- `TaskRegistry`/`TaskScope`: tarefas identificadas por target, progresso opcional, cancelamento e fim RAII; a coleção/listeners são exclusivos da message thread. `ActivityIndicator` e `TaskStatusBar` observam o registry sem conhecer a operação.
+- `DeviceView`: observa targets de plugin da faixa visível e posiciona o indicador no slot de inserção; `MainComponent` registra o carregamento assíncrono do plugin.
+- No Debug, `Ctrl+Alt+F10` inicia uma tarefa simulada cancelável para conferir visualmente a barra e o indicador.
 
 ---
 
@@ -663,6 +669,11 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.6 / Etapa c** | Escaneamento VST3 em `ThreadPool`, progresso no registry, cancelamento e encerramento seguro do worker |
+| **Doc 1.7 / Etapa d** | Parse/serialização de projeto no worker, progresso global e tarefa mantida até restaurar áudio/plugins |
+| **Doc 1.8** | Zoom e navegação por arrasto nas réguas do Arrangement e Piano Roll; sessões salvas como `.pfs`, com leitura legada de `.freedom` |
+| **Doc 1.5 / Etapa b** | Carregamento assíncrono de plugin usa `TaskScope` e mostra indicador no slot da faixa; `DeviceView` dá cursor de cópia durante o drag |
+| **Doc 1.4 / Etapa a** | `TaskRegistry`/`TaskScope`, indicadores por target, barra global cancelável e simulação em worker; gestos de edição não geram avisos centrais |
 | **Marco 1** | Host VST3 mínimo + piano roll básico + modo escala; núcleo com testes |
 | **Marco 2** | Transporte (play/pause/stop/loop/BPM), clip tocando no plugin, scanner automático de VST3, navegador, atalhos do Live (copiar/colar, marcador de inserção, tripleto, K, etc.), regra de sobreposição de notas |
 | **Doc 1.3** | Recebidas as 3 imagens de referência do Live; **DEC-4 revisada** (plugins agrupados por **pasta**, não por fabricante), menu de contexto do piano roll especificado (F1.8), Pitch Lock no modo desenho, estrutura do navegador (Collections/Categories/Places) — tudo no plano, seção 13 |
@@ -730,6 +741,7 @@ rolldaw/                      (raiz do repositório; renomear para project-freed
 | Ícones principais | Cinza-claro | `#E6E6E6` | 9,7:1 | 11,4:1 |
 | Texto secundário | Cinza médio | `#A5A7A8` | 5,0:1 | 5,9:1 |
 | Reprodução/ativo | Azul | `#66A3FF` | 4,8:1 | 5,6:1 |
+| Tarefa em background | Verde | `#55C982` | — (indicador, não texto) | — (indicador, não texto) |
 | Gravação | Vermelho | `#E85B5B` | **3,5:1** | 4,1:1 |
 | Alertas | Amarelo | `#F2BD50` | 7,0:1 | 8,2:1 |
 

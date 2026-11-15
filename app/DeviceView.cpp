@@ -293,11 +293,16 @@ private:
                      moveRightButton { ">" }, removeButton { "x" }, foldButton { "-" };
 };
 
-DeviceView::DeviceView()
+DeviceView::DeviceView (TaskRegistry& taskRegistry) : registry (taskRegistry)
 {
     setWantsKeyboardFocus (true);
+    registry.addListener (*this);
 }
-DeviceView::~DeviceView() = default;
+
+DeviceView::~DeviceView()
+{
+    registry.removeListener (*this);
+}
 
 bool DeviceView::keyPressed (const juce::KeyPress& key)
 {
@@ -328,16 +333,19 @@ bool DeviceView::isInterestedInDragSource (const SourceDetails& details)
 
 void DeviceView::itemDragEnter (const SourceDetails& details)
 {
+    setMouseCursor (juce::MouseCursor::CopyingCursor);
     updatePluginDrop (details);
 }
 
 void DeviceView::itemDragMove (const SourceDetails& details)
 {
+    setMouseCursor (juce::MouseCursor::CopyingCursor);
     updatePluginDrop (details);
 }
 
 void DeviceView::itemDragExit (const SourceDetails&)
 {
+    setMouseCursor (juce::MouseCursor::NormalCursor);
     pluginDragOver = false;
     pluginDropIndex = -1;
     repaint();
@@ -349,6 +357,7 @@ void DeviceView::itemDropped (const SourceDetails& details)
     const int insertionIndex = insertionIndexAt (details.localPosition.x);
     const int targetTrackId = trackId;
     auto callback = onPluginDropped;
+    setMouseCursor (juce::MouseCursor::NormalCursor);
     pluginDragOver = false;
     pluginDropIndex = -1;
     repaint();
@@ -447,8 +456,101 @@ void DeviceView::setDevices (int id, const juce::String& name, const std::vector
         boxes.push_back (std::make_unique<Box> (devices[i], *this, canMoveLeft, canMoveRight));
         addAndMakeVisible (*boxes.back());
     }
+    refreshLoadingIndicators();
+    repaint();
+}
+
+void DeviceView::taskRegistryChanged()
+{
+    refreshLoadingIndicators();
+}
+
+void DeviceView::refreshLoadingIndicators()
+{
+    std::set<std::string> activeTargets;
+    if (trackId >= 0)
+    {
+        const auto prefix = "track:" + juce::String (trackId) + ":plugin";
+        for (const auto& task : registry.tasksForTarget (prefix))
+        {
+            // O sufixo do target identifica o slot que recebera o plugin.
+            if (! task.target.startsWith (prefix + ":"))
+                continue;
+
+            const auto slotText = task.target.substring (prefix.length() + 1);
+            const int slot = slotText.getIntValue();
+            if (slot < 0 || juce::String (slot) != slotText)
+                continue;
+
+            const auto key = task.target.toStdString();
+            activeTargets.insert (key);
+            auto [indicator, inserted] = loadingIndicators.try_emplace (key);
+            if (inserted)
+                indicator->second.indicator = std::make_unique<ActivityIndicator> (registry, task.target);
+
+            indicator->second.slot = slot;
+            if (indicator->second.indicator->getParentComponent() != this)
+                addChildComponent (*indicator->second.indicator);
+        }
+    }
+
+    for (auto indicator = loadingIndicators.begin(); indicator != loadingIndicators.end();)
+    {
+        if (! activeTargets.contains (indicator->first))
+        {
+            removeChildComponent (indicator->second.indicator.get());
+            indicator = loadingIndicators.erase (indicator);
+        }
+        else
+        {
+            ++indicator;
+        }
+    }
+
     resized();
     repaint();
+}
+
+void DeviceView::positionLoadingIndicators()
+{
+    for (auto& [target, loading] : loadingIndicators)
+    {
+        juce::ignoreUnused (target);
+        juce::Component* anchor = nullptr;
+
+        if (loading.slot >= 0 && loading.slot < static_cast<int> (boxes.size()))
+        {
+            auto* candidate = boxes[static_cast<std::size_t> (loading.slot)].get();
+            if (candidate->isVisible())
+            {
+                anchor = candidate;
+            }
+            else if (candidate->groupId() > 0)
+            {
+                for (std::size_t index = 0; index <= static_cast<std::size_t> (loading.slot); ++index)
+                    if (boxes[index]->groupId() == candidate->groupId())
+                    {
+                        anchor = boxes[index].get();
+                        break;
+                    }
+            }
+        }
+
+        if (anchor != nullptr)
+        {
+            loading.indicator->setBounds (anchor->getX() + anchor->getWidth() - 28,
+                                          anchor->getY() + 4, 24, 24);
+        }
+        else
+        {
+            int right = 8;
+            for (const auto& box : boxes)
+                if (box->isVisible())
+                    right = std::max (right, box->getRight() + 6);
+            const int x = std::min (right, std::max (8, getWidth() - 30));
+            loading.indicator->setBounds (x, 8, 24, 24);
+        }
+    }
 }
 
 void DeviceView::paint (juce::Graphics& g)
@@ -582,6 +684,8 @@ void DeviceView::resized()
         }
         i = last + 1;
     }
+
+    positionLoadingIndicators();
 }
 
 void DeviceView::selectDevice (const DeviceInfo& device, juce::ModifierKeys modifiers)

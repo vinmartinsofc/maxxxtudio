@@ -1,4 +1,12 @@
 #include "PluginScanner.h"
+#include "TaskRegistry.h"
+#include <algorithm>
+#include <cmath>
+
+struct PluginScanner::ScanState
+{
+    std::atomic<bool> cancelled { false };
+};
 
 juce::File PluginScanner::dataDirectory()
 {
@@ -7,8 +15,8 @@ juce::File PluginScanner::dataDirectory()
     return dir;
 }
 
-PluginScanner::PluginScanner (juce::AudioPluginFormatManager& fm)
-    : juce::Thread ("Plugin scanner"), formatManager (fm)
+PluginScanner::PluginScanner (juce::AudioPluginFormatManager& fm, TaskRegistry& tasks)
+    : formatManager (fm), taskRegistry (tasks)
 {
     if (auto xml = juce::XmlDocument::parse (dataDirectory().getChildFile ("plugins.xml")))
         knownList.recreateFromXml (*xml);
@@ -16,8 +24,8 @@ PluginScanner::PluginScanner (juce::AudioPluginFormatManager& fm)
 
 PluginScanner::~PluginScanner()
 {
-    *alive = false;
-    stopThread (8000);
+    stopScan();
+    alive->store (false, std::memory_order_release);
 }
 
 std::vector<juce::File> PluginScanner::searchRoots() const
@@ -34,8 +42,47 @@ std::vector<juce::File> PluginScanner::searchRoots() const
 
 void PluginScanner::startScan()
 {
-    if (! isThreadRunning())
-        startThread();
+    if (activeScan != nullptr)
+        return;
+
+    activeScan = std::make_shared<ScanState>();
+    const std::weak_ptr<ScanState> weakScan = activeScan;
+    // O escopo compartilhado permanece vivo ate o callback de conclusao, inclusive em cancelamentos.
+    auto task = std::make_shared<TaskScope> (
+        taskRegistry, "Escaneando plugins", "global", 0.0, true,
+        [weakScan]
+        {
+            if (const auto scan = weakScan.lock())
+                scan->cancelled.store (true, std::memory_order_release);
+        });
+
+    if (onStarted)
+        onStarted();
+
+    const auto scan = activeScan;
+    const auto flag = alive;
+    scanPool.addJob ([this, scan, task, flag]
+    {
+        runScan (scan, task, flag);
+    });
+}
+
+void PluginScanner::cancelScan()
+{
+    // O pedido e observado entre arquivos; o JUCE nao oferece interrupcao segura dentro do plugin atual.
+    if (activeScan != nullptr)
+        activeScan->cancelled.store (true, std::memory_order_release);
+}
+
+void PluginScanner::stopScan()
+{
+    if (activeScan == nullptr)
+        return;
+
+    cancelScan();
+    // Aguarda o worker antes que o scanner ou o TaskRegistry sejam destruidos.
+    scanPool.removeAllJobs (true, -1);
+    activeScan.reset();
 }
 
 void PluginScanner::saveList()
@@ -44,46 +91,87 @@ void PluginScanner::saveList()
         xml->writeTo (dataDirectory().getChildFile ("plugins.xml"));
 }
 
-void PluginScanner::run()
+void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
+                             const std::shared_ptr<TaskScope>& task,
+                             const std::shared_ptr<std::atomic<bool>>& flag)
 {
-    const auto deadMans = dataDirectory().getChildFile ("scan-crash-guard.txt");
-    auto flag = alive;
+    const auto shouldCancel = [&scan]
+    {
+        const auto* job = juce::ThreadPoolJob::getCurrentThreadPoolJob();
+        return scan->cancelled.load (std::memory_order_acquire)
+            || (job != nullptr && job->shouldExit());
+    };
 
-    for (int i = 0; i < formatManager.getNumFormats() && ! threadShouldExit(); ++i)
+    const auto deadMans = dataDirectory().getChildFile ("scan-crash-guard.txt");
+    const int formatCount = formatManager.getNumFormats();
+    bool cancelled = false;
+
+    for (int i = 0; i < formatCount && ! shouldCancel(); ++i)
     {
         auto* format = formatManager.getFormat (i);
-        juce::PluginDirectoryScanner scanner (knownList, *format, format->getDefaultLocationsToSearch(),
-                                              true, deadMans, false);
+        juce::PluginDirectoryScanner directoryScanner (
+            knownList, *format, format->getDefaultLocationsToSearch(), true, deadMans, false);
+
         juce::String name;
-        while (! threadShouldExit() && scanner.scanNextFile (true, name))
+        bool hasMoreFiles = true;
+        while (hasMoreFiles && ! shouldCancel())
         {
-            juce::MessageManager::callAsync ([this, flag, name]
-            {
-                if (*flag && onProgress) onProgress (name);
-            });
-        }
-    }
+            name.clear();
+            hasMoreFiles = directoryScanner.scanNextFile (true, name);
 
-    if (threadShouldExit())
-        return;
+            // O JUCE mede os candidatos ja examinados neste formato; o app registra VST3.
+            const auto formatProgress = static_cast<double> (directoryScanner.getProgress());
+            const auto safeProgress = std::isfinite (formatProgress)
+                ? std::clamp (formatProgress, 0.0, 1.0) : 1.0;
+            task->setProgress (formatCount > 0
+                ? (static_cast<double> (i) + safeProgress) / formatCount : 1.0);
 
-    for (const auto& type : knownList.getTypes())
-    {
-        for (int i = 0; i < formatManager.getNumFormats(); ++i)
-        {
-            auto* format = formatManager.getFormat (i);
-            if (type.pluginFormatName == format->getName())
+            if (name.isNotEmpty()
+                && ! juce::MessageManager::callAsync ([this, flag, name]
+                {
+                    if (flag->load (std::memory_order_acquire) && onProgress)
+                        onProgress (name);
+                }))
             {
-                if (! format->fileMightContainThisPluginType (type.fileOrIdentifier))
-                    knownList.removeType (type);
-                break;
+                juce::Logger::writeToLog ("PluginScanner: nao foi possivel publicar o progresso na message thread.");
             }
         }
     }
 
-    saveList();
-    juce::MessageManager::callAsync ([this, flag]
+    cancelled = shouldCancel();
+    if (! cancelled)
     {
-        if (*flag && onFinished) onFinished();
-    });
+        const auto types = knownList.getTypes();
+        for (const auto& type : types)
+        {
+            for (int i = 0; i < formatManager.getNumFormats(); ++i)
+            {
+                auto* format = formatManager.getFormat (i);
+                if (type.pluginFormatName == format->getName())
+                {
+                    if (! format->fileMightContainThisPluginType (type.fileOrIdentifier))
+                        knownList.removeType (type);
+                    break;
+                }
+            }
+        }
+
+        saveList();
+        task->setProgress (1.0);
+    }
+
+    if (! juce::MessageManager::callAsync ([this, flag, scan, task, cancelled]
+    {
+        if (! flag->load (std::memory_order_acquire))
+            return;
+
+        task->end();
+        if (activeScan == scan)
+            activeScan.reset();
+        if (onFinished)
+            onFinished (cancelled);
+    }))
+    {
+        juce::Logger::writeToLog ("PluginScanner: nao foi possivel publicar o fim do escaneamento.");
+    }
 }

@@ -11,8 +11,11 @@
 #include "ProjectFile.h"
 #include "ProjectModel.h"
 #include "RollModel.h"
+#include "TaskRegistry.h"
+#include "TaskStatusBar.h"
 #include "TransportBar.h"
 #include <map>
+#include <thread>
 
 class MainComponent : public juce::Component, public juce::DragAndDropContainer,
                       private juce::ChangeListener, private juce::Timer
@@ -27,12 +30,14 @@ public:
     void openProjectFromFile (const juce::File&);
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
 
 private:
     class ActionIndicator;
     class PluginWindow;
 
+    void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
     void openDeviceEditor (int trackId, int deviceId);
     void updateActionIndicator();
@@ -53,6 +58,9 @@ private:
     void chooseProjectFile (bool open);
     void saveProject (const juce::File&);
     void loadProject (const juce::File&);
+    void applyLoadedProject (const juce::File&, ProjectFileData, const std::shared_ptr<TaskScope>&);
+    void advanceProjectLoadTask();
+    void finishProjectLoadTask();
     void restoreNextProjectPlugin();
     void loadProjectAudio (const ProjectFileData&);
     void setProjectStatus (const juce::String&);
@@ -67,18 +75,21 @@ private:
     void timerCallback() override;
     juce::String deviceSummary (int trackId) const;
 
+    TaskRegistry taskRegistry;
+    juce::ThreadPool projectFilePool { 1 };
     AudioEngine engine;
-    PluginScanner scanner { engine.formats() };
+    PluginScanner scanner { engine.formats(), taskRegistry };
     ProjectModel project;
     RollModel model;
 
     TransportBar transport { engine.graph() };
+    TaskStatusBar taskStatusBar { taskRegistry };
     BrowserPanel browser { scanner };
     AudioFileBrowser audioBrowser;
     ArrangementView arrangement { project };
     PianoRollEditor editor { model };
     AudioClipEditor audioClipEditor;
-    DeviceView deviceView;
+    DeviceView deviceView { taskRegistry };
 
     // painel do clip
     juce::TextButton clipTab { "Clip" }, deviceTab { "Dispositivos" };
@@ -91,10 +102,10 @@ private:
     std::vector<juce::Component*> clipControls;
 
     std::map<int, std::unique_ptr<PluginWindow>> windows;
-    std::map<int, juce::String> pendingPluginLoads;
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
     juce::File currentProjectFile;
+    std::shared_ptr<TaskScope> projectLoadTask;
     std::vector<PluginState> pendingProjectPlugins;
     std::vector<std::pair<PluginState, int>> loadedProjectPlugins;
     size_t nextProjectPlugin = 0;
@@ -103,11 +114,13 @@ private:
     bool waitingForProjectPluginScan = false, restoringProjectPlugins = false;
     std::shared_ptr<std::atomic<bool>> lifetimeToken { std::make_shared<std::atomic<bool>> (true) };
     std::unique_ptr<ActionIndicator> actionIndicator;
+    std::jthread taskSimulationThread;
     int nextPluginCascadeIndex = 0;
-    int nextPluginLoadToken = 0;
     int previewLoadToken = 0;
-    int pendingAudioLoads = 0;
+    int pendingAudioLoads = 0, pendingPreviewLoads = 0;
     bool scanningPlugins = false;
+    bool projectFileOperationInProgress = false;
+    size_t projectLoadWorkTotal = 0, projectLoadWorkDone = 0;
     juce::String scanMessage;
 
     bool showingDevices = false;
