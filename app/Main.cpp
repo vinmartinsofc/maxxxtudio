@@ -44,7 +44,7 @@ public:
     const juce::String getApplicationName() override    { return JUCE_APPLICATION_NAME_STRING; }
     const juce::String getApplicationVersion() override { return JUCE_APPLICATION_VERSION_STRING; }
 
-    void initialise (const juce::String&) override
+    void initialise (const juce::String& commandLine) override
     {
         if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
         {
@@ -69,11 +69,32 @@ public:
             laf->setColour (juce::Slider::trackColourId, theme::accent());
         }
         window = std::make_unique<MainWindow> (getApplicationName());
+        openProjectArgument (commandLine);
     }
     void shutdown() override                       { window.reset(); }
     void systemRequestedQuit() override            { quit(); }
+    void anotherInstanceStarted (const juce::String& commandLine) override
+    {
+        openProjectArgument (commandLine);
+    }
 
 private:
+    void openProjectArgument (const juce::String& commandLine)
+    {
+        juce::StringArray arguments;
+        arguments.addTokens (commandLine, " \t", "\"");
+        for (const auto& argument : arguments)
+        {
+            const juce::File file (argument.unquoted());
+            if (file.getFileExtension().equalsIgnoreCase (".freedom"))
+            {
+                if (window != nullptr)
+                    window->openProject (file);
+                return;
+            }
+        }
+    }
+
     class MainWindow : public juce::DocumentWindow
     {
     public:
@@ -90,7 +111,7 @@ private:
 
             setUsingNativeTitleBar (true);
             setResizable (true, true);
-            auto* mainComponent = new MainComponent();
+            mainComponent = new MainComponent();
             setContentOwned (mainComponent, true);
             restoreSavedBounds();
             setVisible (true);
@@ -102,6 +123,12 @@ private:
         {
             saveWindowState();
             appProperties.saveIfNeeded();
+        }
+
+        void openProject (const juce::File& file)
+        {
+            if (mainComponent != nullptr)
+                mainComponent->openProjectFromFile (file);
         }
 
         void closeButtonPressed() override
@@ -125,6 +152,7 @@ private:
     private:
         juce::ApplicationProperties appProperties;
         juce::PropertiesFile* userSettings = nullptr;
+        MainComponent* mainComponent = nullptr;
         roll::Rect normalBounds;
         bool maximizeWhenShown = false;
         bool updatingResizeLimits = false;

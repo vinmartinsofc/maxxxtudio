@@ -132,7 +132,7 @@ public:
             g.fillRoundedRectangle (5.0f, static_cast<float> (height / 2 - 5), 10.0f, 10.0f, 2.0f);
         }
         g.setColour (theme::text());
-        g.setFont (juce::FontOptions (12.0f, isBold ? juce::Font::bold : juce::Font::plain));
+        g.setFont (juce::FontOptions (13.5f, isBold ? juce::Font::bold : juce::Font::plain));
         g.drawText (label, textX, 0, width - textX - 5, height, juce::Justification::centredLeft, true);
     }
 
@@ -174,6 +174,7 @@ bool AudioFileBrowser::FileTreeView::keyPressed (const juce::KeyPress& key)
 
 AudioFileBrowser::AudioFileBrowser()
 {
+    juce::Desktop::getInstance().addGlobalMouseListener (this);
     juce::PropertiesFile::Options options;
     options.applicationName = "ProjectFreedomAudioFavorites";
     options.filenameSuffix = ".settings";
@@ -183,7 +184,7 @@ AudioFileBrowser::AudioFileBrowser()
     favoriteSettings = favoriteProperties.getUserSettings();
     loadFavorites();
 
-    title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
     addAndMakeVisible (title);
 
@@ -195,7 +196,7 @@ AudioFileBrowser::AudioFileBrowser()
     tree.setWantsKeyboardFocus (true);
     addAndMakeVisible (tree);
 
-    status.setFont (juce::FontOptions (10.5f));
+    status.setFont (juce::FontOptions (12.0f));
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
 
@@ -222,7 +223,7 @@ AudioFileBrowser::AudioFileBrowser()
     previewGain.setValue (0.5, juce::dontSendNotification);
     previewGain.setTooltip ("Volume da pre-escuta");
     previewGainLabel.setColour (juce::Label::textColourId, theme::textDim());
-    previewGainLabel.setFont (juce::FontOptions (11.0f));
+    previewGainLabel.setFont (juce::FontOptions (12.5f));
     previewGain.onValueChange = [this]
     {
         if (onPreviewGainChanged)
@@ -241,7 +242,21 @@ AudioFileBrowser::AudioFileBrowser()
 
 AudioFileBrowser::~AudioFileBrowser()
 {
+    juce::Desktop::getInstance().removeGlobalMouseListener (this);
     searchGeneration->fetch_add (1);
+}
+
+void AudioFileBrowser::mouseDown (const juce::MouseEvent& event)
+{
+    auto* target = event.eventComponent;
+    if (target != this && (target == nullptr || ! isParentOf (target)))
+        stopPreview();
+}
+
+void AudioFileBrowser::stopPreview()
+{
+    if (onPreviewStopRequested)
+        onPreviewStopRequested();
 }
 
 void AudioFileBrowser::paint (juce::Graphics& g)
@@ -329,7 +344,7 @@ void AudioFileBrowser::selectFile (const juce::File& file)
     selectedFile = file.existsAsFile() && isAudioFile (file) ? file : juce::File();
     previewButton.setEnabled (selectedFile.existsAsFile());
     if (onPreviewStopRequested)
-        onPreviewStopRequested();
+        stopPreview();
     setStatus (selectedFile.existsAsFile()
                    ? "Selecionado: " + selectedFile.getFileName()
                    : "Selecione um arquivo de audio para ouvir");

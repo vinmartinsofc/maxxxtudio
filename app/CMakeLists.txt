@@ -23,7 +23,8 @@ target_sources(ProjectFreedom PRIVATE
     TransportBar.cpp
     RollModel.cpp
     PianoRollEditor.cpp
-    MainComponent.cpp)
+    MainComponent.cpp
+    ProjectFile.cpp)
 
 target_compile_definitions(ProjectFreedom PRIVATE
     JUCE_WEB_BROWSER=0

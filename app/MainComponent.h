@@ -8,6 +8,7 @@
 #include "DeviceView.h"
 #include "PianoRollEditor.h"
 #include "PluginScanner.h"
+#include "ProjectFile.h"
 #include "ProjectModel.h"
 #include "RollModel.h"
 #include "TransportBar.h"
@@ -23,6 +24,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
+    void openProjectFromFile (const juce::File&);
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
@@ -47,6 +49,13 @@ private:
     void playSelectedTrack();
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
+    void showProjectMenu();
+    void chooseProjectFile (bool open);
+    void saveProject (const juce::File&);
+    void loadProject (const juce::File&);
+    void restoreNextProjectPlugin();
+    void loadProjectAudio (const ProjectFileData&);
+    void setProjectStatus (const juce::String&);
     void refreshDeviceView();
     void applyMixers();
     void applyScale();
@@ -84,6 +93,14 @@ private:
     std::map<int, std::unique_ptr<PluginWindow>> windows;
     std::map<int, juce::String> pendingPluginLoads;
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
+    std::unique_ptr<juce::FileChooser> projectFileChooser;
+    juce::File currentProjectFile;
+    std::vector<PluginState> pendingProjectPlugins;
+    std::vector<std::pair<PluginState, int>> loadedProjectPlugins;
+    size_t nextProjectPlugin = 0;
+    int projectLoadToken = 0, projectGeneration = 0;
+    int missingProjectPlugins = 0;
+    bool waitingForProjectPluginScan = false, restoringProjectPlugins = false;
     std::shared_ptr<std::atomic<bool>> lifetimeToken { std::make_shared<std::atomic<bool>> (true) };
     std::unique_ptr<ActionIndicator> actionIndicator;
     int nextPluginCascadeIndex = 0;
@@ -96,6 +113,9 @@ private:
     bool showingDevices = false;
     bool audioClipEditorOpen = false;
     bool pianoRollVisible = true;
+    bool suppressSongStartOnce = false;
+    bool pendingArrangementSeek = false;
+    double pendingArrangementSeekBeat = 0.0;
     double arrangementRatio = 0.42;
     double transportPosition = 0.0;
     double displayedBpm = 120.0;

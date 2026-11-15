@@ -195,7 +195,7 @@ void NoteGrid::paint (juce::Graphics& g)
     {
         g.fillAll (theme::rowBlack());
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (13.0f));
+        g.setFont (juce::FontOptions (14.5f));
         g.drawFittedText (theme::ui ("Selecione um clip no arranjo\n(duplo clique em uma trilha cria um clip)"),
                           getLocalBounds().reduced (10), juce::Justification::centred, 3);
         return;
@@ -270,7 +270,7 @@ void NoteGrid::paint (juce::Graphics& g)
             g.setColour (theme::accent());
             g.drawRoundedRectangle (hint.toFloat(), 5.0f, 1.0f);
             g.setColour (theme::text());
-            g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
             g.drawText (message, hint.reduced (6, 0), juce::Justification::centredLeft, true);
         }
 
@@ -708,7 +708,7 @@ void RulerBar::paint (juce::Graphics& g)
     g.setColour (theme::accent().withAlpha (0.22f));
     g.fillRect (0.0f, 0.0f, static_cast<float> (model.gridWidthPixels()), 4.0f);   // faixa do clip/loop
 
-    g.setFont (juce::FontOptions (11.0f));
+    g.setFont (juce::FontOptions (12.5f));
     for (int b = 0; b <= totalBeats; ++b)
     {
         const float x = static_cast<float> (b * ppb);
@@ -810,7 +810,7 @@ void VelocityLane::paint (juce::Graphics& g)
     }
 
     g.setColour (theme::textDim());
-    g.setFont (juce::FontOptions (10.0f));
+    g.setFont (juce::FontOptions (11.5f));
     g.drawText ("Velocity", 4 + clipBox.getX() * 0, 2, 60, 12, juce::Justification::left);
 }
 

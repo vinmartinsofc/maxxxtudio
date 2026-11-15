@@ -15,6 +15,7 @@ public:
 
     std::function<void (double beats)>  onSeek;
     std::function<float (int trackId)>  meterProvider;
+    std::function<void()> onMasterPeakReset;
     std::function<juce::String (int)>   deviceSummary;
     std::function<bool (const juce::String& pluginIdentifier, int trackId)> canAcceptPluginDrop;
     std::function<void (const juce::String& pluginIdentifier, int trackId, double beats)> onPluginDropped;
@@ -25,6 +26,8 @@ public:
     std::function<void (double startBeat, double endBeat, int firstTrack, int lastTrack)> onConsolidateRequested;
     std::function<void()> onGridChanged;
     std::function<void (bool)> onLoopToggleRequested;
+    std::function<void (double beats)> onLocatorLaunchRequested;
+    std::function<void (double beats)> onArrangementSeekRequested;
 
     void setPlayhead (double beats);
     void setLoopEnabled (bool on);
@@ -38,7 +41,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int headerWidth = 210, rulerHeight = 28, trackHeight = 78;
+    static constexpr int headerWidth = 210, rulerHeight = 28, trackHeight = 94;
 
 private:
     class Lanes;
@@ -54,6 +57,8 @@ private:
     void timerCallback() override;
     void syncPositions();
     void updateSizes();
+    void updateLocatorControls();
+    void navigateLocator (bool forward);
     void zoomAt (double factor, double anchorBeat, int anchorScreenX);
     static juce::Colour colourFor (int trackId);
 
@@ -62,6 +67,7 @@ private:
     double playhead = 0.0;
     bool loopEnabled = true;
     double gridBeat = 0.25;
+    double lastGridBeat = 0.25;
 
     std::unique_ptr<Lanes> lanes;
     std::unique_ptr<Ruler> ruler;
@@ -70,5 +76,7 @@ private:
     juce::Viewport viewport;
     juce::Component headerHolder, rulerHolder;
     juce::TextButton addTrackButton { "+ MIDI" }, addAudioTrackButton { "+ Audio" };
+    juce::TextButton locatorPreviousButton { "<" }, locatorSetButton { "+" },
+                     locatorNextButton { ">" }, locatorDeleteButton { "Del" };
     juce::ComboBox gridBox;
 };

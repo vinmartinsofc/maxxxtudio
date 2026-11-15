@@ -50,7 +50,7 @@ public:
         g.drawText (description.name, 4, 0, std::max (0, width - 86), height,
                     juce::Justification::centredLeft, true);
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (10.5f));
+        g.setFont (juce::FontOptions (12.0f));
         g.drawText (description.manufacturerName, std::max (0, width - 82), 0, 68, height,
                     juce::Justification::centredRight, true);
 
@@ -106,7 +106,7 @@ private:
 
 BrowserPanel::BrowserPanel (PluginScanner& s) : scanner (s), tree (std::make_unique<PluginTree> (*this))
 {
-    title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
     addAndMakeVisible (title);
 
@@ -141,7 +141,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s) : scanner (s), tree (std::make_uni
     };
     addAndMakeVisible (rescanButton);
 
-    status.setFont (juce::FontOptions (11.0f));
+    status.setFont (juce::FontOptions (12.5f));
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
 

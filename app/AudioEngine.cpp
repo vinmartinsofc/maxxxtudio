@@ -187,7 +187,10 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
                 continue;
 
             const auto& source = *clip.source->samples;
-            const double sourceStep = clip.source->sampleRate / outputRate;
+            const double projectBpm = shared.plan.beatsPerSample * outputRate * 60.0;
+            const double warpRatio = clip.warpEnabled && projectBpm > 0.0
+                ? projectBpm / clip.sourceBpm : 1.0;
+            const double sourceStep = clip.source->sampleRate / outputRate * warpRatio;
             const double sourceStart = clip.sourceOffsetSeconds * clip.source->sampleRate
                                      + (activeStart - clip.startBeat)
                                        / shared.plan.beatsPerSample * sourceStep;
@@ -209,10 +212,12 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
                 const double beat = activeStart + i * shared.plan.beatsPerSample;
                 double gain = 1.0;
                 if (clip.fadeInBeats > 0.0)
-                    gain *= std::clamp ((beat - clip.startBeat) / clip.fadeInBeats, 0.0, 1.0);
+                    gain *= roll::audioFadeCurveValue ((beat - clip.startBeat) / clip.fadeInBeats,
+                                                       clip.fadeInCurve);
                 if (clip.fadeOutBeats > 0.0)
-                    gain *= std::clamp ((clip.startBeat + clip.lengthBeats - beat)
-                                        / clip.fadeOutBeats, 0.0, 1.0);
+                    gain *= 1.0 - roll::audioFadeCurveValue (
+                        1.0 - (clip.startBeat + clip.lengthBeats - beat) / clip.fadeOutBeats,
+                        clip.fadeOutCurve);
                 for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
                 {
                     const int sourceChannel = std::min (channel, source.getNumChannels() - 1);
@@ -329,6 +334,11 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     peakLevel = std::max (peakNow, peakLevel.load() * 0.92f);       // queda suave para o medidor
 }
 
+void TrackMixer::resetPeak()
+{
+    peakLevel.store (0.0f, std::memory_order_relaxed);
+}
+
 // ======================================================= SequencerGraph
 
 void SequencerGraph::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -361,6 +371,102 @@ void SequencerGraph::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     juce::AudioProcessorGraph::processBlock (buffer, midi);
 
     const double sampleRate = getSampleRate();
+    if (! metronomeEnabled.load (std::memory_order_relaxed)
+        || sampleRate <= 0.0 || buffer.getNumChannels() == 0)
+    {
+        clickSamplesRemaining = 0;
+        freeMetronomeBeatPhase = 1.0;
+        freeMetronomeBeatNumber = 0;
+    }
+    else if (nowPlaying)
+    {
+        freeMetronomeBeatPhase = 1.0;
+        int cursor = 0;
+        const auto startClick = [this, sampleRate] (bool accentedBeat)
+        {
+            clickSamplesRemaining = std::max (1, static_cast<int> (sampleRate * 0.012));
+            clickPhase = 0.0;
+            clickPhaseStep = juce::MathConstants<double>::twoPi
+                * (accentedBeat ? 1500.0 : 1000.0) / sampleRate;
+            clickEnvelope = metronomeGain.load (std::memory_order_relaxed)
+                * (accentedBeat ? 0.9f : 0.65f);
+            clickEnvelopeDecay = static_cast<float> (std::exp (-1.0 / (sampleRate * 0.0025)));
+        };
+        const auto renderUntil = [this, &buffer, &cursor] (int end)
+        {
+            end = std::clamp (end, cursor, buffer.getNumSamples());
+            for (; cursor < end; ++cursor)
+            {
+                if (clickSamplesRemaining <= 0)
+                    continue;
+
+                const float sample = clickEnvelope * static_cast<float> (std::sin (clickPhase));
+                for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                    buffer.addSample (channel, cursor, sample);
+
+                clickPhase += clickPhaseStep;
+                clickEnvelope *= clickEnvelopeDecay;
+                --clickSamplesRemaining;
+            }
+        };
+
+        constexpr double beatEpsilon = 1.0e-9;
+        for (int segmentIndex = 0; segmentIndex < shared.plan.count; ++segmentIndex)
+        {
+            const auto& segment = shared.plan.seg[segmentIndex];
+            if (segment.samples <= 0)
+                continue;
+
+            for (double beat = std::ceil (segment.a - beatEpsilon);
+                 beat < segment.b - beatEpsilon;
+                 beat += 1.0)
+            {
+                const int offset = std::clamp (
+                    segment.offset + static_cast<int> (std::lround (
+                        (beat - segment.a) / shared.plan.beatsPerSample)),
+                    cursor, buffer.getNumSamples());
+                renderUntil (offset);
+
+                const auto beatNumber = static_cast<std::int64_t> (std::llround (beat));
+                startClick (beatNumber % 4 == 0);
+            }
+        }
+        renderUntil (buffer.getNumSamples());
+    }
+    else
+    {
+        const double beatsPerSample = std::clamp (bpm.load (std::memory_order_relaxed), 20.0, 999.0)
+                                    / (60.0 * sampleRate);
+        for (int sampleIndex = 0; sampleIndex < buffer.getNumSamples(); ++sampleIndex)
+        {
+            if (freeMetronomeBeatPhase >= 1.0)
+            {
+                const bool accentedBeat = freeMetronomeBeatNumber % 4 == 0;
+                clickSamplesRemaining = std::max (1, static_cast<int> (sampleRate * 0.012));
+                clickPhase = 0.0;
+                clickPhaseStep = juce::MathConstants<double>::twoPi
+                    * (accentedBeat ? 1500.0 : 1000.0) / sampleRate;
+                clickEnvelope = metronomeGain.load (std::memory_order_relaxed)
+                    * (accentedBeat ? 0.9f : 0.65f);
+                clickEnvelopeDecay = static_cast<float> (std::exp (-1.0 / (sampleRate * 0.0025)));
+                freeMetronomeBeatPhase -= 1.0;
+                ++freeMetronomeBeatNumber;
+            }
+
+            if (clickSamplesRemaining > 0)
+            {
+                const float clickSample = clickEnvelope * static_cast<float> (std::sin (clickPhase));
+                for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                    buffer.addSample (channel, sampleIndex, clickSample);
+
+                clickPhase += clickPhaseStep;
+                clickEnvelope *= clickEnvelopeDecay;
+                --clickSamplesRemaining;
+            }
+            freeMetronomeBeatPhase += beatsPerSample;
+        }
+    }
+
     if (sampleRate > 0.0 && buffer.getNumSamples() > 0)
     {
         const double blockDuration = static_cast<double> (buffer.getNumSamples()) / sampleRate;
@@ -698,6 +804,12 @@ void AudioEngine::setMasterMixer (float gain, float pan, bool muted)
     setMixer (masterTrackId, gain, pan, muted);
 }
 
+void AudioEngine::resetPeak (int trackId)
+{
+    if (auto* t = find (trackId); t != nullptr && t->mixerPtr != nullptr)
+        t->mixerPtr->resetPeak();
+}
+
 void AudioEngine::loadAudioFileAsync (
     const juce::File& file,
     std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback)
@@ -983,6 +1095,40 @@ std::vector<DeviceInfo> AudioEngine::devices (int trackId) const
         for (const auto& d : t->devices)
             out.push_back ({ d.id, d.name, d.instrument, d.node->isBypassed(), d.groupId });
     return out;
+}
+
+std::vector<PluginState> AudioEngine::getPluginStates()
+{
+    std::vector<PluginState> states;
+    for (auto& [trackId, track] : tracks)
+        for (size_t order = 0; order < track.devices.size(); ++order)
+        {
+            const auto& device = track.devices[order];
+            PluginState state;
+            state.trackId = trackId;
+            state.order = static_cast<int> (order);
+            state.identifier = device.pluginIdentifier;
+            state.bypassed = device.node->isBypassed();
+            state.groupId = device.groupId;
+            if (auto* processor = device.node->getProcessor())
+                processor->getStateInformation (state.state);
+            states.push_back (std::move (state));
+        }
+    return states;
+}
+
+bool AudioEngine::restorePluginState (int trackId, int deviceId, const juce::MemoryBlock& state)
+{
+    if (auto* track = find (trackId))
+        for (auto& device : track->devices)
+            if (device.id == deviceId)
+                if (auto* processor = device.node->getProcessor())
+                {
+                if (state.getSize() > 0)
+                    processor->setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+                    return true;
+                }
+    return false;
 }
 
 std::unique_ptr<juce::AudioProcessorEditor> AudioEngine::createDeviceEditor (int trackId, int deviceId)

@@ -45,7 +45,7 @@ public:
         addAndMakeVisible (spinner);
 
         message.setColour (juce::Label::textColourId, theme::text());
-        message.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        message.setFont (juce::FontOptions (13.5f, juce::Font::bold));
         message.setJustificationType (juce::Justification::centredLeft);
         addAndMakeVisible (message);
         setInterceptsMouseClicks (false, false);
@@ -95,12 +95,15 @@ public:
         : DocumentWindow (name, juce::Colours::darkgrey, DocumentWindow::minimiseButton | DocumentWindow::closeButton)
     {
         setUsingNativeTitleBar (true);
-        setResizable (false, false);
+        const bool editorResizable = editor->isResizable();
+
+        setResizable (true, false);
         const int horizontalMargin = std::min (16, std::max (0, (displayUserArea.getWidth() - 1) / 2));
         const int verticalMargin = std::min (60, std::max (0, (displayUserArea.getHeight() - 1) / 2));
         const auto available = displayUserArea.reduced (horizontalMargin, verticalMargin);
 
-        const bool needsViewport = editor->getWidth() > available.getWidth()
+        const bool needsViewport = ! editorResizable
+                                || editor->getWidth() > available.getWidth()
                                 || editor->getHeight() > available.getHeight();
         if (needsViewport)
         {
@@ -135,6 +138,7 @@ public:
 MainComponent::MainComponent()
 {
     addAndMakeVisible (transport);
+    transport.onProjectMenu = [this] { showProjectMenu(); };
     addAndMakeVisible (browser);
     addAndMakeVisible (audioBrowser);
     audioBrowser.setVisible (false);
@@ -156,7 +160,7 @@ MainComponent::MainComponent()
     for (auto* l : { &scaleCaption, &lengthCaption, &gridCaption, &zoomCaption })
     {
         l->setColour (juce::Label::textColourId, theme::textDim());
-        l->setFont (juce::FontOptions (11.0f));
+        l->setFont (juce::FontOptions (12.5f));
     }
     gridLabel.setColour (juce::Label::textColourId, theme::text());
 
@@ -197,6 +201,10 @@ MainComponent::MainComponent()
     audioClipEditor.onSourceBpmChanged = [this] (double bpm)
     {
         return project.setAudioClipSourceBpm (project.selectedTrackId, project.selectedAudioClipId, bpm);
+    };
+    audioClipEditor.onWarpChanged = [this] (bool enabled)
+    {
+        project.setAudioClipWarpEnabled (project.selectedTrackId, project.selectedAudioClipId, enabled);
     };
 
     // botões não roubam o foco do teclado (Espaço continua sendo play/pause)
@@ -284,12 +292,29 @@ MainComponent::MainComponent()
 
     arrangement.onSeek = [this] (double g)
     {
+        pendingArrangementSeek = false;
         transportPosition = g;
         engine.graph().seek (g);
         arrangement.setPlayhead (g);
         editor.setPlayhead (g - model.clipStartBeats);
     };
+    arrangement.onArrangementSeekRequested = [this] (double beats)
+    {
+        pendingArrangementSeek = true;
+        pendingArrangementSeekBeat = beats;
+    };
+    arrangement.onLocatorLaunchRequested = [this] (double beats)
+    {
+        if (engine.graph().isPlaying())
+            return;
+        pendingArrangementSeek = false;
+        if (arrangement.onSeek)
+            arrangement.onSeek (beats);
+        suppressSongStartOnce = true;
+        transport.togglePlay();
+    };
     arrangement.meterProvider = [this] (int id) { return engine.peak (id); };
+    arrangement.onMasterPeakReset = [this] { engine.resetPeak (AudioEngine::masterTrackId); };
     arrangement.deviceSummary = [this] (int id) { return deviceSummary (id); };
     arrangement.canAcceptPluginDrop = [this] (const juce::String& identifier, int trackId)
     {
@@ -398,6 +423,30 @@ MainComponent::MainComponent()
         arrangement.setPlayhead (beats);
         editor.setPlayhead (beats - model.clipStartBeats);
     };
+    transport.onBeforePlay = [this]
+    {
+        if (pendingArrangementSeek)
+        {
+            const bool stillAtSeek = std::abs (transportPosition - pendingArrangementSeekBeat) < 1.0e-6;
+            pendingArrangementSeek = false;
+            if (stillAtSeek)
+                return;
+        }
+        if (suppressSongStartOnce)
+        {
+            suppressSongStartOnce = false;
+            return;
+        }
+        if (engine.graph().positionBeats() > 1.0e-6)
+            return;
+        if (const auto* marker = project.locator (project.songStartLocatorId))
+        {
+            transportPosition = marker->beat;
+            engine.graph().seek (marker->beat);
+            arrangement.setPlayhead (marker->beat);
+            editor.setPlayhead (marker->beat - model.clipStartBeats);
+        }
+    };
     transport.onLoopToggled = [this] (bool on) { arrangement.setLoopEnabled (on); };
     arrangement.onLoopToggleRequested = [this] (bool on) { transport.setLoopEnabled (on); };
     transport.onBrowserToggled = [this] (bool visible) { setBrowserVisible (visible); };
@@ -485,6 +534,11 @@ MainComponent::MainComponent()
         browser.refresh();
         browser.setStatus (juce::String (scanner.list().getNumTypes()) + " plugins encontrados");
         updateActionIndicator();
+        if (waitingForProjectPluginScan)
+        {
+            waitingForProjectPluginScan = false;
+            restoreNextProjectPlugin();
+        }
     };
 
     engine.graph().setLoopRegion (project.loopStart, project.loopEnd);
@@ -683,6 +737,8 @@ void MainComponent::setBrowserVisible (bool visible)
 
 void MainComponent::setAudioBrowserVisible (bool visible)
 {
+    if (! visible)
+        audioBrowser.stopPreview();
     if (visible && browser.isVisible())
     {
         browser.setVisible (false);
@@ -722,8 +778,9 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
     ++pendingAudioLoads;
     audioBrowser.setStatus ("Carregando " + file.getFileName() + "...");
     updateActionIndicator();
+    const int generation = projectGeneration;
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
-    engine.loadAudioFileAsync (file, [this, token, file, trackId, startBeat]
+    engine.loadAudioFileAsync (file, [this, token, file, trackId, startBeat, generation]
         (const juce::String& error, std::shared_ptr<const AudioFileData> data)
     {
         const auto alive = token.lock();
@@ -731,6 +788,8 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
 
         pendingAudioLoads = std::max (0, pendingAudioLoads - 1);
         updateActionIndicator();
+        if (generation != projectGeneration)
+            return;
         if (error.isNotEmpty() || data == nullptr)
         {
             audioBrowser.setStatus ("Erro ao carregar audio: " + error);
@@ -837,9 +896,11 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
             const float fraction = static_cast<float> (sourcePosition - sourceIndex);
             double gain = 1.0;
             if (clip->fadeInBeats > 0.0)
-                gain *= std::clamp ((beat - clip->start) / clip->fadeInBeats, 0.0, 1.0);
+                gain *= roll::audioFadeCurveValue ((beat - clip->start) / clip->fadeInBeats,
+                                                   clip->fadeInCurve);
             if (clip->fadeOutBeats > 0.0)
-                gain *= std::clamp ((clip->end() - beat) / clip->fadeOutBeats, 0.0, 1.0);
+                gain *= 1.0 - roll::audioFadeCurveValue (
+                    1.0 - (clip->end() - beat) / clip->fadeOutBeats, clip->fadeOutCurve);
 
             for (int channel = 0; channel < renderedSamples->getNumChannels(); ++channel)
             {
@@ -975,7 +1036,8 @@ void MainComponent::publishAudioTrack (int trackId)
                 if (const auto asset = audioAssets.find (clip->filePath); asset != audioAssets.end())
                     clips.push_back ({ clip->start, clip->lengthBeats, clip->sourceBpm,
                                        clip->sourceOffsetSeconds, clip->fadeInBeats,
-                                       clip->fadeOutBeats, asset->second });
+                                       clip->fadeOutBeats, clip->fadeInCurve, clip->fadeOutCurve,
+                                       asset->second, clip->warpEnabled });
     engine.publishAudioClips (trackId, clips);
 
     for (auto it = audioAssets.begin(); it != audioAssets.end();)
@@ -1019,6 +1081,18 @@ void MainComponent::playSelectedTrack()
         transport.togglePlay();
         return;
     }
+
+    if (pendingArrangementSeek
+        && std::abs (transportPosition - pendingArrangementSeekBeat) < 1.0e-6)
+    {
+        transportPosition = pendingArrangementSeekBeat;
+        engine.graph().seek (pendingArrangementSeekBeat);
+        arrangement.setPlayhead (pendingArrangementSeekBeat);
+        editor.setPlayhead (pendingArrangementSeekBeat - model.clipStartBeats);
+        transport.togglePlay();
+        return;
+    }
+    pendingArrangementSeek = false;
 
     double start = 0.0, end = 0.0;
     const auto* selectedTrack = project.selectedTrack();
@@ -1079,6 +1153,19 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
 {
     const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
+    if (ctrl && keyCode == 'S')
+    {
+        if (currentProjectFile.existsAsFile())
+            saveProject (currentProjectFile);
+        else
+            chooseProjectFile (false);
+        return true;
+    }
+    if (ctrl && keyCode == 'O')
+    {
+        chooseProjectFile (true);
+        return true;
+    }
     if (ctrl && keyCode == 'Z' && ! k.getModifiers().isShiftDown())
         return project.undo();
     if (ctrl && (keyCode == 'Y' || (keyCode == 'Z' && k.getModifiers().isShiftDown())))
@@ -1144,6 +1231,275 @@ void MainComponent::applyMixers()
     }
     if (auto* m = project.masterTrack.get())
         engine.setMasterMixer (static_cast<float> (m->volume), static_cast<float> (m->pan), m->mute);
+}
+
+void MainComponent::showProjectMenu()
+{
+    juce::PopupMenu menu;
+    menu.addItem (1, "Abrir projeto...");
+    menu.addItem (2, "Salvar", currentProjectFile.existsAsFile());
+    menu.addItem (3, "Salvar como...");
+#if JUCE_WINDOWS
+    menu.addSeparator();
+    menu.addItem (4, "Associar arquivos .freedom ao Project Freedom");
+#endif
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transport),
+        [this] (int result)
+        {
+            if (result == 1) chooseProjectFile (true);
+            else if (result == 2) saveProject (currentProjectFile);
+            else if (result == 3) chooseProjectFile (false);
+            else if (result == 4)
+            {
+                const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
+                const bool registered = juce::WindowsRegistry::registerFileAssociation (
+                    ".freedom", "ProjectFreedomProject", "Project Freedom Project",
+                    executable, 0, true);
+                const auto command = "\"" + executable.getFullPathName() + "\" \"%1\"";
+                const bool quotedCommandSet = registered && juce::WindowsRegistry::setValue (
+                    "HKEY_CURRENT_USER\\Software\\Classes\\ProjectFreedomProject\\shell\\open\\command",
+                    command);
+                setProjectStatus (quotedCommandSet
+                    ? "Arquivos .freedom associados ao Project Freedom."
+                    : "Nao foi possivel associar arquivos .freedom.");
+            }
+        });
+}
+
+void MainComponent::openProjectFromFile (const juce::File& file)
+{
+    if (file.existsAsFile() && file.getFileExtension().equalsIgnoreCase (".freedom"))
+        loadProject (file);
+}
+
+void MainComponent::chooseProjectFile (bool open)
+{
+    const auto start = currentProjectFile.existsAsFile()
+        ? currentProjectFile : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+    projectFileChooser = std::make_unique<juce::FileChooser> (
+        open ? "Abrir projeto" : "Salvar projeto",
+        start, "*.freedom");
+    const auto chooserFlags = open ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                   : juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles;
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    projectFileChooser->launchAsync (chooserFlags, [this, open, token] (const juce::FileChooser& chooser)
+    {
+        const auto alive = token.lock();
+        if (alive == nullptr || ! alive->load()) return;
+        const auto result = chooser.getResult();
+        projectFileChooser.reset();
+        if (! result.exists() && open)
+            return;
+        if (result == juce::File())
+            return;
+        if (open)
+            loadProject (result);
+        else
+            saveProject (result);
+    });
+}
+
+void MainComponent::saveProject (const juce::File& requestedFile)
+{
+    if (! pendingPluginLoads.empty() || restoringProjectPlugins || pendingAudioLoads > 0)
+    {
+        setProjectStatus ("Aguarde o fim dos carregamentos antes de salvar.");
+        return;
+    }
+
+    auto file = requestedFile;
+    if (file.getFileExtension().compareIgnoreCase (".freedom") != 0)
+        file = file.withFileExtension (".freedom");
+
+    const auto result = ProjectFile::save (file, project, engine, engine.graph().positionBeats());
+    if (result.failed())
+    {
+        setProjectStatus ("Falha ao salvar projeto: " + result.getErrorMessage());
+        return;
+    }
+
+    currentProjectFile = file;
+    setProjectStatus ("Projeto salvo: " + file.getFileName());
+}
+
+void MainComponent::loadProject (const juce::File& file)
+{
+    if (! pendingPluginLoads.empty() || restoringProjectPlugins)
+    {
+        setProjectStatus ("Aguarde o fim do carregamento de plugins antes de abrir outro projeto.");
+        return;
+    }
+
+    ProjectFileData data;
+    const auto result = ProjectFile::load (file, data);
+    if (result.failed())
+    {
+        setProjectStatus ("Falha ao abrir projeto: " + result.getErrorMessage());
+        return;
+    }
+
+    transport.stop();
+    engine.stopAudioPreview();
+    ++projectLoadToken;
+    ++projectGeneration;
+    pendingProjectPlugins.clear();
+    loadedProjectPlugins.clear();
+    nextProjectPlugin = 0;
+    missingProjectPlugins = 0;
+    waitingForProjectPluginScan = false;
+    restoringProjectPlugins = ! data.plugins.empty();
+
+    closeWindowsOfTrack (AudioEngine::masterTrackId);
+    for (const auto& device : engine.devices (AudioEngine::masterTrackId))
+        engine.removeDevice (AudioEngine::masterTrackId, device.id);
+
+    project.replaceState (std::move (data.project));
+    audioAssets.clear();
+    for (const auto& track : project.tracks)
+        if (track->type == roll::TrackType::Audio && project.onAudioClipsChanged)
+            project.onAudioClipsChanged (track->id);
+
+    transport.setBpm (data.bpm);
+    transport.setMetronomeState (data.metronomeEnabled, data.metronomeGain);
+    transport.setLoopEnabled (data.loopEnabled);
+    transportPosition = data.transportPosition;
+    engine.graph().seek (transportPosition);
+    arrangement.setPlayhead (transportPosition);
+
+    currentProjectFile = file;
+    pendingProjectPlugins = std::move (data.plugins);
+    loadProjectAudio (data);
+    setProjectStatus ("Projeto aberto: " + file.getFileName());
+    if (scanningPlugins)
+        waitingForProjectPluginScan = true;
+    else
+        restoreNextProjectPlugin();
+}
+
+void MainComponent::restoreNextProjectPlugin()
+{
+    if (waitingForProjectPluginScan)
+        return;
+
+    const int token = projectLoadToken;
+    while (nextProjectPlugin < pendingProjectPlugins.size())
+    {
+        auto plugin = pendingProjectPlugins[nextProjectPlugin++];
+        const auto description = scanner.list().getTypeForIdentifierString (plugin.identifier);
+        if (description == nullptr)
+        {
+            ++missingProjectPlugins;
+            continue;
+        }
+
+        engine.addDevice (plugin.trackId, *description,
+            [this, token, plugin] (const juce::String& error, int deviceId)
+            {
+                if (token != projectLoadToken)
+                {
+                    if (deviceId > 0)
+                        engine.removeDevice (plugin.trackId, deviceId);
+                    return;
+                }
+
+                if (error.isNotEmpty() || deviceId <= 0)
+                {
+                    ++missingProjectPlugins;
+                    setProjectStatus ("Nao foi possivel carregar " + plugin.identifier + ": " + error);
+                    restoreNextProjectPlugin();
+                    return;
+                }
+
+                if (! engine.restorePluginState (plugin.trackId, deviceId, plugin.state))
+                    ++missingProjectPlugins;
+                engine.setDeviceBypassed (plugin.trackId, deviceId, plugin.bypassed);
+                loadedProjectPlugins.emplace_back (plugin, deviceId);
+                refreshDeviceView();
+                restoreNextProjectPlugin();
+            }, plugin.order);
+        return;
+    }
+
+    std::map<std::pair<int, int>, std::vector<int>> groups;
+    for (const auto& [plugin, deviceId] : loadedProjectPlugins)
+        if (plugin.groupId > 0)
+            groups[{ plugin.trackId, plugin.groupId }].push_back (deviceId);
+    for (const auto& [key, ids] : groups)
+        if (ids.size() > 1)
+            engine.groupDevices (key.first, ids);
+
+    loadedProjectPlugins.clear();
+    restoringProjectPlugins = false;
+    refreshDeviceView();
+    if (missingProjectPlugins > 0)
+        setProjectStatus ("Projeto aberto; " + juce::String (missingProjectPlugins)
+                          + " plugin(s) nao encontrados ou nao carregados.");
+}
+
+void MainComponent::loadProjectAudio (const ProjectFileData& data)
+{
+    std::set<std::string> paths;
+    for (const auto& track : project.tracks)
+        if (track->type == roll::TrackType::Audio)
+            for (const auto& clip : track->audioClips)
+                paths.insert (clip->filePath);
+
+    if (paths.empty())
+    {
+        if (! data.missingAudioFiles.empty())
+            setProjectStatus ("Projeto aberto com arquivos de audio ausentes.");
+        return;
+    }
+
+    const int generation = projectGeneration;
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    for (const auto& path : paths)
+    {
+        const juce::File file (juce::String::fromUTF8 (path.c_str()));
+        ++pendingAudioLoads;
+        updateActionIndicator();
+        engine.loadAudioFileAsync (file, [this, token, generation, path]
+            (const juce::String& error, std::shared_ptr<const AudioFileData> data)
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load()) return;
+
+            pendingAudioLoads = std::max (0, pendingAudioLoads - 1);
+            updateActionIndicator();
+            if (generation != projectGeneration)
+                return;
+            if (error.isNotEmpty() || data == nullptr)
+            {
+                setProjectStatus ("Audio ausente ou invalido: " + juce::File (
+                    juce::String::fromUTF8 (path.c_str())).getFileName());
+                return;
+            }
+
+            audioAssets[path] = data;
+            for (const auto& track : project.tracks)
+                if (track->type == roll::TrackType::Audio)
+                {
+                    bool changed = false;
+                    for (auto& clip : track->audioClips)
+                        if (clip->filePath == path)
+                        {
+                            clip->waveform = data->waveform;
+                            clip->durationSeconds = data->durationSeconds;
+                            changed = true;
+                        }
+                    if (changed && project.onAudioClipsChanged)
+                        project.onAudioClipsChanged (track->id);
+                }
+            refreshAudioClipEditor();
+            project.sendChangeMessage();
+        });
+    }
+}
+
+void MainComponent::setProjectStatus (const juce::String& message)
+{
+    browser.setStatus (message);
+    audioBrowser.setStatus (message);
 }
 
 void MainComponent::onSelectionChanged()

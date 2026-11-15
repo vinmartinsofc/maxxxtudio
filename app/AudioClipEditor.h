@@ -12,6 +12,7 @@ public:
                   double projectBpm, double gridBeats);
 
     std::function<bool (double sourceBpm)> onSourceBpmChanged;
+    std::function<void (bool)> onWarpChanged;
     std::function<void()> onClose;
 
     void paint (juce::Graphics&) override;
@@ -23,5 +24,6 @@ private:
     double projectBpm = 120.0, gridBeats = 0.25;
     juce::Label fileName, tempoInfo, bpmLabel { {}, "BPM da origem" };
     juce::Slider sourceBpm;
+    juce::ToggleButton warpButton { "Warp" };
     juce::TextButton closeButton { "Fechar editor" };
 };

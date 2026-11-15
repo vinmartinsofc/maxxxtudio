@@ -167,24 +167,24 @@ public:
         if (rackCollapsed)
         {
             g.setColour (theme::text());
-            g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (15.5f, juce::Font::bold));
             g.drawText ("Rack (" + juce::String (rackSize) + ")", getLocalBounds().reduced (10, 0).withTrimmedTop (12).withHeight (36),
                         juce::Justification::centredLeft, true);
             g.setColour (theme::textDim());
-            g.setFont (juce::FontOptions (11.0f));
+            g.setFont (juce::FontOptions (12.5f));
             g.drawText (theme::ui ("Cadeia em serie"), 10, 46, getWidth() - 20, 16,
                         juce::Justification::centredLeft);
         }
         else
         {
             g.setColour (theme::text());
-            g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            g.setFont (juce::FontOptions (14.5f, juce::Font::bold));
             auto title = getLocalBounds().reduced (10, 0).withTrimmedTop (12).withHeight (36);
             if (rackHeader)
                 title = title.withTrimmedRight (24);
             g.drawText (info.name, title, juce::Justification::centredLeft, true);
             g.setColour (theme::textDim());
-            g.setFont (juce::FontOptions (11.0f));
+            g.setFont (juce::FontOptions (12.5f));
             g.drawText (info.isInstrument ? theme::ui ("Instrumento") : theme::ui ("Efeito"),
                         10, 46, getWidth() - 20, 16, juce::Justification::centredLeft);
         }
@@ -478,13 +478,13 @@ void DeviceView::paint (juce::Graphics& g)
         g.setColour (theme::panel());
         g.fillRect (label);
         g.setColour (theme::accent());
-        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
         g.drawText ("Rack", label.toNearestInt(), juce::Justification::centred, true);
         i = last + 1;
     }
 
     g.setColour (theme::textDim());
-    g.setFont (juce::FontOptions (12.0f));
+    g.setFont (juce::FontOptions (13.5f));
     if (boxes.empty())
     {
         if (trackId == 0)

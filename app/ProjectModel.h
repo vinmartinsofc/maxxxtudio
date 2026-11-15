@@ -3,13 +3,31 @@
 #include "Arrangement.h"
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
+
+struct ArrangementLocator
+{
+    int id = 0;
+    double beat = 0.0;
+    std::string name, info;
+};
 
 // Estado do projeto: trilhas, clips, seleção e região de loop. Vive na thread principal.
 // O engine de áudio e as views ouvem os callbacks.
 class ProjectModel : public juce::ChangeBroadcaster
 {
 public:
+    struct State
+    {
+        roll::Track master;
+        std::vector<roll::Track> tracks;
+        int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
+        double loopStart = 0.0, loopEnd = 16.0, totalBeats = 256.0;
+        std::vector<ArrangementLocator> locators;
+        int selectedLocatorId = -1, songStartLocatorId = -1;
+    };
+
     ProjectModel();
     ~ProjectModel() override = default;
 
@@ -18,6 +36,8 @@ public:
     int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
     double loopStart = 0.0, loopEnd = 16.0;
     double totalBeats = 256.0;                       // 64 compassos visíveis (cresce com os clips)
+    std::vector<ArrangementLocator> locators;
+    int selectedLocatorId = -1, songStartLocatorId = -1;
 
     std::function<void (int trackId)> onTrackAdded, onTrackRemoved;   // removed: antes de apagar
     std::function<void (int trackId)> onTrackNotes;                   // notas da trilha mudaram
@@ -51,7 +71,9 @@ public:
     int splitAudioClip (int trackId, int clipId, double beat);
     bool resizeAudioClip (int trackId, int clipId, double length);
     bool setAudioClipFades (int trackId, int clipId, double fadeInBeats, double fadeOutBeats);
+    bool setAudioClipFadeCurves (int trackId, int clipId, double fadeInCurve, double fadeOutCurve);
     bool setAudioClipSourceBpm (int trackId, int clipId, double sourceBpm);
+    bool setAudioClipWarpEnabled (int trackId, int clipId, bool enabled);
     bool setClipEnabled (int trackId, int clipId, bool audio, bool enabled);
     // move para outra trilha/posição; devolve o novo id do clip (ou -1 se não coube)
     int  moveClip (int fromTrack, int clipId, int toTrack, double newStart);
@@ -61,12 +83,23 @@ public:
     void notifyTrackNotes (int trackId);
     void notifyMixer()   { if (onMixerChanged) onMixerChanged(); sendChangeMessage(); }
     void setLoop (double s, double e);
+    int addLocator (double beat);
+    bool moveLocator (int id, double beat);
+    bool renameLocator (int id, std::string name);
+    bool setLocatorInfo (int id, std::string info);
+    bool removeLocator (int id);
+    void selectLocator (int id);
+    void setSongStartLocator (int id);
+    ArrangementLocator* locator (int id);
+    const ArrangementLocator* locator (int id) const;
     void growTo (double beats);
     void beginEdit();
     void endEdit();
     bool undo();
     bool redo();
     bool retainsAudioFile (const std::string& path) const;
+    State createState() const;
+    void replaceState (State);
 
 private:
     struct Snapshot
@@ -75,6 +108,9 @@ private:
         int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
         int nextTrackId = 1;
         double loopStart = 0.0, loopEnd = 16.0, totalBeats = 256.0;
+        std::vector<ArrangementLocator> locators;
+        int selectedLocatorId = -1, songStartLocatorId = -1;
+        int nextLocatorId = 1;
     };
 
     Snapshot makeSnapshot() const;
@@ -82,6 +118,7 @@ private:
     void recordUndo();
 
     int nextTrackId = 1;
+    int nextLocatorId = 1;
     std::vector<Snapshot> undoStack, redoStack;
     bool editInProgress = false;
 };

@@ -17,6 +17,7 @@ public:
     std::function<void (float)> onPreviewGainChanged;
     std::function<bool (const juce::File&)> canDeleteFile;
     void setFavoritesMode (bool);
+    void stopPreview();
     void revealFile (const juce::File&);
     void setStatus (const juce::String& text) { status.setText (text, juce::dontSendNotification); }
     void paint (juce::Graphics&) override;
@@ -51,6 +52,7 @@ private:
     void loadFavorites();
     void saveFavorites();
     static bool isAudioFile (const juce::File&);
+    void mouseDown (const juce::MouseEvent&) override;
 
     juce::Label title { {}, "Arquivos de audio" };
     juce::Label status { {}, "Selecione um arquivo de audio para ouvir" };

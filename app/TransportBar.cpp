@@ -16,7 +16,7 @@ void IconButton::setIcon (icons::Icon i)
 void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     auto r = getLocalBounds().toFloat().reduced (1.0f);
-    const bool active = (icon == icons::Icon::Pause);
+    const bool active = icon == icons::Icon::Pause;
     g.setColour (down ? theme::pressed() : over ? theme::hover() : theme::control());
     g.fillRoundedRectangle (r, 4.0f);
 
@@ -44,7 +44,32 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     addAndMakeVisible (playButton);
     addAndMakeVisible (stopButton);
     addAndMakeVisible (rewindButton);
+    addAndMakeVisible (projectButton);
+    addAndMakeVisible (metronomeButton);
+    addAndMakeVisible (metronomeVolumeSlider);
     for (auto* b : std::initializer_list<juce::Component*> { &playButton, &stopButton, &rewindButton }) b->setMouseClickGrabsKeyboardFocus (false);
+    metronomeButton.setMouseClickGrabsKeyboardFocus (false);
+    projectButton.setMouseClickGrabsKeyboardFocus (false);
+    projectButton.setTooltip ("Abrir, salvar ou criar um projeto");
+    projectButton.onClick = [this] { if (onProjectMenu) onProjectMenu(); };
+    metronomeButton.setTooltip ("Ativar ou desativar o metronomo");
+    metronomeButton.setClickingTogglesState (true);
+    metronomeButton.setToggleState (graph.isMetronomeEnabled(), juce::dontSendNotification);
+    metronomeButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
+    metronomeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    metronomeButton.onClick = [this] { graph.setMetronomeEnabled (metronomeButton.getToggleState()); };
+    metronomeVolumeSlider.setName ("Volume do metronomo");
+    metronomeVolumeSlider.setTooltip ("Volume do metronomo");
+    metronomeVolumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
+    metronomeVolumeSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+    metronomeVolumeSlider.setRange (0.0, 1.0, 0.01);
+    metronomeVolumeSlider.setValue (graph.getMetronomeGain(), juce::dontSendNotification);
+    metronomeVolumeSlider.setColour (juce::Slider::thumbColourId, theme::accent());
+    metronomeVolumeSlider.setColour (juce::Slider::trackColourId, theme::border());
+    metronomeVolumeSlider.onValueChange = [this]
+    {
+        graph.setMetronomeGain (static_cast<float> (metronomeVolumeSlider.getValue()));
+    };
     loopButton.setMouseClickGrabsKeyboardFocus (false);
     browserButton.setMouseClickGrabsKeyboardFocus (false);
     fileBrowserButton.setMouseClickGrabsKeyboardFocus (false);
@@ -127,12 +152,12 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     };
 
     bpmCaption.setColour (juce::Label::textColourId, theme::textDim());
-    bpmCaption.setFont (juce::FontOptions (11.0f));
+    bpmCaption.setFont (juce::FontOptions (12.5f));
 
     positionLabel.setJustificationType (juce::Justification::centred);
     positionLabel.setColour (juce::Label::backgroundColourId, theme::control());
     positionLabel.setColour (juce::Label::textColourId, theme::text());
-    positionLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 15.0f, juce::Font::plain));
+    positionLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 16.0f, juce::Font::plain));
 
     startTimerHz (30);
     timerCallback();
@@ -140,6 +165,8 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 
 void TransportBar::togglePlay()
 {
+    if (! graph.isPlaying() && onBeforePlay)
+        onBeforePlay();
     graph.setPlaying (! graph.isPlaying());
     updateButtons();
 }
@@ -181,6 +208,20 @@ void TransportBar::setPianoRollVisible (bool visible)
     pianoRollButton.setToggleState (visible, juce::dontSendNotification);
 }
 
+void TransportBar::setBpm (double bpm)
+{
+    graph.setBpm (std::clamp (bpm, 20.0, 999.0));
+    bpmLabel.setText (juce::String (graph.getBpm(), 2), juce::dontSendNotification);
+}
+
+void TransportBar::setMetronomeState (bool enabled, float gain)
+{
+    graph.setMetronomeEnabled (enabled);
+    graph.setMetronomeGain (gain);
+    metronomeButton.setToggleState (enabled, juce::dontSendNotification);
+    metronomeVolumeSlider.setValue (gain, juce::dontSendNotification);
+}
+
 void TransportBar::updateButtons()
 {
     playButton.setIcon (graph.isPlaying() ? icons::Icon::Pause : icons::Icon::Play);
@@ -220,7 +261,7 @@ void TransportBar::paint (juce::Graphics& g)
         g.setColour (theme::control());
         g.fillRoundedRectangle (meter, 4.0f);
         g.setColour (theme::text());
-        g.setFont (juce::FontOptions (10.0f));
+        g.setFont (juce::FontOptions (11.5f));
         g.drawText ("CPU " + juce::String (static_cast<int> (std::lround (displayedCpuCurrent * 100.0)))
                     + "%  med " + juce::String (static_cast<int> (std::lround (displayedCpuAverage * 100.0))) + "%",
                     meter.toNearestInt().withTrimmedBottom (5), juce::Justification::centred, true);
@@ -237,6 +278,8 @@ void TransportBar::paint (juce::Graphics& g)
 void TransportBar::resized()
 {
     auto area = getLocalBounds().reduced (8, 4);
+    projectButton.setBounds (area.removeFromLeft (72));
+    area.removeFromLeft (8);
     bpmCaption.setBounds (area.removeFromLeft (34));
     bpmLabel.setBounds (area.removeFromLeft (76));
     area.removeFromLeft (16);
@@ -247,10 +290,14 @@ void TransportBar::resized()
     stopButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (12);
     loopButton.setBounds (area.removeFromLeft (56));
-    area.removeFromLeft (16);
+    area.removeFromLeft (6);
+    metronomeButton.setBounds (area.removeFromLeft (88));
+    area.removeFromLeft (6);
+    metronomeVolumeSlider.setBounds (area.removeFromLeft (68).reduced (0, 8));
+    area.removeFromLeft (12);
     positionLabel.setBounds (area.removeFromLeft (120));
     area.removeFromLeft (12);
-    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - 394));
+    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - 482));
     if (cpuWidth >= 100)
     {
         cpuMeterBounds = area.removeFromLeft (cpuWidth);
@@ -260,11 +307,12 @@ void TransportBar::resized()
     {
         cpuMeterBounds = {};
     }
-    browserButton.setBounds (area.removeFromRight (88));
-    area.removeFromRight (6);
-    fileBrowserButton.setBounds (area.removeFromRight (72));
-    area.removeFromRight (6);
-    favoritesButton.setBounds (area.removeFromRight (100));
-    area.removeFromRight (6);
-    pianoRollButton.setBounds (area.removeFromRight (104));
+    const bool compact = getWidth() < 1120;
+    browserButton.setBounds (area.removeFromRight (compact ? 74 : 88));
+    area.removeFromRight (compact ? 4 : 6);
+    fileBrowserButton.setBounds (area.removeFromRight (compact ? 58 : 72));
+    area.removeFromRight (compact ? 4 : 6);
+    favoritesButton.setBounds (area.removeFromRight (compact ? 88 : 100));
+    area.removeFromRight (compact ? 4 : 6);
+    pianoRollButton.setBounds (area.removeFromRight (compact ? 94 : 104));
 }

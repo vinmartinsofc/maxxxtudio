@@ -9,10 +9,11 @@ AudioClipEditor::AudioClipEditor()
     addAndMakeVisible (tempoInfo);
     addAndMakeVisible (bpmLabel);
     addAndMakeVisible (sourceBpm);
+    addAndMakeVisible (warpButton);
     addAndMakeVisible (closeButton);
 
     fileName.setColour (juce::Label::textColourId, theme::text());
-    fileName.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+    fileName.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     tempoInfo.setColour (juce::Label::textColourId, theme::textDim());
     bpmLabel.setColour (juce::Label::textColourId, theme::textDim());
     sourceBpm.setRange (20.0, 300.0, 0.1);
@@ -20,6 +21,12 @@ AudioClipEditor::AudioClipEditor()
     sourceBpm.setColour (juce::Slider::textBoxTextColourId, theme::text());
     sourceBpm.setColour (juce::Slider::textBoxBackgroundColourId, theme::panelLight());
     closeButton.setMouseClickGrabsKeyboardFocus (false);
+    warpButton.setTooltip ("Sincronizar este clip ao BPM do projeto; a velocidade altera a afinação.");
+    warpButton.onClick = [this]
+    {
+        if (clip != nullptr && onWarpChanged)
+            onWarpChanged (warpButton.getToggleState());
+    };
     closeButton.onClick = [this] { if (onClose) onClose(); };
     sourceBpm.onValueChange = [this]
     {
@@ -46,6 +53,8 @@ void AudioClipEditor::setClip (const roll::AudioPlacement* selected,
                       juce::dontSendNotification);
     sourceBpm.setValue (clip != nullptr ? clip->sourceBpm : 120.0, juce::dontSendNotification);
     sourceBpm.setEnabled (clip != nullptr && clip->durationSeconds > 0.0);
+    warpButton.setToggleState (clip != nullptr && clip->warpEnabled, juce::dontSendNotification);
+    warpButton.setEnabled (clip != nullptr);
     tempoInfo.setText (clip != nullptr
         ? "Projeto: " + juce::String (projectBpm, 1) + " BPM    |    Duracao: "
             + juce::String (clip->durationSeconds, 2) + " s"
@@ -98,6 +107,8 @@ void AudioClipEditor::resized()
     auto header = getLocalBounds().reduced (8).removeFromTop (34);
     closeButton.setBounds (header.removeFromRight (110));
     header.removeFromRight (8);
+    warpButton.setBounds (header.removeFromRight (64));
+    header.removeFromRight (6);
     sourceBpm.setBounds (header.removeFromRight (126));
     header.removeFromRight (6);
     bpmLabel.setBounds (header.removeFromRight (90));

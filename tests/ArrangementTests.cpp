@@ -136,6 +136,15 @@ TEST_CASE("Clips de audio preservam arquivo, waveform e limites de sobreposicao"
     REQUIRE(track.isAudioFree (2.0, 3.0, a->id));
 }
 
+TEST_CASE("Curvas de fade sao suaves e permitem ajustar o perfil")
+{
+    REQUIRE(audioFadeCurveValue (0.0, 0.0) == 0.0);
+    REQUIRE(audioFadeCurveValue (1.0, 0.0) == 1.0);
+    REQUIRE(audioFadeCurveValue (0.5, 0.0) == 0.5);
+    REQUIRE(audioFadeCurveValue (0.25, 1.0) > audioFadeCurveValue (0.25, 0.0));
+    REQUIRE(audioFadeCurveValue (0.25, -1.0) < audioFadeCurveValue (0.25, 0.0));
+}
+
 TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
 {
     Track track;
@@ -147,6 +156,8 @@ TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
     original->sourceOffsetSeconds = 1.5;
     original->fadeInBeats = 1.0;
     original->fadeOutBeats = 1.0;
+    original->fadeInCurve = 0.4;
+    original->fadeOutCurve = -0.3;
 
     const int rightId = track.splitAudioClip (original->id, 6.0);
     REQUIRE(rightId > 0);
@@ -167,8 +178,10 @@ TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
     REQUIRE(right->filePath == original->filePath);
     REQUIRE(original->fadeInBeats == 1.0);
     REQUIRE(original->fadeOutBeats == 0.0);
+    REQUIRE(original->fadeInCurve == 0.4);
     REQUIRE(right->fadeInBeats == 0.0);
     REQUIRE(right->fadeOutBeats == 1.0);
+    REQUIRE(right->fadeOutCurve == -0.3);
 }
 
 TEST_CASE("Copiar clip de audio preserva offset e fades")
@@ -180,6 +193,8 @@ TEST_CASE("Copiar clip de audio preserva offset e fades")
     original->sourceOffsetSeconds = 0.5;
     original->fadeInBeats = 0.75;
     original->fadeOutBeats = 1.25;
+    original->fadeInCurve = 0.3;
+    original->fadeOutCurve = -0.2;
 
     auto* copy = track.copyAudioClip (*original, 4.0);
     REQUIRE(copy != nullptr);
@@ -187,6 +202,8 @@ TEST_CASE("Copiar clip de audio preserva offset e fades")
     REQUIRE(copy->sourceOffsetSeconds == 0.5);
     REQUIRE(copy->fadeInBeats == 0.75);
     REQUIRE(copy->fadeOutBeats == 1.25);
+    REQUIRE(copy->fadeInCurve == 0.3);
+    REQUIRE(copy->fadeOutCurve == -0.2);
     REQUIRE(copy->waveform == original->waveform);
     REQUIRE(original->start == 0.0);
     REQUIRE(track.copyAudioClip (*original, 2.0) == nullptr);

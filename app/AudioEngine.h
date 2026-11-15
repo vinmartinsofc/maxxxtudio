@@ -68,6 +68,7 @@ public:
     TrackMixer();
     void set (float gain, float pan, bool muted) { targetGain = gain; targetPan = pan; mute = muted; }
     float peak() const { return peakLevel; }
+    void resetPeak();
 
     const juce::String getName() const override { return "Track Mixer"; }
     void prepareToPlay (double, int) override {}
@@ -100,6 +101,10 @@ public:
     // ---- message thread ----
     void setPlaying (bool p)       { playing = p; }
     bool isPlaying() const         { return playing; }
+    void setMetronomeEnabled (bool enabled) { metronomeEnabled = enabled; }
+    bool isMetronomeEnabled() const { return metronomeEnabled.load(); }
+    void setMetronomeGain (float gain) { metronomeGain.store (std::clamp (gain, 0.0f, 1.0f)); }
+    float getMetronomeGain() const { return metronomeGain.load(); }
     void rewind()                  { rewindRequested = true; }
     void seek (double beats)       { seekTarget = beats; seekRequested = true; }
     void setBpm (double b)         { bpm = b; }
@@ -121,8 +126,15 @@ private:
     BlockShared shared;
     bool wasPlaying = false;
     std::atomic<bool>   playing { false }, rewindRequested { false }, seekRequested { false }, loopEnabled { true };
+    std::atomic<bool> metronomeEnabled { false };
+    std::atomic<float> metronomeGain { 1.0f };
     std::atomic<double> bpm { 120.0 }, loopStart { 0.0 }, loopEnd { 16.0 }, seekTarget { 0.0 }, positionAtomic { 0.0 };
     std::atomic<double> audioCpuCurrentValue { 0.0 }, audioCpuAverageValue { 0.0 };
+    int clickSamplesRemaining = 0;
+    double clickPhase = 0.0, clickPhaseStep = 0.0;
+    double freeMetronomeBeatPhase = 1.0;
+    std::int64_t freeMetronomeBeatNumber = 0;
+    float clickEnvelope = 0.0f, clickEnvelopeDecay = 0.0f;
 };
 
 struct DeviceInfo
@@ -132,6 +144,16 @@ struct DeviceInfo
     bool isInstrument = false;
     bool isBypassed = false;
     int groupId = 0;
+};
+
+struct PluginState
+{
+    int trackId = 0;
+    int order = 0;
+    juce::String identifier;
+    bool bypassed = false;
+    int groupId = 0;
+    juce::MemoryBlock state;
 };
 
 struct AudioFileData
@@ -151,7 +173,10 @@ struct AudioClipPlayback
     double sourceOffsetSeconds = 0.0;
     double fadeInBeats = 0.0;
     double fadeOutBeats = 0.0;
+    double fadeInCurve = 0.0;
+    double fadeOutCurve = 0.0;
     std::shared_ptr<const AudioFileData> source;
+    bool warpEnabled = true;
 };
 
 class TrackAudioSource : public juce::AudioProcessor
@@ -238,6 +263,7 @@ public:
     void setMixer (int trackId, float gain, float pan, bool muted);
     void setTrackRouting (int trackId, roll::TrackOutputRouting routing);
     void setMasterMixer (float gain, float pan, bool muted = false);
+    void resetPeak (int trackId);
     void previewNote (int trackId, int pitch, bool on);
     void activeMask (int trackId, std::uint64_t& lo, std::uint64_t& hi) const;
     float peak (int trackId) const;
@@ -259,6 +285,8 @@ public:
     bool ungroupDevices (int trackId, const std::vector<int>& deviceIds);
     void setDeviceBypassed (int trackId, int deviceId, bool bypassed);
     std::vector<DeviceInfo> devices (int trackId) const;
+    std::vector<PluginState> getPluginStates();
+    bool restorePluginState (int trackId, int deviceId, const juce::MemoryBlock&);
     std::unique_ptr<juce::AudioProcessorEditor> createDeviceEditor (int trackId, int deviceId);
 
 private:

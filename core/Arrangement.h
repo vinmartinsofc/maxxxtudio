@@ -1,5 +1,7 @@
 #pragma once
 #include "Clip.h"
+#include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,6 +31,16 @@ struct WaveformRange
     friend bool operator== (const WaveformRange&, const WaveformRange&) = default;
 };
 
+inline double audioFadeCurveValue (double progress, double curve)
+{
+    const double t = std::clamp (progress, 0.0, 1.0);
+    const double smooth = t * t * (3.0 - 2.0 * t);
+    const double amount = std::clamp (std::abs (curve), 0.0, 1.0);
+    const double control = curve >= 0.0 ? 1.0 : 0.0;
+    const double quadratic = 2.0 * (1.0 - t) * t * control + t * t;
+    return std::clamp (smooth + amount * (quadratic - smooth), 0.0, 1.0);
+}
+
 struct AudioPlacement
 {
     int         id = 0;
@@ -38,8 +50,11 @@ struct AudioPlacement
     double      sourceOffsetSeconds = 0.0;
     double      fadeInBeats = 0.0;
     double      fadeOutBeats = 0.0;
+    double      fadeInCurve = 0.0;
+    double      fadeOutCurve = 0.0;
     double      sourceBpm = 120.0;
     bool        enabled = true;
+    bool        warpEnabled = true;
     std::string name, filePath;
     std::vector<WaveformRange> waveform;
 
@@ -92,6 +107,7 @@ public:
 
     // Id de clip único dentro da trilha.
     int nextClipId() { return nextId++; }
+    void reserveClipId (int clipId) { if (clipId >= nextId) nextId = clipId + 1; }
 
 private:
     int nextId = 1;

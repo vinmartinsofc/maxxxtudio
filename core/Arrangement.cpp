@@ -182,7 +182,10 @@ AudioPlacement* Track::copyAudioClip (const AudioPlacement& source, double start
     copy->sourceOffsetSeconds = source.sourceOffsetSeconds;
     copy->fadeInBeats = source.fadeInBeats;
     copy->fadeOutBeats = source.fadeOutBeats;
+    copy->fadeInCurve = source.fadeInCurve;
+    copy->fadeOutCurve = source.fadeOutCurve;
     copy->enabled = source.enabled;
+    copy->warpEnabled = source.warpEnabled;
     return copy;
 }
 
@@ -224,19 +227,25 @@ int Track::splitAudioClip (int clipId, double beat)
     const double sourceOffset = clip->sourceOffsetSeconds;
     const double fadeIn = clip->fadeInBeats;
     const double fadeOut = clip->fadeOutBeats;
+    const double fadeInCurve = clip->fadeInCurve;
+    const double fadeOutCurve = clip->fadeOutCurve;
     const bool enabled = clip->enabled;
+    const bool warpEnabled = clip->warpEnabled;
     clip->lengthBeats = offset;
     clip->durationSeconds = leftDuration;
     clip->waveform = std::move (leftWaveform);
     clip->fadeInBeats = std::min (fadeIn, offset);
     clip->fadeOutBeats = std::max (0.0, fadeOut - rightLength);
+    clip->fadeInCurve = fadeInCurve;
 
     auto* right = addAudioClip (beat, rightLength, filePath, name, std::move (rightWaveform),
                                 rightDuration, sourceBpm);
     right->sourceOffsetSeconds = rightSourceOffset;
     right->fadeInBeats = std::max (0.0, fadeIn - offset);
     right->fadeOutBeats = std::min (fadeOut, rightLength);
+    right->fadeOutCurve = fadeOutCurve;
     right->enabled = enabled;
+    right->warpEnabled = warpEnabled;
     return right->id;
 }
 

@@ -11,6 +11,103 @@ ProjectModel::ProjectModel()
     masterTrack->pan = 0.0;
 }
 
+ProjectModel::State ProjectModel::createState() const
+{
+    State state;
+    state.master = *masterTrack;
+    state.tracks.reserve (tracks.size());
+    for (const auto& track : tracks)
+        state.tracks.push_back (*track);
+    state.selectedTrackId = selectedTrackId;
+    state.selectedClipId = selectedClipId;
+    state.selectedAudioClipId = selectedAudioClipId;
+    state.loopStart = loopStart;
+    state.loopEnd = loopEnd;
+    state.totalBeats = totalBeats;
+    state.locators = locators;
+    state.selectedLocatorId = selectedLocatorId;
+    state.songStartLocatorId = songStartLocatorId;
+    return state;
+}
+
+void ProjectModel::replaceState (State state)
+{
+    selectedTrackId = selectedClipId = selectedAudioClipId = -1;
+    if (onSelectionChanged)
+        onSelectionChanged();
+
+    for (const auto& track : tracks)
+        if (onTrackRemoved)
+            onTrackRemoved (track->id);
+
+    masterTrack = std::make_unique<roll::Track> (std::move (state.master));
+    tracks.clear();
+    tracks.reserve (state.tracks.size());
+    nextTrackId = 1;
+    for (auto& track : state.tracks)
+    {
+        nextTrackId = std::max (nextTrackId, track.id + 1);
+        tracks.push_back (std::make_unique<roll::Track> (std::move (track)));
+    }
+
+    selectedTrackId = state.selectedTrackId;
+    selectedClipId = state.selectedClipId;
+    selectedAudioClipId = state.selectedAudioClipId;
+    loopStart = std::max (0.0, state.loopStart);
+    loopEnd = std::max (loopStart + 1.0 / 64.0, state.loopEnd);
+    totalBeats = std::max (16.0, state.totalBeats);
+    locators = std::move (state.locators);
+    selectedLocatorId = state.selectedLocatorId;
+    songStartLocatorId = state.songStartLocatorId;
+    nextLocatorId = 1;
+    for (const auto& marker : locators)
+        nextLocatorId = std::max (nextLocatorId, marker.id + 1);
+    if (locator (selectedLocatorId) == nullptr)
+        selectedLocatorId = -1;
+    if (locator (songStartLocatorId) == nullptr)
+        songStartLocatorId = -1;
+    std::sort (locators.begin(), locators.end(), [] (const auto& a, const auto& b)
+    {
+        return a.beat == b.beat ? a.id < b.id : a.beat < b.beat;
+    });
+
+    undoStack.clear();
+    redoStack.clear();
+    editInProgress = false;
+
+    for (const auto& track : tracks)
+    {
+        if (onTrackAdded)
+            onTrackAdded (track->id);
+        if (track->type == roll::TrackType::Audio)
+        {
+            if (onAudioClipsChanged)
+                onAudioClipsChanged (track->id);
+        }
+        else if (onTrackNotes)
+            onTrackNotes (track->id);
+    }
+
+    if (selectedTrack() == nullptr)
+    {
+        selectedTrackId = tracks.empty() ? -1 : tracks.front()->id;
+        selectedClipId = selectedAudioClipId = -1;
+    }
+    if (selectedClip() == nullptr)
+        selectedClipId = -1;
+    if (auto* selected = selectedTrack(); selected == nullptr
+        || selected->findAudioClip (selectedAudioClipId) == nullptr)
+        selectedAudioClipId = -1;
+
+    if (onMixerChanged)
+        onMixerChanged();
+    if (onLoopChanged)
+        onLoopChanged();
+    if (onSelectionChanged)
+        onSelectionChanged();
+    sendChangeMessage();
+}
+
 ProjectModel::Snapshot ProjectModel::makeSnapshot() const
 {
     Snapshot snapshot;
@@ -24,6 +121,10 @@ ProjectModel::Snapshot ProjectModel::makeSnapshot() const
     snapshot.loopStart = loopStart;
     snapshot.loopEnd = loopEnd;
     snapshot.totalBeats = totalBeats;
+    snapshot.locators = locators;
+    snapshot.selectedLocatorId = selectedLocatorId;
+    snapshot.songStartLocatorId = songStartLocatorId;
+    snapshot.nextLocatorId = nextLocatorId;
     return snapshot;
 }
 
@@ -41,6 +142,10 @@ void ProjectModel::restoreSnapshot (Snapshot&& snapshot)
     loopStart = snapshot.loopStart;
     loopEnd = snapshot.loopEnd;
     totalBeats = snapshot.totalBeats;
+    locators = std::move (snapshot.locators);
+    selectedLocatorId = snapshot.selectedLocatorId;
+    songStartLocatorId = snapshot.songStartLocatorId;
+    nextLocatorId = snapshot.nextLocatorId;
 
     for (const auto& track : tracks)
     {
@@ -499,6 +604,28 @@ bool ProjectModel::setAudioClipFades (int trackId, int clipId, double fadeInBeat
     return true;
 }
 
+bool ProjectModel::setAudioClipFadeCurves (int trackId, int clipId, double fadeInCurve,
+                                           double fadeOutCurve)
+{
+    auto* t = track (trackId);
+    auto* clip = t != nullptr ? t->findAudioClip (clipId) : nullptr;
+    if (t == nullptr || t->type != roll::TrackType::Audio || clip == nullptr
+        || ! std::isfinite (fadeInCurve) || ! std::isfinite (fadeOutCurve)
+        || fadeInCurve < -1.0 || fadeInCurve > 1.0
+        || fadeOutCurve < -1.0 || fadeOutCurve > 1.0)
+        return false;
+
+    if (clip->fadeInCurve == fadeInCurve && clip->fadeOutCurve == fadeOutCurve)
+        return true;
+
+    recordUndo();
+    clip->fadeInCurve = fadeInCurve;
+    clip->fadeOutCurve = fadeOutCurve;
+    if (onAudioClipsChanged) onAudioClipsChanged (trackId);
+    sendChangeMessage();
+    return true;
+}
+
 bool ProjectModel::setAudioClipSourceBpm (int trackId, int clipId, double sourceBpm)
 {
     auto* t = track (trackId);
@@ -517,6 +644,22 @@ bool ProjectModel::setAudioClipSourceBpm (int trackId, int clipId, double source
     clip->fadeInBeats = std::min (clip->fadeInBeats, newLength);
     clip->fadeOutBeats = std::min (clip->fadeOutBeats, newLength);
     growTo (clip->end() + 64.0);
+    if (onAudioClipsChanged) onAudioClipsChanged (trackId);
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::setAudioClipWarpEnabled (int trackId, int clipId, bool enabled)
+{
+    auto* t = track (trackId);
+    auto* clip = t != nullptr ? t->findAudioClip (clipId) : nullptr;
+    if (t == nullptr || t->type != roll::TrackType::Audio || clip == nullptr)
+        return false;
+    if (clip->warpEnabled == enabled)
+        return true;
+
+    recordUndo();
+    clip->warpEnabled = enabled;
     if (onAudioClipsChanged) onAudioClipsChanged (trackId);
     sendChangeMessage();
     return true;
@@ -616,6 +759,123 @@ void ProjectModel::setLoop (double s, double e)
     loopEnd = std::max (loopStart + 1.0 / 64.0, e);
     if (onLoopChanged) onLoopChanged();
     sendChangeMessage();
+}
+
+int ProjectModel::addLocator (double beat)
+{
+    if (! std::isfinite (beat) || beat < 0.0)
+        return -1;
+
+    recordUndo();
+    const int id = nextLocatorId++;
+    locators.push_back ({ id, beat, std::to_string (id), {} });
+    std::sort (locators.begin(), locators.end(), [] (const auto& a, const auto& b)
+    {
+        return a.beat == b.beat ? a.id < b.id : a.beat < b.beat;
+    });
+    selectedLocatorId = id;
+    sendChangeMessage();
+    return id;
+}
+
+bool ProjectModel::moveLocator (int id, double beat)
+{
+    auto* marker = locator (id);
+    if (marker == nullptr || ! std::isfinite (beat) || beat < 0.0)
+        return false;
+    if (marker->beat == beat)
+        return true;
+
+    recordUndo();
+    marker->beat = beat;
+    std::sort (locators.begin(), locators.end(), [] (const auto& a, const auto& b)
+    {
+        return a.beat == b.beat ? a.id < b.id : a.beat < b.beat;
+    });
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::renameLocator (int id, std::string name)
+{
+    auto* marker = locator (id);
+    if (marker == nullptr)
+        return false;
+    if (name.empty())
+        name = std::to_string (id);
+    if (marker->name == name)
+        return true;
+
+    recordUndo();
+    marker->name = std::move (name);
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::setLocatorInfo (int id, std::string info)
+{
+    auto* marker = locator (id);
+    if (marker == nullptr)
+        return false;
+    if (marker->info == info)
+        return true;
+
+    recordUndo();
+    marker->info = std::move (info);
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::removeLocator (int id)
+{
+    const auto it = std::find_if (locators.begin(), locators.end(),
+                                  [id] (const auto& marker) { return marker.id == id; });
+    if (it == locators.end())
+        return false;
+
+    recordUndo();
+    locators.erase (it);
+    if (selectedLocatorId == id)
+        selectedLocatorId = -1;
+    if (songStartLocatorId == id)
+        songStartLocatorId = -1;
+    sendChangeMessage();
+    return true;
+}
+
+void ProjectModel::selectLocator (int id)
+{
+    if (id != -1 && locator (id) == nullptr)
+        return;
+    if (selectedLocatorId == id)
+        return;
+    selectedLocatorId = id;
+    sendChangeMessage();
+}
+
+void ProjectModel::setSongStartLocator (int id)
+{
+    if (id != -1 && locator (id) == nullptr)
+        return;
+    if (songStartLocatorId == id)
+        return;
+    recordUndo();
+    songStartLocatorId = id;
+    sendChangeMessage();
+}
+
+ArrangementLocator* ProjectModel::locator (int id)
+{
+    const auto it = std::find_if (locators.begin(), locators.end(),
+                                  [id] (const auto& marker) { return marker.id == id; });
+    return it == locators.end() ? nullptr : &*it;
+}
+
+const ArrangementLocator* ProjectModel::locator (int id) const
+{
+    const auto it = std::find_if (locators.begin(), locators.end(),
+                                  [id] (const auto& marker) { return marker.id == id; });
+    return it == locators.end() ? nullptr : &*it;
 }
 
 void ProjectModel::growTo (double beats)
