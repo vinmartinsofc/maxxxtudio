@@ -2314,11 +2314,10 @@ public:
             navigationPending = e.position.y > 10.0f;
             if (navigationPending)
             {
-                navigationStartScreenPosition = e.getScreenPosition();
-                navigationLastScreenPosition = navigationStartScreenPosition;
-                navigationStartViewX = owner.viewport.getViewPositionX();
+                navigationLastScreenPosition = e.getScreenPosition();
                 navigationAnchorBeat = e.position.x / owner.pixelsPerBeat;
-                navigationAnchorScreenX = static_cast<int> (std::lround (e.position.x - navigationStartViewX));
+                navigationAnchorScreenX = static_cast<int> (std::lround (
+                    e.position.x - owner.viewport.getViewPositionX()));
             }
             else
             {
@@ -2369,8 +2368,7 @@ public:
             if (e.getDistanceFromDragStart() < 4.0f)
                 return;
 
-            const auto delta = screenPosition - navigationStartScreenPosition;
-            mode = std::abs (delta.x) > std::abs (delta.y) ? Mode::PanView : Mode::ZoomView;
+            mode = Mode::PanZoomView;
             updateCursor (e.position);
         }
 
@@ -2386,21 +2384,26 @@ public:
                     owner.onArrangementSeekRequested (seekBeat);
                 break;
             }
-            case Mode::PanView:
+            case Mode::PanZoomView:
             {
-                const int dx = screenPosition.x - navigationStartScreenPosition.x;
-                owner.viewport.setViewPosition (std::max (0, navigationStartViewX + dx),
-                                                owner.viewport.getViewPositionY());
-                owner.syncPositions();
-                break;
-            }
-            case Mode::ZoomView:
-            {
-                const int dy = screenPosition.y - navigationLastScreenPosition.y;
+                const auto delta = screenPosition - navigationLastScreenPosition;
                 navigationLastScreenPosition = screenPosition;
-                if (dy != 0)
-                    owner.zoomAt (std::exp (static_cast<double> (dy) * 0.012),
+                if (delta.y != 0)
+                    owner.zoomAt (std::exp (static_cast<double> (delta.y) * 0.012),
                                   navigationAnchorBeat, navigationAnchorScreenX);
+
+                if (delta.x != 0)
+                {
+                    const int oldViewX = owner.viewport.getViewPositionX();
+                    owner.viewport.setViewPosition (std::max (0, oldViewX + delta.x),
+                                                    owner.viewport.getViewPositionY());
+                    const int actualDelta = owner.viewport.getViewPositionX() - oldViewX;
+                    if (actualDelta != 0)
+                    {
+                        navigationAnchorBeat += static_cast<double> (actualDelta) / owner.pixelsPerBeat;
+                        owner.syncPositions();
+                    }
+                }
                 break;
             }
             case Mode::LoopLeft:  project.setLoop (std::min (beat, project.loopEnd - 1.0), project.loopEnd); break;
@@ -2463,7 +2466,7 @@ public:
     }
 
 private:
-    enum class Mode { Seek, PanView, ZoomView, LoopLeft, LoopRight, LoopMove, LocatorMove };
+    enum class Mode { Seek, PanZoomView, LoopLeft, LoopRight, LoopMove, LocatorMove };
     void notifyInteraction (bool active, int holdMilliseconds = 0, bool dragging = false)
     {
         if (! owner.onInteractionChanged)
@@ -2474,8 +2477,7 @@ private:
         switch (mode)
         {
             case Mode::Seek:       message = active ? (dragging ? "Arrastando playhead" : "Segurando playhead") : "Cursor posicionado"; break;
-            case Mode::PanView:    message = active ? "Navegando no arranjo" : "Navegacao concluida"; icon = icons::Icon::Move; break;
-            case Mode::ZoomView:   message = active ? "Ajustando zoom do arranjo" : "Zoom ajustado"; icon = icons::Icon::Resize; break;
+            case Mode::PanZoomView:message = active ? "Ajustando zoom e navegando" : "Zoom e navegacao ajustados"; icon = icons::Icon::Resize; break;
             case Mode::LoopLeft:
             case Mode::LoopRight:  message = active ? (dragging ? "Ajustando loop" : "Segurando limite do loop") : "Loop ajustado"; icon = icons::Icon::SelectRegion; break;
             case Mode::LoopMove:   message = active ? (dragging ? "Movendo loop" : "Segurando loop") : "Loop movido"; icon = icons::Icon::Loop; break;
@@ -2493,8 +2495,8 @@ private:
     int draggedLocatorId = -1;
     bool locatorEditStarted = false;
     bool navigationPending = false;
-    juce::Point<int> navigationStartScreenPosition, navigationLastScreenPosition;
-    int navigationStartViewX = 0, navigationAnchorScreenX = 0;
+    juce::Point<int> navigationLastScreenPosition;
+    int navigationAnchorScreenX = 0;
     double navigationAnchorBeat = 0.0;
     int hoveredLocatorId = -1;
     juce::String hoveredInfo;
@@ -2653,9 +2655,7 @@ private:
             setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
         else if (target == Mode::LoopMove || target == Mode::LocatorMove)
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
-        else if (target == Mode::PanView)
-            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
-        else if (target == Mode::ZoomView
+        else if (target == Mode::PanZoomView
                  || (target == Mode::Seek && position.y > 10.0f && locatorAt (position) == nullptr))
             setMouseCursor (ui::zoomCursor());
         else
@@ -3410,12 +3410,12 @@ public:
             owner.syncPositions();
         }
 
-        dragStartX = e.position.x;
         lastZoomY = e.position.y;
-        dragStartViewX = owner.viewport.getViewPositionX();
+        lastPanX = e.position.x;
         zoomAnchorBeat = clickedBeat;
         zoomAnchorScreenX = clickedInsideView
-            ? static_cast<int> (std::lround (e.position.x))
+            ? static_cast<int> (std::lround (clickedBeat * owner.pixelsPerBeat
+                                             - owner.viewport.getViewPositionX()))
             : owner.viewport.getMaximumVisibleWidth() / 2;
         gesture = Gesture::Pending;
     }
@@ -3426,27 +3426,35 @@ public:
         {
             if (e.getDistanceFromDragStart() < 4.0f)
                 return;
-            gesture = std::abs (e.position.x - dragStartX) > std::abs (e.position.y - lastZoomY)
-                ? Gesture::Pan : Gesture::Zoom;
+            gesture = Gesture::PanZoom;
         }
 
-        if (gesture == Gesture::Zoom)
+        const float deltaY = e.position.y - lastZoomY;
+        if (deltaY != 0.0f)
         {
-            const float deltaY = e.position.y - lastZoomY;
             lastZoomY = e.position.y;
-            if (deltaY != 0.0f)
-                owner.zoomAt (std::exp (static_cast<double> (deltaY) * 0.012),
-                              zoomAnchorBeat, zoomAnchorScreenX);
-            return;
+            owner.zoomAt (std::exp (static_cast<double> (deltaY) * 0.012),
+                          zoomAnchorBeat, zoomAnchorScreenX);
         }
 
-        const double totalBeats = std::max (1.0, project.totalBeats);
-        const double pixelsPerOverviewPixel = totalBeats * owner.pixelsPerBeat / std::max (1, getWidth());
-        const auto deltaX = static_cast<int> (std::lround (
-            (e.position.x - dragStartX) * pixelsPerOverviewPixel));
-        owner.viewport.setViewPosition (std::max (0, dragStartViewX + deltaX),
-                                        owner.viewport.getViewPositionY());
-        owner.syncPositions();
+        const float deltaX = e.position.x - lastPanX;
+        lastPanX = e.position.x;
+        if (deltaX != 0.0f)
+        {
+            const double totalBeats = std::max (1.0, project.totalBeats);
+            const double pixelsPerOverviewPixel = totalBeats * owner.pixelsPerBeat
+                                                / std::max (1, getWidth());
+            const int oldViewX = owner.viewport.getViewPositionX();
+            const int newViewX = std::max (0, oldViewX + static_cast<int> (std::lround (
+                deltaX * pixelsPerOverviewPixel)));
+            if (newViewX != oldViewX)
+            {
+                owner.viewport.setViewPosition (newViewX, owner.viewport.getViewPositionY());
+                zoomAnchorBeat += static_cast<double> (owner.viewport.getViewPositionX() - oldViewX)
+                                / owner.pixelsPerBeat;
+                owner.syncPositions();
+            }
+        }
     }
 
     void mouseUp (const juce::MouseEvent&) override
@@ -3466,7 +3474,7 @@ public:
     }
 
 private:
-    enum class Gesture { Pending, Pan, Zoom };
+    enum class Gesture { Pending, PanZoom };
 
     juce::Rectangle<float> visibleRange() const
     {
@@ -3482,9 +3490,8 @@ private:
 
     ProjectModel& project;
     ArrangementView& owner;
-    float dragStartX = 0.0f;
+    float lastPanX = 0.0f;
     float lastZoomY = 0.0f;
-    int dragStartViewX = 0;
     int zoomAnchorScreenX = 0;
     double zoomAnchorBeat = 0.0;
     Gesture gesture = Gesture::Pending;
