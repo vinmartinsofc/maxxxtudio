@@ -300,17 +300,24 @@ private:
 };
 
 // Janela de plugin: mantém o editor visível e oferece rolagem como fallback.
-class MainComponent::PluginWindow : public juce::DocumentWindow
+class MainComponent::PluginWindow : public juce::DocumentWindow, private juce::KeyListener
 {
 public:
     PluginWindow (const juce::String& name,
                   std::unique_ptr<juce::AudioProcessorEditor> editor,
                   const juce::Rectangle<int>& displayUserArea,
                   int cascadeIndex,
-                  const std::vector<roll::Rect>& occupiedWindows)
+                  const std::vector<roll::Rect>& occupiedWindows,
+                  std::function<void()> onActiveWindowStatusChanged,
+                  std::function<bool (const juce::KeyPress&)> onTransportKeyPress)
         : DocumentWindow (name, juce::Colours::darkgrey, DocumentWindow::minimiseButton | DocumentWindow::closeButton)
+        , onActiveWindowStatusChanged (std::move (onActiveWindowStatusChanged))
+        , onTransportKeyPress (std::move (onTransportKeyPress))
     {
         setUsingNativeTitleBar (true);
+        editorComponent = editor.get();
+        addTransportKeyListenerRecursively (*editorComponent);
+        addKeyListener (this);
         const bool editorResizable = editor->isResizable();
 
         setResizable (true, false);
@@ -354,6 +361,13 @@ public:
         setBounds (bounds.x, bounds.y, bounds.width, bounds.height);
     }
 
+    ~PluginWindow() override
+    {
+        if (editorComponent != nullptr)
+            removeTransportKeyListenerRecursively (*editorComponent);
+        removeKeyListener (this);
+    }
+
     void showComputerMidiStatus (const juce::String& primary,
                                 const juce::String& secondary,
                                 bool noteHeld)
@@ -365,7 +379,38 @@ public:
 
     void closeButtonPressed() override { setVisible (false); }
 
+    void activeWindowStatusChanged() override
+    {
+        juce::DocumentWindow::activeWindowStatusChanged();
+        if (onActiveWindowStatusChanged)
+            onActiveWindowStatusChanged();
+    }
+
 private:
+    void addTransportKeyListenerRecursively (juce::Component& component)
+    {
+        component.addKeyListener (this);
+        for (int i = 0; i < component.getNumChildComponents(); ++i)
+            if (auto* child = component.getChildComponent (i))
+                addTransportKeyListenerRecursively (*child);
+    }
+
+    void removeTransportKeyListenerRecursively (juce::Component& component)
+    {
+        component.removeKeyListener (this);
+        for (int i = 0; i < component.getNumChildComponents(); ++i)
+            if (auto* child = component.getChildComponent (i))
+                removeTransportKeyListenerRecursively (*child);
+    }
+
+    bool keyPressed (const juce::KeyPress& key, juce::Component*) override
+    {
+        return onTransportKeyPress && onTransportKeyPress (key);
+    }
+
+    juce::AudioProcessorEditor* editorComponent = nullptr;
+    std::function<void()> onActiveWindowStatusChanged;
+    std::function<bool (const juce::KeyPress&)> onTransportKeyPress;
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
 };
 
@@ -862,6 +907,47 @@ MainComponent::~MainComponent()
     windows.clear();                              // fecha as UIs dos plugins antes do engine
 }
 
+void MainComponent::setMainWindow (juce::TopLevelWindow* window)
+{
+    mainWindow = window;
+    updatePluginWindowZOrder();
+}
+
+void MainComponent::updatePluginWindowZOrder()
+{
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    juce::MessageManager::callAsync ([safeThis]
+    {
+        if (safeThis == nullptr)
+            return;
+
+        auto* activeWindow = juce::TopLevelWindow::getActiveTopLevelWindow();
+        bool appIsActive = activeWindow == safeThis->mainWindow
+                        && safeThis->mainWindow != nullptr;
+        if (! appIsActive)
+            for (const auto& [deviceId, window] : safeThis->windows)
+            {
+                juce::ignoreUnused (deviceId);
+                if (window.get() == activeWindow)
+                {
+                    appIsActive = true;
+                    break;
+                }
+            }
+
+        for (auto& [deviceId, window] : safeThis->windows)
+        {
+            juce::ignoreUnused (deviceId);
+            if (window == nullptr)
+                continue;
+
+            const bool shouldStayOnTop = appIsActive && window->isVisible() && ! window->isMinimised();
+            if (window->isAlwaysOnTop() != shouldStayOnTop)
+                window->setAlwaysOnTop (shouldStayOnTop);
+        }
+    });
+}
+
 // ------------------------------------------------------------ layout
 
 void MainComponent::paint (juce::Graphics& g)
@@ -1120,6 +1206,14 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
 
 void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int firstTrack, int lastTrack)
 {
+    if (audioRenderInProgress || projectFileOperationInProgress
+        || ! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
+        || pendingAudioLoads > 0 || scanningPlugins)
+    {
+        audioBrowser.setStatus ("Aguarde os carregamentos e operacoes atuais antes de consolidar.");
+        return;
+    }
+
     if (firstTrack != lastTrack || firstTrack < 0 || firstTrack >= static_cast<int> (project.tracks.size())
         || startBeat < 0.0 || endBeat <= startBeat)
     {
@@ -1134,25 +1228,23 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
         return;
     }
 
-    constexpr double outputSampleRate = 44100.0;
+    constexpr double consolidationSampleRate = 44100.0;
     const double bpm = engine.graph().getBpm();
     if (! std::isfinite (bpm) || bpm <= 0.0)
     {
         audioBrowser.setStatus ("Consolidar: o BPM do projeto e invalido.");
         return;
     }
-    const double secondsPerBeat = 60.0 / bpm;
-    const double durationSeconds = (endBeat - startBeat) * secondsPerBeat;
-    const auto frameCountDouble = std::ceil (durationSeconds * outputSampleRate);
+    const double durationSeconds = (endBeat - startBeat) * 60.0 / bpm;
+    const auto frameCountDouble = std::ceil (durationSeconds * consolidationSampleRate);
     if (! std::isfinite (frameCountDouble) || frameCountDouble < 1.0
-        || durationSeconds > 600.0 || frameCountDouble > static_cast<double> (std::numeric_limits<int>::max()))
+        || durationSeconds > 600.0
+        || frameCountDouble > static_cast<double> (std::numeric_limits<int>::max()))
     {
         audioBrowser.setStatus ("Consolidar: a selecao e grande demais para renderizar (maximo de 10 minutos).");
         return;
     }
 
-    auto renderedSamples = std::make_shared<juce::AudioBuffer<float>> (2, static_cast<int> (frameCountDouble));
-    renderedSamples->clear();
     bool foundSource = false;
     for (const auto& clip : track->audioClips)
     {
@@ -1173,41 +1265,6 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
         }
 
         foundSource = true;
-        const auto& source = *asset->second->samples;
-        const int firstFrame = std::max (0, static_cast<int> (std::floor ((overlapStart - startBeat)
-                                                                           * secondsPerBeat * outputSampleRate)));
-        const int lastFrame = std::min (renderedSamples->getNumSamples(),
-            static_cast<int> (std::ceil ((overlapEnd - startBeat) * secondsPerBeat * outputSampleRate)));
-        for (int frame = firstFrame; frame < lastFrame; ++frame)
-        {
-            const double beat = startBeat + static_cast<double> (frame) / (secondsPerBeat * outputSampleRate);
-            if (beat < clip->start || beat >= clip->end())
-                continue;
-
-            const double sourcePosition = (clip->sourceOffsetSeconds
-                + (beat - clip->start) * secondsPerBeat) * asset->second->sampleRate;
-            if (! std::isfinite (sourcePosition) || sourcePosition < 0.0
-                || sourcePosition >= source.getNumSamples())
-                continue;
-            const int sourceIndex = static_cast<int> (sourcePosition);
-            const int nextIndex = std::min (sourceIndex + 1, source.getNumSamples() - 1);
-            const float fraction = static_cast<float> (sourcePosition - sourceIndex);
-            double gain = 1.0;
-            if (clip->fadeInBeats > 0.0)
-                gain *= roll::audioFadeCurveValue ((beat - clip->start) / clip->fadeInBeats,
-                                                   clip->fadeInCurve);
-            if (clip->fadeOutBeats > 0.0)
-                gain *= 1.0 - roll::audioFadeCurveValue (
-                    1.0 - (clip->end() - beat) / clip->fadeOutBeats, clip->fadeOutCurve);
-
-            for (int channel = 0; channel < renderedSamples->getNumChannels(); ++channel)
-            {
-                const int sourceChannel = std::min (channel, source.getNumChannels() - 1);
-                const float sample = source.getSample (sourceChannel, sourceIndex)
-                    + (source.getSample (sourceChannel, nextIndex) - source.getSample (sourceChannel, sourceIndex)) * fraction;
-                renderedSamples->addSample (channel, frame, sample * static_cast<float> (gain));
-            }
-        }
     }
 
     if (! foundSource)
@@ -1215,6 +1272,11 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
         audioBrowser.setStatus ("Consolidar: nao ha clips de audio na selecao.");
         return;
     }
+
+    std::vector<int> overlappingIds;
+    for (const auto& clip : track->audioClips)
+        if (clip->start < endBeat && clip->end() > startBeat)
+            overlappingIds.push_back (clip->id);
 
     auto outputDirectory = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
                               .getChildFile ("ProjectFreedom").getChildFile ("Consolidated");
@@ -1226,103 +1288,188 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     const auto outputFile = outputDirectory.getNonexistentChildFile (
         "Consolidated_" + juce::Time::getCurrentTime().formatted ("%Y%m%d_%H%M%S"),
         ".wav", false);
-    auto fileStream = std::make_unique<juce::FileOutputStream> (outputFile);
-    if (! fileStream->openedOk())
-    {
-        audioBrowser.setStatus ("Consolidar: nao foi possivel criar o WAV.");
-        return;
-    }
-    std::unique_ptr<juce::OutputStream> outputStream (std::move (fileStream));
-    juce::WavAudioFormat wavFormat;
-    const juce::AudioFormatWriterOptions writerOptions;
-    auto writer = wavFormat.createWriterFor (outputStream,
-        writerOptions.withSampleRate (outputSampleRate).withNumChannels (2).withBitsPerSample (24));
-    if (writer == nullptr || ! writer->writeFromAudioSampleBuffer (*renderedSamples, 0, renderedSamples->getNumSamples()))
-    {
-        writer.reset();
-        outputStream.reset();
-        outputFile.deleteFile();
-        audioBrowser.setStatus ("Consolidar: falha ao gravar o arquivo WAV.");
-        return;
-    }
-    writer.reset();
-
-    auto data = std::make_shared<AudioFileData>();
-    data->file = outputFile;
-    data->samples = renderedSamples;
-    data->sampleRate = outputSampleRate;
-    data->durationSeconds = durationSeconds;
-    constexpr int maxWaveformBins = 16384;
-    const int waveformBins = std::min (renderedSamples->getNumSamples(), maxWaveformBins);
-    data->waveform.resize (static_cast<std::size_t> (waveformBins));
-    for (int bin = 0; bin < waveformBins; ++bin)
-    {
-        const int sampleCount = renderedSamples->getNumSamples();
-        const int from = static_cast<int> (static_cast<std::int64_t> (bin) * sampleCount / waveformBins);
-        const int to = std::max (from + 1, static_cast<int> (
-            static_cast<std::int64_t> (bin + 1) * sampleCount / waveformBins));
-        float minimum = 1.0f;
-        float maximum = -1.0f;
-        for (int frame = from; frame < std::min (to, renderedSamples->getNumSamples()); ++frame)
-            for (int channel = 0; channel < renderedSamples->getNumChannels(); ++channel)
-            {
-                const float value = renderedSamples->getSample (channel, frame);
-                minimum = std::min (minimum, value);
-                maximum = std::max (maximum, value);
-            }
-        data->waveform[static_cast<std::size_t> (bin)] = { minimum, maximum };
-    }
-
     const int trackId = track->id;
-    std::vector<int> overlappingIds;
-    for (const auto& clip : track->audioClips)
-        if (clip->start < endBeat && clip->end() > startBeat)
-            overlappingIds.push_back (clip->id);
+    const auto trackName = juce::String (track->name);
 
-    project.beginEdit();
-    bool replaced = true;
-    for (const int clipId : overlappingIds)
+    releaseComputerMidiNotes();
+    juce::String error;
+    if (! engine.beginOfflineTrackRender (trackId, error))
     {
-        auto* clip = track->findAudioClip (clipId);
-        if (clip == nullptr)
-            continue;
-        int innerClipId = clipId;
-        if (clip->start < startBeat && clip->end() > startBeat)
-        {
-            innerClipId = project.splitAudioClip (trackId, clipId, startBeat);
-            if (innerClipId < 0)
+        audioBrowser.setStatus ("Nao foi possivel iniciar a consolidacao: " + error);
+        return;
+    }
+
+    audioRenderInProgress = true;
+    setAudioRenderUiEnabled (false);
+    auto cancelled = std::make_shared<std::atomic<bool>> (false);
+    auto task = std::make_shared<TaskScope> (
+        taskRegistry, "Consolidando faixa: " + trackName, "global", 0.0, true,
+        [cancelled] { cancelled->store (true, std::memory_order_release); });
+    const auto outputSampleRate = engine.offlineRenderSampleRate();
+    const auto token = std::weak_ptr<std::atomic<bool>> (lifetimeToken);
+
+    projectFilePool.addJob ([this, token, task, cancelled, outputFile, trackId,
+                              startBeat, endBeat, bpm, durationSeconds, outputSampleRate,
+                              overlappingIds = std::move (overlappingIds)]
+    {
+        const auto frameCount = static_cast<int> (std::ceil (durationSeconds * outputSampleRate));
+        auto renderedSamples = std::make_shared<juce::AudioBuffer<float>> (2, frameCount);
+        int lastReportedPercent = -1;
+        const auto renderResult = engine.renderTrackRange (
+            startBeat, endBeat - startBeat, *renderedSamples,
+            [task, &lastReportedPercent] (double progress)
             {
-                replaced = false;
-                break;
+                const int percent = static_cast<int> (progress * 100.0);
+                if (percent != lastReportedPercent)
+                {
+                    task->setProgress (progress);
+                    lastReportedPercent = percent;
+                }
+            },
+            [cancelled] { return cancelled->load (std::memory_order_acquire); });
+
+        auto result = renderResult;
+        std::shared_ptr<AudioFileData> data;
+        if (result.wasOk())
+        {
+            auto fileStream = std::make_unique<juce::FileOutputStream> (outputFile);
+            if (! fileStream->openedOk())
+            {
+                result = juce::Result::fail ("Nao foi possivel criar o WAV.");
+            }
+            else
+            {
+                std::unique_ptr<juce::OutputStream> outputStream (std::move (fileStream));
+                juce::WavAudioFormat wavFormat;
+                const juce::AudioFormatWriterOptions writerOptions;
+                auto writer = wavFormat.createWriterFor (outputStream,
+                    writerOptions.withSampleRate (outputSampleRate).withNumChannels (2).withBitsPerSample (24));
+                if (writer == nullptr
+                    || ! writer->writeFromAudioSampleBuffer (*renderedSamples, 0, renderedSamples->getNumSamples()))
+                {
+                    writer.reset();
+                    outputStream.reset();
+                    result = juce::Result::fail ("Falha ao gravar o arquivo WAV.");
+                }
+                else
+                {
+                    writer.reset();
+                    data = std::make_shared<AudioFileData>();
+                    data->file = outputFile;
+                    data->samples = renderedSamples;
+                    data->sampleRate = outputSampleRate;
+                    data->durationSeconds = durationSeconds;
+
+                    constexpr int maxWaveformBins = 16384;
+                    const int waveformBins = std::min (renderedSamples->getNumSamples(), maxWaveformBins);
+                    data->waveform.resize (static_cast<std::size_t> (waveformBins));
+                    for (int bin = 0; bin < waveformBins; ++bin)
+                    {
+                        const int sampleCount = renderedSamples->getNumSamples();
+                        const int from = static_cast<int> (static_cast<std::int64_t> (bin) * sampleCount / waveformBins);
+                        const int to = std::max (from + 1, static_cast<int> (
+                            static_cast<std::int64_t> (bin + 1) * sampleCount / waveformBins));
+                        float minimum = 1.0f;
+                        float maximum = -1.0f;
+                        for (int frame = from; frame < std::min (to, sampleCount); ++frame)
+                            for (int channel = 0; channel < renderedSamples->getNumChannels(); ++channel)
+                            {
+                                const float value = renderedSamples->getSample (channel, frame);
+                                minimum = std::min (minimum, value);
+                                maximum = std::max (maximum, value);
+                            }
+                        data->waveform[static_cast<std::size_t> (bin)] = { minimum, maximum };
+                    }
+                }
             }
         }
 
-        clip = track->findAudioClip (innerClipId);
-        if (clip != nullptr && clip->end() > endBeat)
-            project.splitAudioClip (trackId, innerClipId, endBeat);
-        clip = track->findAudioClip (innerClipId);
-        if (clip != nullptr && clip->start >= startBeat - 1.0e-9
-            && clip->end() <= endBeat + 1.0e-9)
-            project.deleteAudioClip (trackId, innerClipId);
-    }
+        if (result.failed())
+            outputFile.deleteFile();
 
-    const auto path = outputFile.getFullPathName().toStdString();
-    audioAssets[path] = data;
-    if (replaced && project.addAudioClip (trackId, startBeat, endBeat - startBeat, path,
-                                          outputFile.getFileName().toStdString(), data->waveform,
-                                          durationSeconds, bpm) == nullptr)
-        replaced = false;
-    project.endEdit();
-    if (! replaced)
-    {
-        project.undo();
-        audioAssets.erase (path);
-        outputFile.deleteFile();
-        audioBrowser.setStatus ("Consolidar: nao foi possivel substituir a selecao.");
-        return;
-    }
+        task->end();
+        juce::MessageManager::callAsync ([this, token, task, cancelled, outputFile, trackId,
+                                          startBeat, endBeat, bpm, durationSeconds, result, data,
+                                          overlappingIds = std::move (overlappingIds)]
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+            {
+                outputFile.deleteFile();
+                return;
+            }
 
-    audioBrowser.setStatus ("Selecao consolidada: " + outputFile.getFileName());
+            engine.finishOfflineRender();
+            audioRenderInProgress = false;
+            setAudioRenderUiEnabled (true);
+
+            if (cancelled->load (std::memory_order_acquire))
+            {
+                outputFile.deleteFile();
+                audioBrowser.setStatus ("Consolidacao cancelada.");
+                return;
+            }
+            if (result.failed())
+            {
+                audioBrowser.setStatus ("Falha ao consolidar: " + result.getErrorMessage());
+                return;
+            }
+
+            auto* targetTrack = project.track (trackId);
+            if (targetTrack == nullptr || targetTrack->type != roll::TrackType::Audio || data == nullptr)
+            {
+                outputFile.deleteFile();
+                audioBrowser.setStatus ("Consolidar: a faixa mudou durante a renderizacao.");
+                return;
+            }
+
+            project.beginEdit();
+            bool replaced = true;
+            for (const int clipId : overlappingIds)
+            {
+                auto* clip = targetTrack->findAudioClip (clipId);
+                if (clip == nullptr)
+                    continue;
+                int innerClipId = clipId;
+                if (clip->start < startBeat && clip->end() > startBeat)
+                {
+                    innerClipId = project.splitAudioClip (trackId, clipId, startBeat);
+                    if (innerClipId < 0)
+                    {
+                        replaced = false;
+                        break;
+                    }
+                }
+
+                clip = targetTrack->findAudioClip (innerClipId);
+                if (clip != nullptr && clip->end() > endBeat)
+                    project.splitAudioClip (trackId, innerClipId, endBeat);
+                clip = targetTrack->findAudioClip (innerClipId);
+                if (clip != nullptr && clip->start >= startBeat - 1.0e-9
+                    && clip->end() <= endBeat + 1.0e-9)
+                    project.deleteAudioClip (trackId, innerClipId);
+            }
+
+            const auto path = outputFile.getFullPathName().toStdString();
+            audioAssets[path] = data;
+            if (replaced && project.addAudioClip (trackId, startBeat, endBeat - startBeat, path,
+                                                  outputFile.getFileName().toStdString(), data->waveform,
+                                                  durationSeconds, bpm) == nullptr)
+                replaced = false;
+            project.endEdit();
+            if (! replaced)
+            {
+                project.undo();
+                audioAssets.erase (path);
+                outputFile.deleteFile();
+                audioBrowser.setStatus ("Consolidar: nao foi possivel substituir a selecao.");
+                return;
+            }
+
+            audioBrowser.setStatus ("Selecao consolidada: " + outputFile.getFileName()
+                                    + " (efeitos da faixa aplicados)");
+        });
+    });
 }
 
 void MainComponent::publishAudioTrack (int trackId)
@@ -1446,8 +1593,34 @@ void MainComponent::resumeFromPausedPosition()
     transport.resumeFromPosition (pausedPosition);
 }
 
+bool MainComponent::handleTransportKeyPress (const juce::KeyPress& key)
+{
+    if (audioRenderInProgress)
+        return true;
+
+    if (key.isKeyCode (juce::KeyPress::spaceKey) && key.getModifiers().isShiftDown())
+    {
+        resumeFromPausedPosition();
+        return true;
+    }
+
+    if (key == juce::KeyPress::spaceKey)
+    {
+        playSelectedTrack();
+        return true;
+    }
+
+    return false;
+}
+
 void MainComponent::loopSelectedTrack()
 {
+    if (engine.graph().isLoop())
+    {
+        transport.setLoopEnabled (false);
+        return;
+    }
+
     double start = 0.0, end = 0.0;
     const auto* track = project.selectedTrack();
     const auto* audio = track != nullptr && track->type == roll::TrackType::Audio
@@ -1551,12 +1724,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
         loopSelectedTrack();
         return true;
     }
-    if (k.isKeyCode (juce::KeyPress::spaceKey) && k.getModifiers().isShiftDown())
-    {
-        resumeFromPausedPosition();
+    if (handleTransportKeyPress (k))
         return true;
-    }
-    if (k == juce::KeyPress::spaceKey) { playSelectedTrack(); return true; }
     if (k == juce::KeyPress::homeKey)  { transport.rewind(); return true; }
     if (k == juce::KeyPress (juce::KeyPress::F12Key) || k == juce::KeyPress (juce::KeyPress::tabKey, juce::ModifierKeys::shiftModifier, 0))
     {
@@ -1596,7 +1765,13 @@ juce::String MainComponent::deviceSummary (int trackId) const
     const auto summary = names.joinIntoString (" > ");
     if (trackId == 0) return summary.isNotEmpty() ? summary : theme::ui ("Efeitos Master");
     const auto* track = project.track (trackId);
-    return summary.isNotEmpty() ? summary : (track != nullptr && track->type == roll::TrackType::Audio ? theme::ui ("Canal de audio") : juce::String());
+    if (summary.isNotEmpty())
+        return summary;
+    if (track == nullptr)
+        return {};
+    if (track->type == roll::TrackType::Group)
+        return theme::ui ("Barramento de grupo");
+    return track->type == roll::TrackType::Audio ? theme::ui ("Canal de audio") : juce::String();
 }
 
 void MainComponent::applyMixers()
@@ -1605,8 +1780,20 @@ void MainComponent::applyMixers()
     for (const auto& t : project.tracks) anySolo |= t->solo;
     for (const auto& t : project.tracks)
     {
-        engine.setTrackRouting (t->id, t->outputRouting);
-        engine.setMixer (t->id, static_cast<float> (t->volume), static_cast<float> (t->pan), t->mute || (anySolo && ! t->solo));
+        engine.setTrackRouting (t->id, t->outputRouting, t->parentGroupId);
+        bool audibleWhenSoloed = t->solo;
+        if (t->type == roll::TrackType::Group)
+        {
+            audibleWhenSoloed |= std::any_of (project.tracks.begin(), project.tracks.end(),
+                [id = t->id] (const auto& child) { return child->parentGroupId == id && child->solo; });
+        }
+        else if (t->parentGroupId != 0)
+        {
+            if (const auto* group = project.track (t->parentGroupId))
+                audibleWhenSoloed |= group->solo;
+        }
+        engine.setMixer (t->id, static_cast<float> (t->volume), static_cast<float> (t->pan),
+                         t->mute || (anySolo && ! audibleWhenSoloed));
     }
     if (auto* m = project.masterTrack.get())
         engine.setMasterMixer (static_cast<float> (m->volume), static_cast<float> (m->pan), m->mute);
@@ -2585,8 +2772,20 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 occupiedWindows.push_back ({ bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight() });
             }
         }
+        const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
         auto window = std::make_unique<PluginWindow> (
-            title, std::move (ed), displayArea, nextPluginCascadeIndex++, occupiedWindows);
+            title, std::move (ed), displayArea, nextPluginCascadeIndex++, occupiedWindows,
+            [this, token]
+            {
+                const auto alive = token.lock();
+                if (alive != nullptr && alive->load())
+                    updatePluginWindowZOrder();
+            },
+            [this, token] (const juce::KeyPress& key)
+            {
+                const auto alive = token.lock();
+                return alive != nullptr && alive->load() && handleTransportKeyPress (key);
+            });
         windows[deviceId] = std::move (window);
         if (computerMidiIndicator->isVisible())
             windows[deviceId]->showComputerMidiStatus (
@@ -2594,6 +2793,7 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 computerMidiIndicator->getSecondaryText(),
                 computerMidiIndicator->isHeld());
         windows[deviceId]->toFront (true);
+        updatePluginWindowZOrder();
     }
     else
     {

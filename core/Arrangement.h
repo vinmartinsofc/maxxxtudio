@@ -8,7 +8,7 @@
 
 namespace roll
 {
-enum class TrackType { Midi, Audio };
+enum class TrackType { Midi, Audio, Group };
 enum class TrackOutputRouting { Master, ExtOut };
 
 // Um clip colocado na linha do tempo de uma trilha (posição em beats).
@@ -79,6 +79,7 @@ public:
     bool        mute = false;
     bool        solo = false;
     TrackOutputRouting outputRouting = TrackOutputRouting::Master;
+    int         parentGroupId = 0;
 
     std::vector<std::unique_ptr<Placement>> clips;
     std::vector<std::unique_ptr<AudioPlacement>> audioClips;

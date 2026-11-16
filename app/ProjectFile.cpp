@@ -96,7 +96,9 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
     auto* node = parent.createNewChildElement ("Track");
     node->setAttribute ("id", track.id);
     node->setAttribute ("name", stringFromUtf8 (track.name));
-    node->setAttribute ("type", track.type == roll::TrackType::Audio ? "audio" : "midi");
+    node->setAttribute ("type", track.type == roll::TrackType::Audio ? "audio"
+                                      : track.type == roll::TrackType::Group ? "group" : "midi");
+    node->setAttribute ("parentGroupId", track.parentGroupId);
     node->setAttribute ("volume", track.volume);
     node->setAttribute ("pan", track.pan);
     node->setAttribute ("mute", track.mute);
@@ -181,18 +183,20 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
     track.id = node.getIntAttribute ("id", -1);
     const auto type = node.getStringAttribute ("type");
     if (track.id < 0 || ! trackIds.insert (track.id).second
-        || (type != "midi" && type != "audio"))
+        || (type != "midi" && type != "audio" && type != "group"))
         return false;
 
     track.name = node.getStringAttribute ("name").toStdString();
-    track.type = type == "audio" ? roll::TrackType::Audio : roll::TrackType::Midi;
+    track.type = type == "audio" ? roll::TrackType::Audio
+               : type == "group" ? roll::TrackType::Group : roll::TrackType::Midi;
+    track.parentGroupId = node.getIntAttribute ("parentGroupId", 0);
     track.volume = node.getDoubleAttribute ("volume", 1.0);
     track.pan = node.getDoubleAttribute ("pan", 0.0);
     track.mute = node.getBoolAttribute ("mute", false);
     track.solo = node.getBoolAttribute ("solo", false);
     track.outputRouting = node.getStringAttribute ("routing") == "external"
         ? roll::TrackOutputRouting::ExtOut : roll::TrackOutputRouting::Master;
-    if (! validNumber (track.volume) || track.volume < 0.0 || track.volume > 1.5
+    if (track.parentGroupId < 0 || ! validNumber (track.volume) || track.volume < 0.0 || track.volume > 1.5
         || ! validNumber (track.pan) || track.pan < -1.0 || track.pan > 1.0)
         return false;
 
@@ -426,6 +430,19 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
     }
     if (! foundMaster || loaded.project.tracks.empty())
         return juce::Result::fail ("The project is missing its master or arrangement tracks.");
+
+    for (const auto& track : loaded.project.tracks)
+    {
+        if (track.type == roll::TrackType::Group && track.parentGroupId != 0)
+            return juce::Result::fail ("Groups cannot be nested.");
+        if (track.parentGroupId != 0)
+        {
+            const auto group = std::find_if (loaded.project.tracks.begin(), loaded.project.tracks.end(),
+                [&track] (const auto& candidate) { return candidate.id == track.parentGroupId; });
+            if (group == loaded.project.tracks.end() || group->type != roll::TrackType::Group)
+                return juce::Result::fail ("A track references a missing group.");
+        }
+    }
 
     std::set<int> locatorIds;
     if (auto* locatorsNode = xml->getChildByName ("Locators"))

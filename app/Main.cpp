@@ -114,6 +114,7 @@ private:
             setResizable (true, true);
             mainComponent = new MainComponent();
             setContentOwned (mainComponent, true);
+            mainComponent->setMainWindow (this);
             restoreSavedBounds();
             setVisible (true);
             if (maximizeWhenShown)
@@ -136,6 +137,13 @@ private:
         {
             saveWindowState();
             juce::JUCEApplication::getInstance()->systemRequestedQuit();
+        }
+
+        void activeWindowStatusChanged() override
+        {
+            juce::DocumentWindow::activeWindowStatusChanged();
+            if (mainComponent != nullptr)
+                mainComponent->updatePluginWindowZOrder();
         }
 
         void moved() override

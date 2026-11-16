@@ -126,4 +126,25 @@ if(ROLL_BUILD_TESTS)
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
     add_test(NAME AudioEngineTests COMMAND audio_engine_tests)
+
+    add_executable(project_file_tests
+        ../tests/ProjectFileTests.cpp
+        ProjectFile.cpp)
+    target_include_directories(project_file_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(project_file_tests PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_PLUGINHOST_VST3=1)
+    target_link_libraries(project_file_tests
+        PRIVATE
+            roll_core
+            Catch2::Catch2WithMain
+            juce::juce_audio_utils
+            juce::juce_audio_devices
+            juce::juce_audio_processors
+            juce::juce_gui_basics
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    add_test(NAME ProjectFileTests COMMAND project_file_tests)
 endif()

@@ -1,6 +1,7 @@
 #include "ProjectModel.h"
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 ProjectModel::ProjectModel()
 {
@@ -18,6 +19,7 @@ ProjectModel::State ProjectModel::createState() const
     state.tracks.reserve (tracks.size());
     for (const auto& track : tracks)
         state.tracks.push_back (*track);
+    state.selectedTrackIds = selectedTrackIds;
     state.selectedTrackId = selectedTrackId;
     state.selectedClipId = selectedClipId;
     state.selectedAudioClipId = selectedAudioClipId;
@@ -33,6 +35,7 @@ ProjectModel::State ProjectModel::createState() const
 void ProjectModel::replaceState (State state)
 {
     selectedTrackId = selectedClipId = selectedAudioClipId = -1;
+    selectedTrackIds.clear();
     if (onSelectionChanged)
         onSelectionChanged();
 
@@ -51,6 +54,10 @@ void ProjectModel::replaceState (State state)
     }
 
     selectedTrackId = state.selectedTrackId;
+    selectedTrackIds.clear();
+    for (const int id : state.selectedTrackIds)
+        if (track (id) != nullptr && std::find (selectedTrackIds.begin(), selectedTrackIds.end(), id) == selectedTrackIds.end())
+            selectedTrackIds.push_back (id);
     selectedClipId = state.selectedClipId;
     selectedAudioClipId = state.selectedAudioClipId;
     loopStart = std::max (0.0, state.loopStart);
@@ -90,9 +97,16 @@ void ProjectModel::replaceState (State state)
 
     if (selectedTrack() == nullptr)
     {
-        selectedTrackId = tracks.empty() ? -1 : tracks.front()->id;
+        selectedTrackId = selectedTrackIds.empty()
+            ? (tracks.empty() ? -1 : tracks.front()->id)
+            : selectedTrackIds.back();
         selectedClipId = selectedAudioClipId = -1;
     }
+    if (selectedTrackId >= 0
+        && std::find (selectedTrackIds.begin(), selectedTrackIds.end(), selectedTrackId) == selectedTrackIds.end())
+        selectedTrackIds.push_back (selectedTrackId);
+    if (selectedTrackIds.empty() && selectedTrackId == 0)
+        selectedTrackIds.push_back (0);
     if (selectedClip() == nullptr)
         selectedClipId = -1;
     if (auto* selected = selectedTrack(); selected == nullptr
@@ -114,6 +128,7 @@ ProjectModel::Snapshot ProjectModel::makeSnapshot() const
     snapshot.tracks.reserve (tracks.size());
     for (const auto& track : tracks)
         snapshot.tracks.push_back (*track);
+    snapshot.selectedTrackIds = selectedTrackIds;
     snapshot.selectedTrackId = selectedTrackId;
     snapshot.selectedClipId = selectedClipId;
     snapshot.selectedAudioClipId = selectedAudioClipId;
@@ -130,12 +145,28 @@ ProjectModel::Snapshot ProjectModel::makeSnapshot() const
 
 void ProjectModel::restoreSnapshot (Snapshot&& snapshot)
 {
+    std::vector<int> previousTrackIds;
+    previousTrackIds.reserve (tracks.size());
+    for (const auto& track : tracks)
+        previousTrackIds.push_back (track->id);
+
+    for (const auto& track : tracks)
+        if (std::none_of (snapshot.tracks.begin(), snapshot.tracks.end(),
+                          [&track] (const auto& restored) { return restored.id == track->id; })
+            && onTrackRemoved)
+            onTrackRemoved (track->id);
+
     tracks.clear();
     tracks.reserve (snapshot.tracks.size());
     for (const auto& track : snapshot.tracks)
         tracks.push_back (std::make_unique<roll::Track> (track));
+    for (const auto& track : tracks)
+        if (std::find (previousTrackIds.begin(), previousTrackIds.end(), track->id) == previousTrackIds.end()
+            && onTrackAdded)
+            onTrackAdded (track->id);
 
     selectedTrackId = snapshot.selectedTrackId;
+    selectedTrackIds = std::move (snapshot.selectedTrackIds);
     selectedClipId = snapshot.selectedClipId;
     selectedAudioClipId = snapshot.selectedAudioClipId;
     nextTrackId = snapshot.nextTrackId;
@@ -147,13 +178,21 @@ void ProjectModel::restoreSnapshot (Snapshot&& snapshot)
     songStartLocatorId = snapshot.songStartLocatorId;
     nextLocatorId = snapshot.nextLocatorId;
 
+    std::erase_if (selectedTrackIds, [this] (int id) { return track (id) == nullptr; });
+    if (selectedTrack() == nullptr)
+        selectedTrackId = selectedTrackIds.empty() ? (tracks.empty() ? -1 : tracks.front()->id)
+                                                    : selectedTrackIds.back();
+    if (selectedTrackId >= 0
+        && std::find (selectedTrackIds.begin(), selectedTrackIds.end(), selectedTrackId) == selectedTrackIds.end())
+        selectedTrackIds.push_back (selectedTrackId);
+
     for (const auto& track : tracks)
     {
         if (track->type == roll::TrackType::Audio)
         {
             if (onAudioClipsChanged) onAudioClipsChanged (track->id);
         }
-        else if (onTrackNotes)
+        else if (track->type == roll::TrackType::Midi && onTrackNotes)
             onTrackNotes (track->id);
     }
     if (onSelectionChanged) onSelectionChanged();
@@ -262,7 +301,8 @@ roll::Track* ProjectModel::addTrack (roll::TrackType type)
     auto t = std::make_unique<roll::Track>();
     t->id = nextTrackId++;
     t->type = type;
-    t->name = std::to_string (t->id) + (type == roll::TrackType::Audio ? " AUDIO" : " MIDI");
+    t->name = std::to_string (t->id) + (type == roll::TrackType::Audio ? " AUDIO"
+                               : type == roll::TrackType::Group ? " GROUP" : " MIDI");
     auto* raw = t.get();
     tracks.push_back (std::move (t));
     if (onTrackAdded) onTrackAdded (raw->id);
@@ -276,6 +316,11 @@ void ProjectModel::removeTrack (int id)
     if (tracks.size() <= 1) return;                       // sempre resta uma trilha
     const int idx = trackIndex (id);
     if (idx < 0) return;
+    if (tracks[static_cast<size_t> (idx)]->type == roll::TrackType::Group)
+    {
+        ungroupTrack (id);
+        return;
+    }
 
     if (selectedTrackId == id)
     {
@@ -285,30 +330,193 @@ void ProjectModel::removeTrack (int id)
     }
     if (onTrackRemoved) onTrackRemoved (id);
     tracks.erase (tracks.begin() + idx);
+    std::erase (selectedTrackIds, id);
 
     if (selectedTrackId == id)
-        selectedTrackId = tracks[static_cast<size_t> (std::min (idx, static_cast<int> (tracks.size()) - 1))]->id;
+        selectedTrackId = selectedTrackIds.empty()
+            ? tracks[static_cast<size_t> (std::min (idx, static_cast<int> (tracks.size()) - 1))]->id
+            : selectedTrackIds.back();
+    if (selectedTrackIds.empty() && selectedTrackId >= 0)
+        selectedTrackIds.push_back (selectedTrackId);
     if (onSelectionChanged) onSelectionChanged();
     if (onMixerChanged) onMixerChanged();
     sendChangeMessage();
 }
 
-void ProjectModel::selectTrack (int id)
+int ProjectModel::groupTracks (const std::vector<int>& trackIds)
 {
-    if (track (id) == nullptr) return;
-    if (selectedTrackId != id)
+    std::vector<int> uniqueIds;
+    for (const int id : trackIds)
+        if (std::find (uniqueIds.begin(), uniqueIds.end(), id) == uniqueIds.end())
+            uniqueIds.push_back (id);
+    if (uniqueIds.size() < 2)
+        return -1;
+
+    int firstSelectedIndex = static_cast<int> (tracks.size());
+    for (const int id : uniqueIds)
     {
-        selectedClipId = -1;
-        selectedAudioClipId = -1;
+        const int index = trackIndex (id);
+        const auto* selected = track (id);
+        if (index < 0 || selected == nullptr || selected->type == roll::TrackType::Group
+            || selected->parentGroupId != 0)
+            return -1;
+        firstSelectedIndex = std::min (firstSelectedIndex, index);
     }
-    selectedTrackId = id;
+
+    recordUndo();
+    const int groupId = nextTrackId++;
+    const int insertIndex = static_cast<int> (std::count_if (
+        tracks.begin(), tracks.begin() + firstSelectedIndex,
+        [&uniqueIds] (const auto& item)
+        {
+            return std::find (uniqueIds.begin(), uniqueIds.end(), item->id) == uniqueIds.end();
+        }));
+    auto group = std::make_unique<roll::Track>();
+    group->id = groupId;
+    group->type = roll::TrackType::Group;
+    group->name = std::to_string (groupId) + " GROUP";
+
+    std::vector<std::unique_ptr<roll::Track>> selectedTracks, remainingTracks;
+    selectedTracks.reserve (uniqueIds.size());
+    remainingTracks.reserve (tracks.size() - uniqueIds.size() + 1);
+    for (auto& item : tracks)
+    {
+        if (std::find (uniqueIds.begin(), uniqueIds.end(), item->id) != uniqueIds.end())
+        {
+            item->parentGroupId = groupId;
+            selectedTracks.push_back (std::move (item));
+        }
+        else
+            remainingTracks.push_back (std::move (item));
+    }
+    remainingTracks.insert (remainingTracks.begin() + insertIndex, std::move (group));
+    remainingTracks.insert (remainingTracks.begin() + insertIndex + 1,
+                            std::make_move_iterator (selectedTracks.begin()),
+                            std::make_move_iterator (selectedTracks.end()));
+    tracks = std::move (remainingTracks);
+
+    selectedTrackIds.assign (1, groupId);
+    selectedTrackId = groupId;
+    selectedClipId = selectedAudioClipId = -1;
+    if (onTrackAdded)
+        onTrackAdded (groupId);
+    if (onMixerChanged)
+        onMixerChanged();
+    if (onSelectionChanged)
+        onSelectionChanged();
+    sendChangeMessage();
+    return groupId;
+}
+
+bool ProjectModel::ungroupTrack (int groupId)
+{
+    const int index = trackIndex (groupId);
+    if (index < 0 || tracks[static_cast<size_t> (index)]->type != roll::TrackType::Group)
+        return false;
+
+    recordUndo();
+    int firstChildId = -1;
+    for (const auto& item : tracks)
+        if (item->parentGroupId == groupId)
+        {
+            if (firstChildId < 0)
+                firstChildId = item->id;
+            item->parentGroupId = 0;
+        }
+
+    if (selectedTrackId == groupId)
+    {
+        selectedTrackId = firstChildId;
+        selectedTrackIds.clear();
+        if (selectedTrackId >= 0)
+            selectedTrackIds.push_back (selectedTrackId);
+        selectedClipId = selectedAudioClipId = -1;
+        if (onSelectionChanged)
+            onSelectionChanged();
+    }
+    if (onTrackRemoved)
+        onTrackRemoved (groupId);
+    tracks.erase (tracks.begin() + index);
+    std::erase (selectedTrackIds, groupId);
+    if (selectedTrackId < 0 && ! tracks.empty())
+    {
+        selectedTrackId = tracks[static_cast<size_t> (std::min (index, static_cast<int> (tracks.size()) - 1))]->id;
+        selectedTrackIds.assign (1, selectedTrackId);
+    }
+    if (onMixerChanged)
+        onMixerChanged();
+    if (onSelectionChanged)
+        onSelectionChanged();
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::isTrackSelected (int id) const
+{
+    return std::find (selectedTrackIds.begin(), selectedTrackIds.end(), id) != selectedTrackIds.end();
+}
+
+void ProjectModel::selectTrack (int id, bool toggleSelection)
+{
+    if (track (id) == nullptr)
+        return;
+
+    if (! toggleSelection)
+    {
+        selectedTrackIds.assign (1, id);
+        selectedTrackId = id;
+        selectedClipId = selectedAudioClipId = -1;
+    }
+    else if (isTrackSelected (id))
+    {
+        if (selectedTrackIds.size() > 1)
+        {
+            std::erase (selectedTrackIds, id);
+            if (selectedTrackId == id)
+                selectedTrackId = selectedTrackIds.back();
+            selectedClipId = selectedAudioClipId = -1;
+        }
+    }
+    else
+    {
+        selectedTrackIds.push_back (id);
+        selectedTrackId = id;
+        selectedClipId = selectedAudioClipId = -1;
+    }
+
     if (onSelectionChanged) onSelectionChanged();
     sendChangeMessage();
+}
+
+void ProjectModel::setTrackSolo (int id, bool solo, bool additive)
+{
+    if (track (id) == nullptr)
+        return;
+
+    if (additive)
+    {
+        track (id)->solo = solo;
+    }
+    else if (solo)
+    {
+        const bool applyToSelection = isTrackSelected (id) && selectedTrackIds.size() > 1;
+        for (auto& item : tracks)
+            item->solo = applyToSelection
+                ? isTrackSelected (item->id)
+                : item->id == id;
+    }
+    else
+    {
+        for (auto& item : tracks)
+            item->solo = false;
+    }
+    notifyMixer();
 }
 
 void ProjectModel::selectClip (int trackId, int clipId)
 {
     if (track (trackId) == nullptr) return;
+    selectedTrackIds.assign (1, trackId);
     selectedTrackId = trackId;
     selectedClipId = clipId;
     selectedAudioClipId = -1;
@@ -320,6 +528,7 @@ void ProjectModel::selectAudioClip (int trackId, int clipId)
 {
     auto* t = track (trackId);
     if (t == nullptr || t->findAudioClip (clipId) == nullptr) return;
+    selectedTrackIds.assign (1, trackId);
     selectedTrackId = trackId;
     selectedClipId = -1;
     selectedAudioClipId = clipId;
@@ -739,6 +948,7 @@ int ProjectModel::moveClip (int fromTrack, int clipId, int toTrack, double newSt
     if (selectedTrackId == fromTrack && selectedClipId == clipId)
     {
         selectedTrackId = toTrack;
+        selectedTrackIds.assign (1, toTrack);
         selectedClipId = newId;
     }
     growTo (newStart + len + 64.0);

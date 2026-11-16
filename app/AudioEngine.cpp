@@ -510,6 +510,56 @@ public:
     void setStateInformation (const void*, int) override {}
 };
 
+class TrackRangeCaptureProcessor : public juce::AudioProcessor
+{
+public:
+    TrackRangeCaptureProcessor()
+        : juce::AudioProcessor (BusesProperties()
+                                    .withInput  ("In",  juce::AudioChannelSet::stereo(), true)
+                                    .withOutput ("Out", juce::AudioChannelSet::stereo(), true)) {}
+
+    void setDestination (juce::AudioBuffer<float>* buffer)
+    {
+        destination = buffer;
+        writePosition = 0;
+    }
+
+    int capturedSamples() const { return writePosition; }
+
+    const juce::String getName() const override { return "Track Range Capture"; }
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override { destination = nullptr; }
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        if (destination == nullptr || buffer.getNumChannels() == 0
+            || writePosition >= destination->getNumSamples())
+            return;
+
+        const int count = std::min (buffer.getNumSamples(), destination->getNumSamples() - writePosition);
+        for (int channel = 0; channel < destination->getNumChannels(); ++channel)
+            destination->copyFrom (channel, writePosition, buffer,
+                                   std::min (channel, buffer.getNumChannels() - 1), 0, count);
+        writePosition += count;
+    }
+    using juce::AudioProcessor::processBlock;
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+private:
+    juce::AudioBuffer<float>* destination = nullptr;
+    int writePosition = 0;
+};
+
 // ======================================================= AudioEngine
 
 AudioEngine::AudioEngine()
@@ -569,8 +619,11 @@ void AudioEngine::addTrack (int trackId, roll::TrackType type)
     if (find (trackId) != nullptr) return;
 
     TrackNodes t;
-    t.audioTrack = type == roll::TrackType::Audio;
-    if (t.audioTrack)
+    t.audioTrack = type != roll::TrackType::Midi;
+    t.isGroup = type == roll::TrackType::Group;
+    if (t.isGroup)
+        t.source = seqGraph.addNode (std::make_unique<PassThroughProcessor>());
+    else if (type == roll::TrackType::Audio)
     {
         auto src = std::make_unique<TrackAudioSource> (seqGraph.sharedBlock());
         t.audioSourcePtr = src.get();
@@ -672,7 +725,10 @@ void AudioEngine::rewire (TrackNodes& t)
         return;
     }
 
-    clearConnectionsOf (t.source->nodeID);
+    if (t.isGroup)
+        clearOutputConnectionsOf (t.source->nodeID);
+    else
+        clearConnectionsOf (t.source->nodeID);
     clearConnectionsOf (t.mixer->nodeID);
     for (auto& d : t.devices) clearConnectionsOf (d.node->nodeID);
 
@@ -680,9 +736,11 @@ void AudioEngine::rewire (TrackNodes& t)
     const int midi = AG::midiChannelIndex;
 
     auto* master = find (masterTrackId);
+    auto* parentGroup = t.parentGroupId != 0 ? find (t.parentGroupId) : nullptr;
     auto destNode = (t.routing == roll::TrackOutputRouting::ExtOut || master == nullptr)
                         ? outputNode
-                        : master->source;
+                        : parentGroup != nullptr && parentGroup->isGroup ? parentGroup->source
+                                                                         : master->source;
 
     for (int ch = 0; ch < 2; ++ch)
         seqGraph.addConnection ({ { t.mixer->nodeID, ch }, { destNode->nodeID, ch } });
@@ -789,13 +847,14 @@ float AudioEngine::masterPeak() const
     return peak (masterTrackId);
 }
 
-void AudioEngine::setTrackRouting (int trackId, roll::TrackOutputRouting routing)
+void AudioEngine::setTrackRouting (int trackId, roll::TrackOutputRouting routing, int parentGroupId)
 {
     if (auto* t = find (trackId))
     {
-        if (t->routing != routing)
+        if (t->routing != routing || t->parentGroupId != parentGroupId)
         {
             t->routing = routing;
+            t->parentGroupId = parentGroupId;
             rewire (*t);
         }
     }
@@ -839,6 +898,16 @@ void AudioEngine::setAudioPreviewGain (float gain)
 
 bool AudioEngine::beginOfflineRender (juce::String& error)
 {
+    return beginOfflineRenderInternal (error, -1);
+}
+
+bool AudioEngine::beginOfflineTrackRender (int trackId, juce::String& error)
+{
+    return beginOfflineRenderInternal (error, trackId);
+}
+
+bool AudioEngine::beginOfflineRenderInternal (juce::String& error, int captureTrackId)
+{
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
     if (offlineRenderActive)
     {
@@ -850,11 +919,18 @@ bool AudioEngine::beginOfflineRender (juce::String& error)
         error = "Stop playback before exporting audio.";
         return false;
     }
+    auto* captureTrack = captureTrackId >= 0 ? find (captureTrackId) : nullptr;
+    if (captureTrackId >= 0 && (captureTrack == nullptr || ! captureTrack->audioTrack))
+    {
+        error = "The selected track cannot be rendered as audio.";
+        return false;
+    }
 
     auto* device = deviceManager.getCurrentAudioDevice();
-    offlineRenderSampleRate = device != nullptr ? device->getCurrentSampleRate() : seqGraph.getSampleRate();
+    offlineRenderRate = captureTrackId >= 0 ? 44100.0
+        : device != nullptr ? device->getCurrentSampleRate() : seqGraph.getSampleRate();
     offlineRenderBlockSize = device != nullptr ? device->getCurrentBufferSizeSamples() : seqGraph.getBlockSize();
-    if (! std::isfinite (offlineRenderSampleRate) || offlineRenderSampleRate <= 0.0
+    if (! std::isfinite (offlineRenderRate) || offlineRenderRate <= 0.0
         || offlineRenderBlockSize <= 0)
     {
         error = "The audio device has no valid sample rate or buffer size.";
@@ -867,15 +943,61 @@ bool AudioEngine::beginOfflineRender (juce::String& error)
     previousMetronomeGain = seqGraph.getMetronomeGain();
 
     deviceManager.removeAudioCallback (&player);
-    seqGraph.setPlayConfigDetails (0, 2, offlineRenderSampleRate, offlineRenderBlockSize);
+    seqGraph.setPlayConfigDetails (0, 2, offlineRenderRate, offlineRenderBlockSize);
     seqGraph.setNonRealtime (true);
-    seqGraph.prepareToPlay (offlineRenderSampleRate, offlineRenderBlockSize);
     seqGraph.setLoop (false);
     seqGraph.setMetronomeEnabled (false);
     previewSourcePtr->stop();
-    seqGraph.seek (0.0);
-    seqGraph.setPlaying (true);
     offlineRenderActive = true;
+
+    if (captureTrack != nullptr)
+    {
+        auto capture = std::make_unique<TrackRangeCaptureProcessor>();
+        offlineCaptureProcessor = capture.get();
+        offlineCaptureNode = seqGraph.addNode (std::move (capture));
+        if (offlineCaptureNode == nullptr)
+        {
+            offlineCaptureProcessor = nullptr;
+            error = "Could not create the track render capture node.";
+            finishOfflineRender();
+            return false;
+        }
+
+        auto source = captureTrack->devices.empty() ? captureTrack->source : captureTrack->devices.back().node;
+        auto* sourceProcessor = source != nullptr ? source->getProcessor() : nullptr;
+        const int sourceOutputs = sourceProcessor != nullptr
+            ? std::max (1, sourceProcessor->getTotalNumOutputChannels()) : 0;
+        if (source == nullptr || sourceOutputs <= 0)
+        {
+            error = "The selected track has no renderable audio output.";
+            finishOfflineRender();
+            return false;
+        }
+
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            const auto sourceChannel = juce::AudioProcessorGraph::NodeAndChannel {
+                source->nodeID, std::min (channel, sourceOutputs - 1) };
+            const auto captureInput = juce::AudioProcessorGraph::NodeAndChannel {
+                offlineCaptureNode->nodeID, channel };
+            const auto captureOutput = juce::AudioProcessorGraph::NodeAndChannel {
+                offlineCaptureNode->nodeID, channel };
+            const auto graphOutput = juce::AudioProcessorGraph::NodeAndChannel {
+                outputNode->nodeID, channel };
+
+            if (! seqGraph.addConnection ({ sourceChannel, captureInput })
+                || ! seqGraph.addConnection ({ captureOutput, graphOutput }))
+            {
+                error = "Could not connect the track render capture node.";
+                finishOfflineRender();
+                return false;
+            }
+        }
+    }
+
+    seqGraph.prepareToPlay (offlineRenderRate, offlineRenderBlockSize);
+    seqGraph.seek (0.0);
+    seqGraph.setPlaying (captureTrackId < 0);
     return true;
 }
 
@@ -889,7 +1011,7 @@ juce::Result AudioEngine::renderMasterToWav (const juce::File& file,
     if (! std::isfinite (durationSeconds) || durationSeconds <= 0.0)
         return juce::Result::fail ("The requested render duration is invalid.");
 
-    const double frameCount = std::ceil (durationSeconds * offlineRenderSampleRate);
+    const double frameCount = std::ceil (durationSeconds * offlineRenderRate);
     constexpr std::uint64_t maxWavDataBytes = 0xffffffffULL - 4096;
     constexpr std::uint64_t bytesPerStereoFrame = 2 * 3;
     const auto maxFrames = maxWavDataBytes / bytesPerStereoFrame;
@@ -905,7 +1027,7 @@ juce::Result AudioEngine::renderMasterToWav (const juce::File& file,
     juce::WavAudioFormat wavFormat;
     const juce::AudioFormatWriterOptions writerOptions;
     auto writer = wavFormat.createWriterFor (outputStream,
-        writerOptions.withSampleRate (offlineRenderSampleRate)
+        writerOptions.withSampleRate (offlineRenderRate)
                      .withNumChannels (2)
                      .withBitsPerSample (24));
     if (writer == nullptr)
@@ -952,6 +1074,62 @@ juce::Result AudioEngine::renderMasterToWav (const juce::File& file,
     return juce::Result::ok();
 }
 
+juce::Result AudioEngine::renderTrackRange (double startBeat,
+                                            double lengthBeats,
+                                            juce::AudioBuffer<float>& destination,
+                                            std::function<void (double)> onProgress,
+                                            std::function<bool()> shouldCancel)
+{
+    if (! offlineRenderActive || offlineCaptureProcessor == nullptr)
+        return juce::Result::fail ("Track rendering was not prepared.");
+    if (! std::isfinite (startBeat) || startBeat < 0.0
+        || ! std::isfinite (lengthBeats) || lengthBeats <= 0.0)
+        return juce::Result::fail ("The requested track range is invalid.");
+
+    const double bpm = seqGraph.getBpm();
+    if (! std::isfinite (bpm) || bpm <= 0.0)
+        return juce::Result::fail ("The project tempo is invalid.");
+    const double frameCount = std::ceil (lengthBeats * 60.0 / bpm * offlineRenderRate);
+    if (! std::isfinite (frameCount) || frameCount < 1.0
+        || frameCount > destination.getNumSamples()
+        || destination.getNumChannels() < 2)
+        return juce::Result::fail ("The track render buffer has invalid dimensions.");
+
+    auto* capture = static_cast<TrackRangeCaptureProcessor*> (offlineCaptureProcessor);
+    destination.clear();
+    capture->setDestination (&destination);
+    seqGraph.seek (startBeat);
+    seqGraph.setPlaying (true);
+
+    juce::AudioBuffer<float> graphBuffer (2, offlineRenderBlockSize);
+    juce::MidiBuffer midi;
+    const auto totalFrames = static_cast<std::uint64_t> (frameCount);
+    std::uint64_t renderedFrames = 0;
+    while (renderedFrames < totalFrames)
+    {
+        if (shouldCancel && shouldCancel())
+        {
+            seqGraph.setPlaying (false);
+            capture->setDestination (nullptr);
+            return juce::Result::fail ("Track render cancelled.");
+        }
+
+        graphBuffer.clear();
+        midi.clear();
+        seqGraph.processBlock (graphBuffer, midi);
+
+        const auto framesThisBlock = std::min<std::uint64_t> (
+            static_cast<std::uint64_t> (offlineRenderBlockSize), totalFrames - renderedFrames);
+        renderedFrames += framesThisBlock;
+        if (onProgress)
+            onProgress (static_cast<double> (renderedFrames) / static_cast<double> (totalFrames));
+    }
+
+    seqGraph.setPlaying (false);
+    capture->setDestination (nullptr);
+    return juce::Result::ok();
+}
+
 void AudioEngine::finishOfflineRender()
 {
     jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
@@ -959,6 +1137,12 @@ void AudioEngine::finishOfflineRender()
         return;
 
     seqGraph.setPlaying (false);
+    if (offlineCaptureNode != nullptr)
+    {
+        seqGraph.removeNode (offlineCaptureNode->nodeID);
+        offlineCaptureNode.reset();
+        offlineCaptureProcessor = nullptr;
+    }
     seqGraph.setLoop (previousLoopEnabled);
     seqGraph.setMetronomeEnabled (previousMetronomeEnabled);
     seqGraph.setMetronomeGain (previousMetronomeGain);

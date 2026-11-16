@@ -22,6 +22,7 @@ public:
     {
         roll::Track master;
         std::vector<roll::Track> tracks;
+        std::vector<int> selectedTrackIds;
         int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
         double loopStart = 0.0, loopEnd = 16.0, totalBeats = 256.0;
         std::vector<ArrangementLocator> locators;
@@ -33,6 +34,7 @@ public:
 
     std::unique_ptr<roll::Track> masterTrack;
     std::vector<std::unique_ptr<roll::Track>> tracks;
+    std::vector<int> selectedTrackIds;
     int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
     double loopStart = 0.0, loopEnd = 16.0;
     double totalBeats = 256.0;                       // 64 compassos visíveis (cresce com os clips)
@@ -48,12 +50,16 @@ public:
 
     roll::Track*     track (int id) const;
     roll::Track*     selectedTrack() const { return track (selectedTrackId); }
+    bool isTrackSelected (int id) const;
     roll::Placement* selectedClip() const;
     int  trackIndex (int id) const;
 
     roll::Track* addTrack (roll::TrackType type = roll::TrackType::Midi);
     void removeTrack (int id);
-    void selectTrack (int id);
+    int groupTracks (const std::vector<int>& trackIds);
+    bool ungroupTrack (int groupId);
+    void selectTrack (int id, bool toggleSelection = false);
+    void setTrackSolo (int id, bool solo, bool additive);
     void selectClip (int trackId, int clipId);
 
     roll::Placement* addClip (int trackId, double start, double length);
@@ -107,6 +113,7 @@ private:
     struct Snapshot
     {
         std::vector<roll::Track> tracks;
+        std::vector<int> selectedTrackIds;
         int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
         int nextTrackId = 1;
         double loopStart = 0.0, loopEnd = 16.0, totalBeats = 256.0;

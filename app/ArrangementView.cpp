@@ -82,6 +82,11 @@ public:
             {
                 g.setColour ((i % 2 == 0) ? theme::rowWhite() : theme::rowBlack());
                 g.fillRect (cb.getX(), static_cast<int> (i) * trackHeight, cb.getWidth(), trackHeight);
+                if (project.isTrackSelected (project.tracks[i]->id))
+                {
+                    g.setColour (theme::accent().withAlpha (0.10f));
+                    g.fillRect (cb.getX(), static_cast<int> (i) * trackHeight, cb.getWidth(), trackHeight);
+                }
             }
             g.setColour (theme::border());
             g.drawHorizontalLine ((static_cast<int> (i) + 1) * trackHeight - 1, static_cast<float> (cb.getX()), static_cast<float> (cb.getRight()));
@@ -1081,6 +1086,17 @@ public:
         if (ctrl && key == 'A')
         {
             selectAll();
+            return true;
+        }
+        if (ctrl && key == 'G')
+        {
+            if (k.getModifiers().isShiftDown())
+            {
+                if (t != nullptr && t->type == roll::TrackType::Group)
+                    project.ungroupTrack (t->id);
+            }
+            else
+                project.groupTracks (project.selectedTrackIds);
             return true;
         }
         if (ctrl && key == '1')
@@ -2683,6 +2699,7 @@ public:
         name.setEditable (false, true, false);
         name.setColour (juce::Label::textColourId, theme::text());
         name.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+        name.addMouseListener (this, false);
         name.onTextChange = [this]
         {
             if (auto* tr = project.track (trackId)) tr->name = name.getText().toStdString();
@@ -2698,7 +2715,8 @@ public:
         mute.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
         solo.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
         mute.setTooltip (theme::ui ("Ativador da trilha: desativa a saída MIDI/áudio"));
-        solo.setTooltip ("Solo da trilha");
+        solo.setTooltip (theme::ui ("Clique para solo exclusivo; Ctrl+clique adiciona/remove solo. "
+                                    "Com varias trilhas selecionadas, clique aplica a todas."));
         mute.setToggleState (t->mute, juce::dontSendNotification);
         mute.setButtonText (t->mute ? "OFF" : "ON");
         solo.setToggleState (t->solo, juce::dontSendNotification);
@@ -2711,7 +2729,12 @@ public:
                 project.notifyMixer();
             }
         };
-        solo.onClick = [this] { if (auto* tr = project.track (trackId)) { tr->solo = solo.getToggleState(); project.notifyMixer(); } };
+        solo.onClick = [this]
+        {
+            const auto modifiers = juce::ModifierKeys::getCurrentModifiers();
+            project.setTrackSolo (trackId, solo.getToggleState(),
+                                  modifiers.isCtrlDown() || modifiers.isCommandDown());
+        };
 
         panLabel.setText ("Pan", juce::dontSendNotification);
         panLabel.setFont (juce::FontOptions (11.5f));
@@ -2776,6 +2799,7 @@ public:
         {
             mute.setToggleState (tr->mute, juce::dontSendNotification);
             mute.setButtonText (tr->mute ? "OFF" : "ON");
+            solo.setToggleState (tr->solo, juce::dontSendNotification);
             volume.setValue (tr->volume, juce::dontSendNotification);
             updateVolumeText (tr->volume);
             pan.setValue (tr->pan, juce::dontSendNotification);
@@ -2816,8 +2840,11 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const bool sel = (project.selectedTrackId == trackId);
-        g.setColour (sel ? theme::panelLight().brighter (0.15f) : theme::panel());
+        const bool sel = project.isTrackSelected (trackId);
+        const auto* track = project.track (trackId);
+        const bool isGroup = track != nullptr && track->type == roll::TrackType::Group;
+        g.setColour (sel ? theme::panelLight().brighter (0.15f)
+                         : isGroup ? theme::panelLight().darker (0.12f) : theme::panel());
         g.fillRect (getLocalBounds());
         g.setColour (colourFor (trackId));
         g.fillRect (0, 0, 6, getHeight());
@@ -2848,6 +2875,8 @@ public:
         auto topRow = a.removeFromTop (22);
         routingButton.setBounds (topRow.removeFromRight (58));
         topRow.removeFromRight (4);
+        if (const auto* track = project.track (trackId); track != nullptr && track->parentGroupId != 0)
+            topRow.removeFromLeft (12);
         name.setBounds (topRow);
         a.removeFromTop (18);
         auto row = a.removeFromTop (24);
@@ -2869,23 +2898,70 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
-        project.selectClip (trackId, -1);
-        owner.grabFocus();
+        if (e.originalComponent == &name)
+        {
+            if (e.mods.isPopupMenu())
+            {
+                const bool toggleSelection = e.mods.isShiftDown() || e.mods.isCtrlDown()
+                                          || e.mods.isCommandDown();
+                if (! project.isTrackSelected (trackId))
+                    project.selectTrack (trackId, toggleSelection);
+                showTrackMenu();
+                owner.grabFocus();
+                return;
+            }
+            const bool toggleSelection = e.mods.isShiftDown()
+                || e.mods.isCtrlDown() || e.mods.isCommandDown();
+            project.selectTrack (trackId, toggleSelection);
+            owner.grabFocus();
+            return;
+        }
+
         if (e.mods.isPopupMenu())
         {
-            juce::PopupMenu m;
-            m.addItem (1, theme::ui ("Nova trilha MIDI"));
-            m.addItem (3, theme::ui ("Nova trilha de audio"));
-            m.addItem (2, theme::ui ("Apagar trilha"), project.tracks.size() > 1);
-            const int tid = trackId;
-            auto* proj = &project;
-            m.showMenuAsync ({}, [proj, tid] (int r)
-            {
-                if (r == 1) proj->addTrack();
-                if (r == 2) proj->removeTrack (tid);
-                if (r == 3) proj->addTrack (roll::TrackType::Audio);
-            });
+            if (! project.isTrackSelected (trackId))
+                project.selectTrack (trackId);
+            showTrackMenu();
+            owner.grabFocus();
+            return;
         }
+
+        const bool toggleSelection = ! e.mods.isPopupMenu()
+            && (e.mods.isShiftDown() || e.mods.isCtrlDown() || e.mods.isCommandDown());
+        project.selectTrack (trackId, toggleSelection);
+        owner.grabFocus();
+    }
+
+    void showTrackMenu()
+    {
+        juce::PopupMenu m;
+        m.addItem (1, theme::ui ("Nova trilha MIDI"));
+        m.addItem (3, theme::ui ("Nova trilha de audio"));
+        const bool canGroup = project.selectedTrackIds.size() >= 2
+            && std::all_of (project.selectedTrackIds.begin(), project.selectedTrackIds.end(),
+                [this] (int id)
+                {
+                    const auto* selected = project.track (id);
+                    return selected != nullptr && selected->type != roll::TrackType::Group
+                        && selected->parentGroupId == 0;
+                });
+        m.addItem (4, theme::ui ("Agrupar faixas selecionadas (Ctrl+G)"), canGroup);
+        const int tid = trackId;
+        const auto* selected = project.track (trackId);
+        const bool isGroup = selected != nullptr && selected->type == roll::TrackType::Group;
+        if (isGroup)
+            m.addItem (5, theme::ui ("Desagrupar faixa (Ctrl+Shift+G)"));
+        else
+            m.addItem (2, theme::ui ("Apagar trilha"), project.tracks.size() > 1);
+        auto* proj = &project;
+        m.showMenuAsync ({}, [proj, tid] (int r)
+        {
+            if (r == 1) proj->addTrack();
+            if (r == 2) proj->removeTrack (tid);
+            if (r == 3) proj->addTrack (roll::TrackType::Audio);
+            if (r == 4) proj->groupTracks (proj->selectedTrackIds);
+            if (r == 5) proj->ungroupTrack (tid);
+        });
     }
 
 private:
@@ -3026,7 +3102,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const bool sel = (project.selectedTrackId == 0);
+        const bool sel = project.isTrackSelected (0);
         g.setColour (sel ? theme::panelLight().brighter (0.15f) : theme::panel());
         g.fillRect (getLocalBounds());
 

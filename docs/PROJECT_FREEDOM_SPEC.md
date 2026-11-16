@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.18 (retomar reprodução pausada com Shift+Espaço)
+- **Versão do documento:** 1.24 (grupos de faixas com barramento real)
 - **⚠️ Ordem de trabalho vigente:** `PLANO_DE_ACAO_FASE_4.md` (feedback do Marco 3: correções críticas, layout, groove, automação, áudio). **Em caso de conflito com o §14 deste documento, vale o plano.**
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -175,12 +175,15 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 |---|---|---|
 | Plugins | Scan automático VST3 em segundo plano + lista persistida em XML | ✅ (lista) / 🟡 (scan em Windows real) |
 | Plugins | Navegador com busca e filtros Todos/Instrumentos/Efeitos; duplo clique carrega | ✅ UI / 🟡 carregamento |
-| Plugins | Cadeia por trilha (1 instrumento + N efeitos), UI do plugin em janela (minimizar+fechar) | 🟡 |
+| Plugins | Cadeia por trilha (1 instrumento + N efeitos), UI do plugin em janela (minimizar+fechar; janelas permanecem à frente enquanto o app está ativo) | 🟡 |
 | Plugins | Favoritos de plugins | ⬜ (favoritos atuais são arquivos/pastas de áudio) |
 | Plugins | Host VST2 e diretórios customizados | ⬜ (depende de SDK compatível/licenciado; diretórios customizados serão exclusivos do VST2) |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
-| Áudio | Mixer por trilha: volume, pan (sem UI), mute, solo, medidor de pico | 🟡 |
-| Transporte | Play/Pause (Espaço), Shift+Espaço retoma da posição pausada/Stop, Home, Loop, BPM, posição | 🟡 (falta teste manual) |
+| Áudio | Mixer por trilha: volume, pan, mute, medidor; Solo exclusivo, por seleção múltipla e Ctrl+clique aditivo | 🟡 (build/testes; falta validação manual na UI) |
+| Áudio | Grupos planos como barramentos reais: faixas-filhas → mixer/efeitos do grupo → Master ou Ext. Out; Solo respeita grupo e filhos | 🟡 (build/testes; falta validação manual com plugins) |
+| Arranjo | Selecionar múltiplas faixas com Shift/Ctrl+clique, com destaque visual | 🟡 (build/testes; falta validação manual na UI) |
+| Arranjo | Agrupar seleção com Ctrl+G e desagrupar com Ctrl+Shift+G; menu de contexto; grupos sem clips e sem nesting | 🟡 |
+| Transporte | Play/Pause (Espaço), Shift+Espaço retoma da posição pausada/Stop, Home, Ctrl+L alterna loop na seleção, BPM, posição | 🟡 (falta teste manual) |
 | Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar), régua, brace de loop | ✅ |
 | Arranjo | Ctrl+C/X/V em clips de áudio/MIDI, incluindo colar em outra trilha do mesmo tipo; Ctrl+D insere tempo e desloca o conteúdo posterior | 🟡 (build/testes; falta teste manual na UI) |
 | Arranjo | Tecla `0` ativa/desativa o clip selecionado | ✅ |
@@ -198,6 +201,7 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Entrada | Teclado do computador: modo M; notas A–L com teclas pretas; Z/X oitava; C/V velocidade | ✅ (pendente teste sonoro manual) |
 | Entrada | MIDI de teclado/controlador, gravação | ⬜ |
 | Exportação | Master em WAV 24-bit, offline, com cauda configurável e progresso/cancelamento | ✅ |
+| Arranjo | Consolidar seleção de áudio em WAV 24-bit com os plugins da faixa, sem incluir Master/mixer | 🟡 (build e teste offline; falta validação manual com VST3 real) |
 | Exportação | MIDI (clip/trilha/projeto) | ⬜ |
 | Config. | Seleção de dispositivo de áudio, buffer, taxa de amostragem | ⬜ (usa o padrão do sistema) |
 | Acessibilidade | Anel de foco, F6 alterna painéis, setas selecionam trilha | 🟡 parcial |
@@ -597,6 +601,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 
 - [ ] **T8.1 — Renomear clip/trilha** (Ctrl+R) e cor de clip.
 - [ ] **T8.2 — Dividir (Ctrl+E) e consolidar (Ctrl+J) clips;** *loop selection* (Ctrl+L).
+  - Consolidação de seleção de áudio implementada: renderiza a cadeia de plugins da própria faixa e substitui os clips no trecho; falta validação manual com plugin VST3 real.
 - [ ] **T8.3 — Seleção por tempo** arrastando em área vazia; comandos "Duplicar tempo", etc.
 - [ ] **T8.4 — Reordenar trilhas** (arrastar cabeçalho); altura de trilha; "zoom para caber".
 - [ ] **T8.5 — Pan na UI** (knob/slider); lei de pan *constant-power*; medidor com *clip indicator*.
@@ -653,7 +658,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 **Transporte**
 - [ ] Espaço toca/pausa **sem notas presas**; Home/botão voltam ao início; Stop volta ao início.
-- [ ] Loop: a nota que cruza o fim do loop é cortada e recomeça sem estalo; arrastar o brace muda o loop em tempo real.
+- [ ] Loop: Ctrl+L alterna o loop da seleção; a nota que cruza o fim do loop é cortada e recomeça sem estalo; arrastar o brace muda o loop em tempo real.
 - [ ] Clique na régua move o playhead, tocando ou parado.
 - [ ] BPM altera o andamento; valores inválidos são limitados (20–999).
 
@@ -665,6 +670,8 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 **Janelas e foco**
 - [ ] Janela do plugin tem **minimizar e fechar**; fechar não derruba o programa.
+- [ ] Ao voltar ao Project Freedom, janelas abertas de plugins ficam à frente da janela principal; janelas minimizadas continuam minimizadas.
+- [ ] Espaço e Shift+Espaço controlam play/pause/retomada mesmo com o foco dentro da janela de um plugin.
 - [ ] Espaço funciona depois de clicar em qualquer botão; F6 alterna painéis.
 
 ---
@@ -683,6 +690,12 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.24** | Grupos planos de faixas implementados como barramentos reais com mixer/efeitos, roteamento e persistência compatível; Ctrl+G / Ctrl+Shift+G e menu de contexto |
+| **Doc 1.23** | Seleção múltipla de faixas pelo cabeçalho; Solo aplica-se às faixas selecionadas e Ctrl+clique permite solos aditivos |
+| **Doc 1.22** | Consolidar seleção de áudio renderiza a faixa após seus plugins e antes do mixer/Master; inclui progresso, cancelamento e teste offline |
+| **Doc 1.21** | Ctrl+L desativa o loop quando já está ligado; quando desligado, define o loop pelo clip/trilha selecionado e o ativa |
+| **Doc 1.20** | Janelas de plugins ficam no topo enquanto o Project Freedom está ativo, sem restaurar minimizadas; Espaço e Shift+Espaço controlam o transporte mesmo com o foco no editor de plugin |
+| **Doc 1.19** | Janelas abertas de plugins voltam à frente da janela principal ao ativar o Project Freedom; janelas minimizadas não são restauradas |
 | **Doc 1.18** | Shift+Espaço retoma diretamente da posição capturada ao pausar ou pressionar Stop, inclusive com loop e seleção |
 | **Doc 1.17** | Atalho `0` no Piano Roll aceita teclado numérico e encaminha a ação para as notas selecionadas quando a grade tem foco |
 | **Doc 1.16** | Ctrl+C/X/V para clips de áudio e MIDI, com colagem em outra trilha compatível; Ctrl+D duplica inserindo tempo e deslocando o conteúdo posterior |

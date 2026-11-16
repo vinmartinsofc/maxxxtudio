@@ -261,7 +261,7 @@ public:
     void publishNotes (int trackId, const std::vector<roll::Note>& notes);
     void publishAudioClips (int trackId, const std::vector<AudioClipPlayback>& clips);
     void setMixer (int trackId, float gain, float pan, bool muted);
-    void setTrackRouting (int trackId, roll::TrackOutputRouting routing);
+    void setTrackRouting (int trackId, roll::TrackOutputRouting routing, int parentGroupId = 0);
     void setMasterMixer (float gain, float pan, bool muted = false);
     void resetPeak (int trackId);
     void previewNote (int trackId, int pitch, bool on, float velocity = 0.8f);
@@ -278,10 +278,17 @@ public:
     void stopAudioPreview();
     void setAudioPreviewGain (float gain);
     bool beginOfflineRender (juce::String& error);
+    bool beginOfflineTrackRender (int trackId, juce::String& error);
     juce::Result renderMasterToWav (const juce::File&,
                                    double durationSeconds,
                                    std::function<void (double)> onProgress,
                                    std::function<bool()> shouldCancel);
+    juce::Result renderTrackRange (double startBeat,
+                                   double lengthBeats,
+                                   juce::AudioBuffer<float>& destination,
+                                   std::function<void (double)> onProgress,
+                                   std::function<bool()> shouldCancel);
+    double offlineRenderSampleRate() const { return offlineRenderRate; }
     void finishOfflineRender();
     bool canAcceptPlugin (int trackId, const juce::PluginDescription&) const;
     void removeDevice (int trackId, int deviceId);
@@ -312,12 +319,15 @@ private:
         TrackMixer*  mixerPtr = nullptr;
         bool audioTrack = false;
         bool isMaster = false;
+        bool isGroup = false;
+        int parentGroupId = 0;
         roll::TrackOutputRouting routing = roll::TrackOutputRouting::Master;
         std::vector<Device> devices;
     };
 
     TrackNodes* find (int trackId);
     const TrackNodes* find (int trackId) const;
+    bool beginOfflineRenderInternal (juce::String& error, int captureTrackId);
     void rewire (TrackNodes&);
     void rewireMaster();
     void clearConnectionsOf (juce::AudioProcessorGraph::NodeID);
@@ -331,6 +341,8 @@ private:
     juce::AudioProcessorPlayer player;
     juce::AudioProcessorGraph::Node::Ptr outputNode;
     juce::AudioProcessorGraph::Node::Ptr previewNode;
+    juce::AudioProcessorGraph::Node::Ptr offlineCaptureNode;
+    juce::AudioProcessor* offlineCaptureProcessor = nullptr;
     AudioPreviewSource* previewSourcePtr = nullptr;
     std::map<int, TrackNodes> tracks;
     std::set<std::pair<int, std::string>> pendingPluginLoads;
@@ -338,6 +350,6 @@ private:
     bool offlineRenderActive = false, previousLoopEnabled = true, previousMetronomeEnabled = false;
     double previousPosition = 0.0;
     float previousMetronomeGain = 1.0f;
-    double offlineRenderSampleRate = 44100.0;
+    double offlineRenderRate = 44100.0;
     int offlineRenderBlockSize = 512;
 };

@@ -49,3 +49,101 @@ TEST_CASE ("ProjectModel copies audio clips from a clipboard snapshot")
     REQUIRE_FALSE (copy->warpEnabled);
     REQUIRE (copy->waveform.size() == 2);
 }
+
+TEST_CASE ("ProjectModel toggles multi-track selection without losing the primary track")
+{
+    ProjectModel project;
+    const int first = project.addTrack (roll::TrackType::Midi)->id;
+    const int second = project.addTrack (roll::TrackType::Audio)->id;
+    const int third = project.addTrack (roll::TrackType::Midi)->id;
+
+    project.selectTrack (first);
+    project.selectTrack (second, true);
+    project.selectTrack (third, true);
+
+    REQUIRE (project.selectedTrackId == third);
+    REQUIRE (project.isTrackSelected (first));
+    REQUIRE (project.isTrackSelected (second));
+    REQUIRE (project.isTrackSelected (third));
+
+    project.selectTrack (third, true);
+    REQUIRE (project.selectedTrackId == second);
+    REQUIRE_FALSE (project.isTrackSelected (third));
+
+    project.selectTrack (first);
+    REQUIRE (project.selectedTrackId == first);
+    REQUIRE (project.selectedTrackIds.size() == 1);
+}
+
+TEST_CASE ("Solo toggles selected tracks together or adds one track with Control")
+{
+    ProjectModel project;
+    const int first = project.addTrack (roll::TrackType::Midi)->id;
+    const int second = project.addTrack (roll::TrackType::Audio)->id;
+    const int third = project.addTrack (roll::TrackType::Midi)->id;
+
+    project.selectTrack (first);
+    project.selectTrack (second, true);
+    project.setTrackSolo (second, true, false);
+
+    REQUIRE (project.track (first)->solo);
+    REQUIRE (project.track (second)->solo);
+    REQUIRE_FALSE (project.track (third)->solo);
+
+    project.setTrackSolo (third, true, true);
+    REQUIRE (project.track (first)->solo);
+    REQUIRE (project.track (second)->solo);
+    REQUIRE (project.track (third)->solo);
+
+    project.setTrackSolo (second, false, false);
+    REQUIRE_FALSE (project.track (first)->solo);
+    REQUIRE_FALSE (project.track (second)->solo);
+    REQUIRE_FALSE (project.track (third)->solo);
+}
+
+TEST_CASE ("ProjectModel groups selected tracks into one flat bus and restores grouping with undo")
+{
+    ProjectModel project;
+    const int first = project.addTrack (roll::TrackType::Midi)->id;
+    const int between = project.addTrack (roll::TrackType::Audio)->id;
+    const int last = project.addTrack (roll::TrackType::Audio)->id;
+    int addedTracks = 0;
+    int removedTracks = 0;
+    project.onTrackAdded = [&addedTracks] (int) { ++addedTracks; };
+    project.onTrackRemoved = [&removedTracks] (int) { ++removedTracks; };
+
+    const int groupId = project.groupTracks ({ first, last });
+
+    REQUIRE (groupId > 0);
+    REQUIRE (addedTracks == 1);
+    REQUIRE (project.tracks.size() == 4);
+    REQUIRE (project.tracks[0]->id == groupId);
+    REQUIRE (project.tracks[1]->id == first);
+    REQUIRE (project.tracks[2]->id == last);
+    REQUIRE (project.tracks[3]->id == between);
+    REQUIRE (project.track (groupId)->type == roll::TrackType::Group);
+    REQUIRE (project.track (first)->parentGroupId == groupId);
+    REQUIRE (project.track (last)->parentGroupId == groupId);
+    REQUIRE (project.groupTracks ({ first, groupId }) == -1);
+
+    REQUIRE (project.undo());
+    REQUIRE (removedTracks == 1);
+    REQUIRE (project.track (groupId) == nullptr);
+    REQUIRE (project.track (first)->parentGroupId == 0);
+    REQUIRE (project.track (last)->parentGroupId == 0);
+}
+
+TEST_CASE ("ProjectModel ungroups children without changing their order")
+{
+    ProjectModel project;
+    const int first = project.addTrack (roll::TrackType::Midi)->id;
+    const int second = project.addTrack (roll::TrackType::Audio)->id;
+    const int groupId = project.groupTracks ({ first, second });
+
+    REQUIRE (project.ungroupTrack (groupId));
+    REQUIRE (project.track (groupId) == nullptr);
+    REQUIRE (project.track (first)->parentGroupId == 0);
+    REQUIRE (project.track (second)->parentGroupId == 0);
+    REQUIRE (project.tracks[0]->id == first);
+    REQUIRE (project.tracks[1]->id == second);
+}

@@ -29,6 +29,8 @@ public:
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
     bool keyStateChanged (bool isKeyDown) override;
+    void setMainWindow (juce::TopLevelWindow*);
+    void updatePluginWindowZOrder();
     void openProjectFromFile (const juce::File&);
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -56,6 +58,7 @@ private:
     bool selectedTrackSpan (double& start, double& end) const;
     void playSelectedTrack();
     void resumeFromPausedPosition();
+    bool handleTransportKeyPress (const juce::KeyPress&);
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
     void showProjectMenu();
@@ -114,6 +117,7 @@ private:
     juce::Label gridLabel;
     std::vector<juce::Component*> clipControls;
 
+    juce::TopLevelWindow* mainWindow = nullptr;
     std::map<int, std::unique_ptr<PluginWindow>> windows;
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
