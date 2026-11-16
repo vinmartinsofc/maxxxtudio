@@ -187,9 +187,10 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Arranjo | Duplicar faixa MIDI/áudio com clips, mixer e cadeia de plugins, via Ctrl+D sem clip selecionado ou menu de contexto | 🟡 (build/testes; falta validação manual com VST3) |
 | Transporte | Play/Pause (Espaço), Shift+Espaço retoma da posição pausada/Stop, Home, Ctrl+L alterna loop na seleção, BPM, posição | 🟡 (falta teste manual) |
 | Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar), régua, brace de loop | ✅ |
-| Arranjo | Ctrl+C/X/V em clips de áudio/MIDI, incluindo colar em outra trilha do mesmo tipo; Ctrl+D insere tempo e desloca o conteúdo posterior | 🟡 (build/testes; falta teste manual na UI) |
+| Arranjo | Ctrl+C/X/V em clips de áudio/MIDI, incluindo colar em outra trilha do mesmo tipo; Ctrl+D duplica a seleção e substitui clips no destino sem deslocar outras faixas | 🟡 (build/testes; falta teste manual na UI) |
 | Arranjo | Tecla `0` ativa/desativa o clip selecionado | ✅ |
 | Arranjo | Clique no fundo posiciona o cursor na grade; arrastar seleciona intervalo e Espaço inicia do começo da seleção | 🟡 |
+| Arranjo | Grade adaptativa acompanha o zoom e mantém o snap ativo; Ctrl+5 alterna para grade fixa | 🟡 (build/testes; falta validação manual na UI) |
 | Arranjo | Visão geral no topo, navegação horizontal e cores customizáveis por trilha | 🟡 visão geral implementada nesta versão / ⬜ cores customizáveis |
 | Arranjo | Visão geral com zoom vertical e enquadramento do arrangement; bandeiras de locator destacadas e botão Del remove o mais recente sem seleção | 🟡 |
 | Piano roll | Notas, seleção, mover/redimensionar, rubber band, copiar/colar, duplicar, quantizar | ✅ |
@@ -378,7 +379,7 @@ Project
 | Redimensionar | Arrastar a borda direita (mín. 1 beat) |
 | Copiar / recortar / colar | Ctrl+C / Ctrl+X / Ctrl+V; cola no playhead e na trilha selecionada, mantendo espaçamento relativo |
 | Copiar por arrasto | Ctrl + arrastar |
-| Duplicar / apagar | Com clips/intervalo selecionados, Ctrl+D duplica inserindo tempo; sem seleção de clips, duplica a faixa MIDI/áudio ativa; Delete ou Backspace apaga |
+| Duplicar / apagar | Com clips/intervalo selecionados, Ctrl+D duplica no destino, substituindo clips sobrepostos apenas nas faixas selecionadas; sem seleção de clips, duplica a faixa MIDI/áudio ativa; Delete ou Backspace apaga |
 | Trilha acima/abaixo | ↑ / ↓ |
 | Zoom | Ctrl+roda, `+` / `-` |
 | Loop | Arrastar bordas/corpo do brace (faixa fina no topo da régua) |
@@ -692,6 +693,8 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.27** | Ctrl+D com clips/intervalo selecionados substitui o conteúdo no destino sem deslocar clips em outras faixas |
+| **Doc 1.26** | Grade adaptativa do Arrangement acompanha o zoom; Ctrl+5 alterna entre grade adaptativa e fixa |
 | **Doc 1.25** | Ctrl+D sem clips selecionados duplica a faixa MIDI/áudio com clips, mixer, roteamento e plugins; opção adicionada ao menu de contexto |
 | **Doc 1.24** | Grupos planos de faixas implementados como barramentos reais com mixer/efeitos, roteamento e persistência compatível; Ctrl+G / Ctrl+Shift+G e menu de contexto |
 | **Doc 1.23** | Seleção múltipla de faixas pelo cabeçalho; Solo aplica-se às faixas selecionadas e Ctrl+clique permite solos aditivos |
@@ -701,7 +704,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 | **Doc 1.19** | Janelas abertas de plugins voltam à frente da janela principal ao ativar o Project Freedom; janelas minimizadas não são restauradas |
 | **Doc 1.18** | Shift+Espaço retoma diretamente da posição capturada ao pausar ou pressionar Stop, inclusive com loop e seleção |
 | **Doc 1.17** | Atalho `0` no Piano Roll aceita teclado numérico e encaminha a ação para as notas selecionadas quando a grade tem foco |
-| **Doc 1.16** | Ctrl+C/X/V para clips de áudio e MIDI, com colagem em outra trilha compatível; Ctrl+D duplica inserindo tempo e deslocando o conteúdo posterior |
+| **Doc 1.16** | Ctrl+C/X/V para clips de áudio e MIDI, com colagem em outra trilha compatível |
 | **Doc 1.15** | Exportação offline do Master em WAV 24-bit com cauda configurável e progresso/cancelamento |
 | **Doc 1.14** | Zoom vertical e enquadramento pela visão geral; bandeiras de locator mais visíveis; Del remove o locator mais recente quando nenhum está selecionado |
 | **Doc 1.13** | Ao pressionar Espaço com um intervalo temporal selecionado, a reprodução inicia no começo da seleção |

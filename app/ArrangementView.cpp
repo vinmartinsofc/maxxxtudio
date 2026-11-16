@@ -1126,6 +1126,11 @@ public:
             owner.setGridBeat (std::min (4.0, current * 2.0));
             return true;
         }
+        if (ctrl && key == '5')
+        {
+            owner.setAdaptiveGrid (! owner.adaptiveGridEnabled);
+            return true;
+        }
         if (ctrl && key == '4')
         {
             owner.setGridBeat (owner.gridBeats() > 0.0 ? 0.0 : owner.lastGridBeat);
@@ -1576,7 +1581,7 @@ private:
             return true;
         };
 
-        bool succeeded = splitBoundary (end, nullptr);
+        bool succeeded = splitBoundary (end, &selectedTrackIds);
         if (succeeded && duplicateRange)
             succeeded = splitBoundary (start, &selectedTrackIds);
 
@@ -1613,30 +1618,32 @@ private:
             succeeded = ! copyActions.empty();
         }
 
-        struct ShiftAction { int trackId; int clipId; double start; bool audio; };
-        std::vector<ShiftAction> clipsToShift;
         if (succeeded)
         {
-            for (const auto& track : project.tracks)
+            const double destinationEnd = end + offset;
+            succeeded = splitBoundary (destinationEnd, &selectedTrackIds);
+            if (succeeded)
             {
-                for (const auto& clip : track->clips)
-                    if (clip->start >= end - 1.0e-9)
-                        clipsToShift.push_back ({ track->id, clip->id, clip->start, false });
-                for (const auto& clip : track->audioClips)
-                    if (clip->start >= end - 1.0e-9)
-                        clipsToShift.push_back ({ track->id, clip->id, clip->start, true });
-            }
-            std::sort (clipsToShift.begin(), clipsToShift.end(),
-                       [] (const auto& a, const auto& b) { return a.start > b.start; });
-            for (const auto& clip : clipsToShift)
-            {
-                const int movedId = clip.audio
-                    ? project.moveAudioClip (clip.trackId, clip.clipId, clip.trackId, clip.start + offset)
-                    : project.moveClip (clip.trackId, clip.clipId, clip.trackId, clip.start + offset);
-                if (movedId < 0)
+                for (const int trackId : selectedTrackIds)
                 {
-                    succeeded = false;
-                    break;
+                    const auto* track = project.track (trackId);
+                    if (track == nullptr)
+                        continue;
+
+                    std::vector<int> midiIds, audioIds;
+                    for (const auto& clip : track->clips)
+                        if (clip->start >= end - 1.0e-9
+                            && clip->end() <= destinationEnd + 1.0e-9)
+                            midiIds.push_back (clip->id);
+                    for (const auto& clip : track->audioClips)
+                        if (clip->start >= end - 1.0e-9
+                            && clip->end() <= destinationEnd + 1.0e-9)
+                            audioIds.push_back (clip->id);
+
+                    for (const int id : midiIds)
+                        project.deleteClip (trackId, id);
+                    for (const int id : audioIds)
+                        project.deleteAudioClip (trackId, id);
                 }
             }
         }
@@ -3542,7 +3549,9 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     for (int i = 0; i < 10; ++i)
         gridBox.addItem (gridLabels[i], i + 1);
     gridBox.addItem ("Sem grade", 11);
+    gridBox.addItem ("Adaptativa", 12);
     gridBox.setSelectedId (3, juce::dontSendNotification);
+    gridBox.setTooltip ("Ctrl+5 alterna entre a grade fixa e a grade adaptativa ao zoom");
     gridBox.onChange = [this]
     {
         const int id = gridBox.getSelectedId();
@@ -3550,6 +3559,8 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
             setGridBeat (gridValues[id - 1]);
         else if (id == 11)
             setGridBeat (0.0);
+        else if (id == 12)
+            setAdaptiveGrid (true);
     };
 
     project.addChangeListener (this);
@@ -3579,6 +3590,8 @@ void ArrangementView::zoomAt (double factor, double anchorBeat, int anchorScreen
     const double fitScale = static_cast<double> (std::max (1, viewport.getMaximumVisibleWidth()))
                           / std::max (1.0, project.totalBeats);
     pixelsPerBeat = std::clamp (pixelsPerBeat * factor, std::min (4.0, fitScale), 600.0);
+    if (adaptiveGridEnabled)
+        updateAdaptiveGrid();
     updateSizes();
     const auto viewPosition = viewport.getViewPosition();
     viewport.setViewPosition (std::max (0, static_cast<int> (std::lround (anchorBeat * pixelsPerBeat
@@ -3596,11 +3609,41 @@ double ArrangementView::snapBeat (double beat) const
     return std::max (0.0, std::round (beat / gridBeat) * gridBeat);
 }
 
-void ArrangementView::setGridBeat (double beats)
+void ArrangementView::setAdaptiveGrid (bool enabled)
 {
-    gridBeat = std::max (0.0, beats);
-    if (gridBeat > 0.0)
-        lastGridBeat = gridBeat;
+    adaptiveGridEnabled = enabled;
+    if (adaptiveGridEnabled)
+    {
+        updateAdaptiveGrid();
+        return;
+    }
+
+    updateGridSelection();
+    lanes->repaint();
+}
+
+void ArrangementView::updateAdaptiveGrid()
+{
+    const double previousGrid = gridBeat;
+    gridBeat = roll::adaptiveGridBeat (pixelsPerBeat);
+    lastGridBeat = gridBeat;
+    updateGridSelection();
+    if (std::abs (previousGrid - gridBeat) > 1.0e-9)
+    {
+        lanes->repaint();
+        if (onGridChanged)
+            onGridChanged();
+    }
+}
+
+void ArrangementView::updateGridSelection()
+{
+    if (adaptiveGridEnabled)
+    {
+        gridBox.setSelectedId (12, juce::dontSendNotification);
+        return;
+    }
+
     static constexpr double values[] { 1.0, 0.5, 0.25, 0.125, 0.0625,
                                        2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0,
                                        1.0 / 12.0, 4.0 };
@@ -3611,6 +3654,15 @@ void ArrangementView::setGridBeat (double beats)
     if (gridBeat <= 0.0)
         selectedId = 11;
     gridBox.setSelectedId (selectedId, juce::dontSendNotification);
+}
+
+void ArrangementView::setGridBeat (double beats)
+{
+    adaptiveGridEnabled = false;
+    gridBeat = std::max (0.0, beats);
+    if (gridBeat > 0.0)
+        lastGridBeat = gridBeat;
+    updateGridSelection();
     lanes->repaint();
     if (onGridChanged) onGridChanged();
 }

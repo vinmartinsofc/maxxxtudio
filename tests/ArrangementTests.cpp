@@ -4,6 +4,15 @@
 
 using namespace roll;
 
+TEST_CASE("Adaptive arrangement grid keeps snap spacing usable while zooming")
+{
+    REQUIRE(adaptiveGridBeat (24.0) == 0.5);
+    REQUIRE(adaptiveGridBeat (96.0) == 0.125);
+    REQUIRE(adaptiveGridBeat (4.0) == 4.0);
+    REQUIRE(adaptiveGridBeat (0.0) == 0.25);
+    REQUIRE(adaptiveGridBeat (24.0, 0.0) == 0.25);
+}
+
 TEST_CASE("Clips nao podem se sobrepor na mesma trilha")
 {
     Track t;

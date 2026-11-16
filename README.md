@@ -23,7 +23,7 @@ C++20, JUCE 8, CMake, testes com Catch2.
 | F6 | Muda o foco: plugins -> arranjo -> piano roll |
 | Duplo clique numa trilha | Cria um clip de 1 compasso |
 | Arrastar clip / borda direita | Mover (entre trilhas também) / redimensionar; Ctrl = copiar |
-| Ctrl+D (no arranjo) | Com clips selecionados, duplica a seleção; sem clips selecionados, duplica a faixa MIDI/áudio ativa |
+| Ctrl+D (no arranjo) | Com clips selecionados, duplica a seleção e substitui clips no destino sem deslocar outras faixas; sem clips selecionados, duplica a faixa MIDI/áudio ativa |
 | Delete (no arranjo) | Apagar clip |
 | Alt + roda (piano roll) | Zoom vertical |
 | Home / End | Piano roll: marcador de inserção no início / fim. Fora dele, Home volta ao início |

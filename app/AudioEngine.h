@@ -141,6 +141,7 @@ struct DeviceInfo
 {
     int  id = 0;
     juce::String name;
+    juce::String pluginIdentifier;
     bool isInstrument = false;
     bool isBypassed = false;
     int groupId = 0;

@@ -1,5 +1,6 @@
 #include "Arrangement.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace roll
@@ -317,5 +318,24 @@ float decibelsToGain (float decibels)
     if (decibels <= -59.9f)
         return 0.0f;
     return std::pow (10.0f, decibels / 20.0f);
+}
+
+double adaptiveGridBeat (double pixelsPerBeat, double targetSpacingPixels)
+{
+    if (! std::isfinite (pixelsPerBeat) || pixelsPerBeat <= 0.0
+        || ! std::isfinite (targetSpacingPixels) || targetSpacingPixels <= 0.0)
+        return 0.25;
+
+    static constexpr std::array gridValues {
+        1.0, 0.5, 0.25, 0.125, 0.0625,
+        2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0, 1.0 / 12.0, 4.0
+    };
+    const auto best = std::min_element (gridValues.begin(), gridValues.end(),
+        [pixelsPerBeat, targetSpacingPixels] (double first, double second)
+        {
+            return std::abs (first * pixelsPerBeat - targetSpacingPixels)
+                 < std::abs (second * pixelsPerBeat - targetSpacingPixels);
+        });
+    return *best;
 }
 } // namespace roll

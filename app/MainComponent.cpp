@@ -343,7 +343,7 @@ public:
         }
 
         computerMidiIndicator = std::make_unique<ComputerMidiIndicator> (true);
-        addAndMakeVisible (*computerMidiIndicator);
+        addAndMakeVisible (computerMidiIndicator.get());
         computerMidiIndicator->setVisible (false);
         computerMidiIndicator->alignWithParent();
 
@@ -430,9 +430,9 @@ MainComponent::MainComponent()
     addAndMakeVisible (clipTab);
     addAndMakeVisible (deviceTab);
     actionIndicator = std::make_unique<ActionIndicator>();
-    addAndMakeVisible (*actionIndicator);
+    addAndMakeVisible (actionIndicator.get());
     computerMidiIndicator = std::make_unique<ComputerMidiIndicator>();
-    addAndMakeVisible (*computerMidiIndicator);
+    addAndMakeVisible (computerMidiIndicator.get());
     computerMidiIndicator->setVisible (false);
 
     clipControls = { &scaleCaption, &lengthCaption, &gridCaption, &zoomCaption, &rootBox, &modeBox, &lengthBox, &scaleButton,
@@ -2836,12 +2836,25 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
         return;
     }
 
+    const juce::String pluginIdentifier = desc.createIdentifierString();
+    const auto existingDevices = engine.devices (trackId);
+    if (const auto existing = std::find_if (existingDevices.begin(), existingDevices.end(),
+            [&pluginIdentifier] (const DeviceInfo& device)
+            {
+                return device.pluginIdentifier == pluginIdentifier;
+            });
+        existing != existingDevices.end())
+    {
+        browser.setStatus (theme::ui ("Este plugin ja esta carregado nesta trilha."));
+        openDeviceEditor (trackId, existing->id);
+        return;
+    }
+
     if (desc.isInstrument)                                // o instrumento atual será substituído: fecha a UI dele
-        for (const auto& d : engine.devices (trackId))
+        for (const auto& d : existingDevices)
             if (d.isInstrument) windows.erase (d.id);
 
     // Use the same slot index that AudioEngine will use when it inserts the plugin.
-    const auto existingDevices = engine.devices (trackId);
     int pluginSlot = 0;
     if (! desc.isInstrument)
     {

@@ -121,4 +121,5 @@ std::vector<Note> flatten (const Track& track);
 // Conversao linear <-> decibeis para faders e medidores
 float gainToDecibels (float gain, float minusInfinityDb = -60.0f);
 float decibelsToGain (float decibels);
+double adaptiveGridBeat (double pixelsPerBeat, double targetSpacingPixels = 12.0);
 } // namespace roll

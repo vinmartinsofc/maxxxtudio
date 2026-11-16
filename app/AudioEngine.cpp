@@ -1411,7 +1411,7 @@ std::vector<DeviceInfo> AudioEngine::devices (int trackId) const
     std::vector<DeviceInfo> out;
     if (auto* t = find (trackId))
         for (const auto& d : t->devices)
-            out.push_back ({ d.id, d.name, d.instrument, d.node->isBypassed(), d.groupId });
+            out.push_back ({ d.id, d.name, d.pluginIdentifier, d.instrument, d.node->isBypassed(), d.groupId });
     return out;
 }
 

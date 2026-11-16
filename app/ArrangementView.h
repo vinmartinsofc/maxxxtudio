@@ -41,6 +41,7 @@ public:
     void zoom (double factor);
     double gridBeats() const { return gridBeat; }
     double snapBeat (double beat) const;
+    void setAdaptiveGrid (bool enabled);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -66,6 +67,8 @@ private:
     void updateLocatorControls();
     void navigateLocator (bool forward);
     void zoomAt (double factor, double anchorBeat, int anchorScreenX);
+    void updateAdaptiveGrid();
+    void updateGridSelection();
     static juce::Colour colourFor (int trackId);
 
     ProjectModel& project;
@@ -74,6 +77,7 @@ private:
     bool loopEnabled = true;
     double gridBeat = 0.25;
     double lastGridBeat = 0.25;
+    bool adaptiveGridEnabled = false;
 
     std::unique_ptr<Lanes> lanes;
     std::unique_ptr<Ruler> ruler;

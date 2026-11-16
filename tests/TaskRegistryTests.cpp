@@ -125,8 +125,8 @@ TEST_CASE ("Plugin task indicator is attached to the affected device slot")
     DeviceView deviceView (registry);
     deviceView.setBounds (0, 0, 800, 300);
     const std::vector<DeviceInfo> devices {
-        { 1, "Instrument", true, false, 0 },
-        { 2, "Effect", false, false, 0 }
+        { 1, "Instrument", "plugin:instrument", true, false, 0 },
+        { 2, "Effect", "plugin:effect", false, false, 0 }
     };
     deviceView.setDevices (3, "Track 3", devices);
     const int deviceCount = deviceView.getNumChildComponents();
