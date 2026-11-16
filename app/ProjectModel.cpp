@@ -343,6 +343,40 @@ void ProjectModel::removeTrack (int id)
     sendChangeMessage();
 }
 
+int ProjectModel::duplicateTrack (int id)
+{
+    const int index = trackIndex (id);
+    const auto* source = track (id);
+    if (index < 0 || source == nullptr || source->type == roll::TrackType::Group)
+        return -1;
+
+    recordUndo();
+    auto duplicate = std::make_unique<roll::Track> (*source);
+    duplicate->id = nextTrackId++;
+    duplicate->name = source->name + " Copy";
+    const int duplicateId = duplicate->id;
+    tracks.insert (tracks.begin() + index + 1, std::move (duplicate));
+
+    selectedTrackIds.assign (1, duplicateId);
+    selectedTrackId = duplicateId;
+    selectedClipId = selectedAudioClipId = -1;
+    if (onTrackAdded)
+        onTrackAdded (duplicateId);
+    if (source->type == roll::TrackType::Audio)
+    {
+        if (onAudioClipsChanged)
+            onAudioClipsChanged (duplicateId);
+    }
+    else if (onTrackNotes)
+        onTrackNotes (duplicateId);
+    if (onMixerChanged)
+        onMixerChanged();
+    if (onSelectionChanged)
+        onSelectionChanged();
+    sendChangeMessage();
+    return duplicateId;
+}
+
 int ProjectModel::groupTracks (const std::vector<int>& trackIds)
 {
     std::vector<int> uniqueIds;

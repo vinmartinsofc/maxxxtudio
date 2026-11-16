@@ -108,6 +108,28 @@ private:
     bool dragging = false, resizing = false;
 };
 
+class HorizontalZoomHandle : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    HorizontalZoomHandle()
+    {
+        setTooltip ("Arraste horizontalmente para ajustar o zoom do Piano Roll.");
+    }
+
+    std::function<void()> onZoomStart;
+    std::function<void (float)> onZoomDrag;
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+private:
+    juce::Point<int> zoomStartScreenPosition;
+    bool zoomDragging = false, zoomHovered = false;
+};
+
 // Faixa de velocity: uma barra por nota; arraste para mudar.
 class VelocityLane : public juce::Component
 {
@@ -164,6 +186,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void syncPositions();
     double constrainedHorizontalZoom (double requested) const;
+    void setHorizontalZoomAt (double requested, double anchorBeat, int anchorScreenX);
 
     static constexpr int keyWidth = 58, rulerHeight = 24, velocityHeight = 72;
 
@@ -171,6 +194,7 @@ private:
     NoteGrid grid { model };
     KeyColumn keys { model };
     RulerBar ruler { model };
+    HorizontalZoomHandle horizontalZoomHandle;
     VelocityLane velocity { model };
     SyncViewport viewport;
     Holder keyHolder, rulerHolder, velocityHolder;
@@ -178,4 +202,6 @@ private:
     int  lastCenterPitch = 60;      // mantém a posição vertical ao ligar/desligar o fold
     int noteRulerStartRowHeight = 16, noteRulerStartViewY = 0;
     int noteRulerAnchorPitch = 60, noteRulerAnchorScreenY = 0;
+    double horizontalZoomStart = 0.0, horizontalZoomAnchorBeat = 0.0;
+    int horizontalZoomAnchorScreenX = 0;
 };

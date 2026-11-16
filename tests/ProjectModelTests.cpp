@@ -147,3 +147,47 @@ TEST_CASE ("ProjectModel ungroups children without changing their order")
     REQUIRE (project.tracks[0]->id == first);
     REQUIRE (project.tracks[1]->id == second);
 }
+
+TEST_CASE ("ProjectModel duplicates a track's mix and clips within its group")
+{
+    ProjectModel project;
+    const int midiId = project.addTrack (roll::TrackType::Midi)->id;
+    auto* audio = project.addTrack (roll::TrackType::Audio);
+    auto* clip = project.addAudioClip (audio->id, 2.0, 4.0, "C:/audio/kick.wav", "kick",
+                                       { { -0.5f, 0.5f } }, 2.0, 120.0);
+    REQUIRE (clip != nullptr);
+    audio->volume = 0.7;
+    audio->pan = -0.25;
+    audio->mute = true;
+    const int audioId = audio->id;
+    const int groupId = project.groupTracks ({ midiId, audioId });
+
+    const int duplicateId = project.duplicateTrack (audioId);
+
+    REQUIRE (duplicateId > 0);
+    const auto* duplicate = project.track (duplicateId);
+    REQUIRE (duplicate != nullptr);
+    REQUIRE (duplicate->type == roll::TrackType::Audio);
+    REQUIRE (duplicate->parentGroupId == groupId);
+    REQUIRE (duplicate->name == "2 AUDIO Copy");
+    REQUIRE (duplicate->volume == 0.7);
+    REQUIRE (duplicate->pan == -0.25);
+    REQUIRE (duplicate->mute);
+    REQUIRE (duplicate->audioClips.size() == 1);
+    REQUIRE (duplicate->audioClips.front()->filePath == "C:/audio/kick.wav");
+    REQUIRE (duplicate->audioClips.front()->waveform.size() == 1);
+    REQUIRE (project.selectedTrackId == duplicateId);
+    REQUIRE (project.undo());
+    REQUIRE (project.track (duplicateId) == nullptr);
+}
+
+TEST_CASE ("ProjectModel does not duplicate a group bus by itself")
+{
+    ProjectModel project;
+    const int first = project.addTrack (roll::TrackType::Midi)->id;
+    const int second = project.addTrack (roll::TrackType::Audio)->id;
+    const int groupId = project.groupTracks ({ first, second });
+
+    REQUIRE (project.duplicateTrack (groupId) == -1);
+    REQUIRE (project.tracks.size() == 3);
+}

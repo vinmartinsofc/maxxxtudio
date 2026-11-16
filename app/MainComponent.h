@@ -44,6 +44,7 @@ private:
 
     void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
+    void duplicateSelectedTrack (int trackId);
     void openDeviceEditor (int trackId, int deviceId);
     void updateActionIndicator();
     void setBrowserVisible (bool);
@@ -139,6 +140,7 @@ private:
     int pendingAudioLoads = 0, pendingPreviewLoads = 0;
     bool scanningPlugins = false;
     bool projectFileOperationInProgress = false;
+    bool trackDuplicationInProgress = false;
     bool audioRenderInProgress = false;
     size_t projectLoadWorkTotal = 0, projectLoadWorkDone = 0;
     juce::String scanMessage;

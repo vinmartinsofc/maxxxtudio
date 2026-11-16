@@ -90,8 +90,8 @@ void NoteGrid::showContextMenu (juce::Point<int> screenPosition)
     noteMenu.addItem (25, "Subir uma oitava", hasSelection);
     noteMenu.addItem (26, "Descer uma oitava", hasSelection);
     noteMenu.addSeparator();
-    noteMenu.addItem (27, "Aumentar duração", hasSelection);
-    noteMenu.addItem (28, "Reduzir duração", hasSelection);
+    noteMenu.addItem (27, "Aumentar duracao", hasSelection);
+    noteMenu.addItem (28, "Reduzir duracao", hasSelection);
 
     const auto addGridChoice = [&gridMenu, this] (int id, const juce::String& label, double beats, bool triplet)
     {
@@ -117,20 +117,20 @@ void NoteGrid::showContextMenu (juce::Point<int> screenPosition)
     viewMenu.addItem (32, "Modo de escala", true, model.scaleOn);
     viewMenu.addItem (33, "Fold", true, model.fold);
     viewMenu.addItem (34, "Fold da escala", true, model.foldScale);
-    viewMenu.addItem (35, "Pré-escuta de notas", true, model.previewOn);
+    viewMenu.addItem (35, "Pre-escuta de notas", true, model.previewOn);
     viewMenu.addSeparator();
-    viewMenu.addItem (36, "Snap à grade", true, model.snap);
+    viewMenu.addItem (36, "Snap a grade", true, model.snap);
 
-    spellingMenu.addItem (201, "Automática", true, model.noteSpelling == RollModel::NoteSpelling::Auto);
+    spellingMenu.addItem (201, "Automatica", true, model.noteSpelling == RollModel::NoteSpelling::Auto);
     spellingMenu.addItem (202, "Sustenidos", true, model.noteSpelling == RollModel::NoteSpelling::Sharps);
-    spellingMenu.addItem (203, "Bemóis", true, model.noteSpelling == RollModel::NoteSpelling::Flats);
-    spellingMenu.addItem (204, "Sustenidos e bemóis", true, model.noteSpelling == RollModel::NoteSpelling::Both);
+    spellingMenu.addItem (203, "Bemois", true, model.noteSpelling == RollModel::NoteSpelling::Flats);
+    spellingMenu.addItem (204, "Sustenidos e bemois", true, model.noteSpelling == RollModel::NoteSpelling::Both);
 
     menu.addSubMenu ("Editar notas", editMenu);
-    menu.addSubMenu ("Ações das notas", noteMenu);
+    menu.addSubMenu ("Acoes das notas", noteMenu);
     menu.addSubMenu ("Grade", gridMenu);
     menu.addItem (10, "Grade tercinada", true, model.triplet);
-    menu.addSubMenu ("Visualização", viewMenu);
+    menu.addSubMenu ("Visualizacao", viewMenu);
     menu.addSubMenu ("Grafia das notas", spellingMenu);
 
     juce::Component::SafePointer<NoteGrid> safeThis (this);
@@ -857,6 +857,64 @@ void RulerBar::mouseUp (const juce::MouseEvent& e)
     resizing = false;
 }
 
+// ======================================================== HorizontalZoomHandle
+
+void HorizontalZoomHandle::paint (juce::Graphics& g)
+{
+    g.fillAll (zoomHovered ? theme::panelLight().brighter (0.12f) : theme::panelLight());
+    g.setColour (theme::border());
+    g.drawRect (getLocalBounds(), 1);
+
+    const float centerX = static_cast<float> (getWidth()) * 0.5f;
+    const float centerY = static_cast<float> (getHeight()) * 0.5f - 1.0f;
+    const auto iconColour = zoomHovered ? theme::accent() : theme::textDim();
+    g.setColour (iconColour);
+    g.drawEllipse (centerX - 6.0f, centerY - 7.0f, 11.0f, 11.0f, 1.5f);
+    g.drawLine (centerX + 3.0f, centerY + 2.0f, centerX + 8.0f, centerY + 7.0f, 1.8f);
+    g.drawLine (centerX - 3.0f, centerY - 1.5f, centerX + 2.0f, centerY - 1.5f, 1.2f);
+    g.drawLine (centerX - 0.5f, centerY - 4.0f, centerX - 0.5f, centerY + 1.0f, 1.2f);
+}
+
+void HorizontalZoomHandle::mouseDown (const juce::MouseEvent& e)
+{
+    if (! e.mods.isLeftButtonDown())
+        return;
+
+    zoomDragging = true;
+    zoomStartScreenPosition = e.getScreenPosition();
+    setMouseCursor (ui::zoomCursor());
+    if (onZoomStart) onZoomStart();
+}
+
+void HorizontalZoomHandle::mouseMove (const juce::MouseEvent&)
+{
+    if (! zoomHovered)
+    {
+        zoomHovered = true;
+        repaint();
+    }
+    setMouseCursor (ui::zoomCursor());
+}
+
+void HorizontalZoomHandle::mouseExit (const juce::MouseEvent&)
+{
+    zoomHovered = false;
+    repaint();
+    setMouseCursor (zoomDragging ? ui::zoomCursor() : juce::MouseCursor::NormalCursor);
+}
+
+void HorizontalZoomHandle::mouseDrag (const juce::MouseEvent& e)
+{
+    if (zoomDragging && onZoomDrag)
+        onZoomDrag (static_cast<float> (e.getScreenPosition().x - zoomStartScreenPosition.x));
+}
+
+void HorizontalZoomHandle::mouseUp (const juce::MouseEvent&)
+{
+    zoomDragging = false;
+    setMouseCursor (zoomHovered ? ui::zoomCursor() : juce::MouseCursor::NormalCursor);
+}
+
 // ============================================================ VelocityLane
 
 int VelocityLane::velocityAt (float y) const
@@ -934,6 +992,7 @@ PianoRollEditor::PianoRollEditor (RollModel& m) : model (m)
     addAndMakeVisible (viewport);
     addAndMakeVisible (keyHolder);
     addAndMakeVisible (rulerHolder);
+    addAndMakeVisible (horizontalZoomHandle);
     addAndMakeVisible (velocityHolder);
     keyHolder.addAndMakeVisible (keys);
     rulerHolder.addAndMakeVisible (ruler);
@@ -957,6 +1016,18 @@ PianoRollEditor::PianoRollEditor (RollModel& m) : model (m)
     ruler.onZoom = [this] (double factor) { zoomHorizontal (factor); };
     grid.onZoomHorizontal = [this] (double factor) { zoomHorizontal (factor); };
     grid.onFocusChange = [this] { repaint(); };
+    horizontalZoomHandle.onZoomStart = [this]
+    {
+        horizontalZoomStart = model.pixelsPerBeat;
+        horizontalZoomAnchorScreenX = viewport.getMaximumVisibleWidth() / 2;
+        horizontalZoomAnchorBeat = (viewport.getViewPositionX() + horizontalZoomAnchorScreenX)
+                                   / model.pixelsPerBeat;
+    };
+    horizontalZoomHandle.onZoomDrag = [this] (float dx)
+    {
+        const double requested = horizontalZoomStart * std::exp (static_cast<double> (dx) * 0.012);
+        setHorizontalZoomAt (requested, horizontalZoomAnchorBeat, horizontalZoomAnchorScreenX);
+    };
     keys.onZoomStart = [this] (int screenY)
     {
         noteRulerStartRowHeight = model.rowHeight;
@@ -1022,6 +1093,23 @@ void PianoRollEditor::zoomHorizontal (double factor)
     model.sendChangeMessage();
 }
 
+void PianoRollEditor::setHorizontalZoomAt (double requested, double anchorBeat, int anchorScreenX)
+{
+    const double nextZoom = constrainedHorizontalZoom (requested);
+    if (std::abs (nextZoom - model.pixelsPerBeat) < 1.0e-9)
+        return;
+
+    model.pixelsPerBeat = nextZoom;
+    grid.updateSize();
+    const int viewX = std::max (0, static_cast<int> (std::lround (anchorBeat * nextZoom - anchorScreenX)));
+    viewport.setViewPosition (viewX, viewport.getViewPositionY());
+    syncPositions();
+    grid.repaint();
+    ruler.repaint();
+    velocity.repaint();
+    model.sendChangeMessage();
+}
+
 double PianoRollEditor::constrainedHorizontalZoom (double requested) const
 {
     const double clipLength = std::max (0.001, model.clip().length());
@@ -1041,7 +1129,7 @@ void PianoRollEditor::resized()
 {
     auto area = getLocalBounds();
     auto top = area.removeFromTop (rulerHeight);
-    top.removeFromLeft (keyWidth);
+    horizontalZoomHandle.setBounds (top.removeFromLeft (keyWidth));
     rulerHolder.setBounds (top);
 
     auto bottom = area.removeFromBottom (velocityHeight);

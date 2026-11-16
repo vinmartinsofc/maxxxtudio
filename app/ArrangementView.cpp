@@ -53,6 +53,14 @@ public:
         repaint (static_cast<int> (beats * owner.pixelsPerBeat) - 2, 0, 5, getHeight());
     }
 
+    void clearSelection()
+    {
+        selectedClips.clear();
+        selectionAnchor = {};
+        hasRangeSelection = false;
+        repaint();
+    }
+
     bool getTimeSelectionStart (double& startBeat) const
     {
         if (! hasRangeSelection || std::abs (rangeEndBeat - rangeStartBeat) < 1.0e-9)
@@ -686,7 +694,7 @@ public:
             gridMenu.addItem (100 + i, theme::ui (gridLabels[i]), true,
                               std::abs (owner.gridBeats() - gridValues[i]) < 1.0e-9);
         gridMenu.addItem (110, theme::ui ("Sem grade"), true, owner.gridBeats() <= 0.0);
-        menu.addSubMenu (theme::ui ("Grade de edição"), gridMenu);
+        menu.addSubMenu (theme::ui ("Grade de edicao"), gridMenu);
 
         juce::Component::SafePointer<Lanes> safeThis (this);
         const double splitBeat = owner.playhead;
@@ -1165,10 +1173,19 @@ public:
 
         if (ctrl && key == 'D')
         {
-            if (selectedClips.empty() && ! hasRangeSelection)
-                return false;
-            duplicateSelectedClips();
-            return true;
+            if (hasRangeSelection
+                || (! selectedClips.empty()
+                    && (project.selectedClipId >= 0 || project.selectedAudioClipId >= 0)))
+            {
+                duplicateSelectedClips();
+                return true;
+            }
+            if (project.selectedTrackId > 0 && owner.onTrackDuplicateRequested)
+            {
+                owner.onTrackDuplicateRequested (project.selectedTrackId);
+                return true;
+            }
+            return false;
         }
 
         if (ctrl && key == 'C')
@@ -2900,6 +2917,7 @@ public:
     {
         if (e.originalComponent == &name)
         {
+            owner.lanes->clearSelection();
             if (e.mods.isPopupMenu())
             {
                 const bool toggleSelection = e.mods.isShiftDown() || e.mods.isCtrlDown()
@@ -2919,6 +2937,7 @@ public:
 
         if (e.mods.isPopupMenu())
         {
+            owner.lanes->clearSelection();
             if (! project.isTrackSelected (trackId))
                 project.selectTrack (trackId);
             showTrackMenu();
@@ -2928,6 +2947,7 @@ public:
 
         const bool toggleSelection = ! e.mods.isPopupMenu()
             && (e.mods.isShiftDown() || e.mods.isCtrlDown() || e.mods.isCommandDown());
+        owner.lanes->clearSelection();
         project.selectTrack (trackId, toggleSelection);
         owner.grabFocus();
     }
@@ -2952,15 +2972,21 @@ public:
         if (isGroup)
             m.addItem (5, theme::ui ("Desagrupar faixa (Ctrl+Shift+G)"));
         else
+        {
+            m.addItem (6, theme::ui ("Duplicar faixa (Ctrl+D)"));
             m.addItem (2, theme::ui ("Apagar trilha"), project.tracks.size() > 1);
+        }
         auto* proj = &project;
-        m.showMenuAsync ({}, [proj, tid] (int r)
+        auto* arrangement = &owner;
+        m.showMenuAsync ({}, [proj, arrangement, tid] (int r)
         {
             if (r == 1) proj->addTrack();
             if (r == 2) proj->removeTrack (tid);
             if (r == 3) proj->addTrack (roll::TrackType::Audio);
             if (r == 4) proj->groupTracks (proj->selectedTrackIds);
             if (r == 5) proj->ungroupTrack (tid);
+            if (r == 6 && arrangement->onTrackDuplicateRequested)
+                arrangement->onTrackDuplicateRequested (tid);
         });
     }
 

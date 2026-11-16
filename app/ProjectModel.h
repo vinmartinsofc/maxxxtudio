@@ -56,6 +56,7 @@ public:
 
     roll::Track* addTrack (roll::TrackType type = roll::TrackType::Midi);
     void removeTrack (int id);
+    int duplicateTrack (int id);
     int groupTracks (const std::vector<int>& trackIds);
     bool ungroupTrack (int groupId);
     void selectTrack (int id, bool toggleSelection = false);

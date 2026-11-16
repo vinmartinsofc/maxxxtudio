@@ -600,6 +600,7 @@ MainComponent::MainComponent()
     arrangement.meterProvider = [this] (int id) { return engine.peak (id); };
     arrangement.onMasterPeakReset = [this] { engine.resetPeak (AudioEngine::masterTrackId); };
     arrangement.deviceSummary = [this] (int id) { return deviceSummary (id); };
+    arrangement.onTrackDuplicateRequested = [this] (int id) { duplicateSelectedTrack (id); };
     arrangement.canAcceptPluginDrop = [this] (const juce::String& identifier, int trackId)
     {
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
@@ -2659,6 +2660,119 @@ void MainComponent::startSimulatedTask()
 }
 
 // ------------------------------------------------------------ dispositivos
+
+void MainComponent::duplicateSelectedTrack (int trackId)
+{
+    const auto* source = project.track (trackId);
+    if (source == nullptr || source->type == roll::TrackType::Group)
+        return;
+    if (trackDuplicationInProgress || scanningPlugins || restoringProjectPlugins
+        || projectFileOperationInProgress || audioRenderInProgress || pendingAudioLoads > 0)
+    {
+        setProjectStatus ("Aguarde a operacao em andamento antes de duplicar a faixa.");
+        return;
+    }
+
+    auto pluginStates = engine.getPluginStates();
+    std::erase_if (pluginStates, [trackId] (const PluginState& state) { return state.trackId != trackId; });
+    const auto duplicateId = project.duplicateTrack (trackId);
+    if (duplicateId < 0)
+        return;
+
+    if (pluginStates.empty())
+    {
+        setProjectStatus ("Faixa duplicada.");
+        return;
+    }
+
+    struct PluginCopyOperation
+    {
+        int targetTrackId = -1;
+        size_t completed = 0;
+        int failures = 0;
+        std::vector<PluginState> plugins;
+        std::map<int, std::vector<int>> groups;
+        std::shared_ptr<TaskScope> task;
+    };
+
+    auto operation = std::make_shared<PluginCopyOperation>();
+    operation->targetTrackId = duplicateId;
+    operation->plugins = std::move (pluginStates);
+    operation->task = std::make_shared<TaskScope> (
+        taskRegistry, theme::ui ("Copiando dispositivos da faixa"), "track:" + juce::String (duplicateId), 0.0);
+    trackDuplicationInProgress = true;
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+
+    auto copyNextPlugin = [this, token, operation] (auto&& copyNextPlugin, size_t index) -> void
+    {
+        const auto alive = token.lock();
+        if (alive == nullptr || ! alive->load())
+            return;
+        if (project.track (operation->targetTrackId) == nullptr)
+        {
+            trackDuplicationInProgress = false;
+            operation->task->end();
+            setProjectStatus ("A faixa duplicada foi removida antes da copia dos dispositivos.");
+            return;
+        }
+        if (index >= operation->plugins.size())
+        {
+            for (const auto& [groupId, devices] : operation->groups)
+            {
+                juce::ignoreUnused (groupId);
+                if (devices.size() >= 2 && ! engine.groupDevices (operation->targetTrackId, devices))
+                    ++operation->failures;
+            }
+            trackDuplicationInProgress = false;
+            operation->task->setProgress (1.0);
+            operation->task->end();
+            refreshDeviceView();
+            project.sendChangeMessage();
+            setProjectStatus (operation->failures == 0
+                ? "Faixa e dispositivos duplicados."
+                : "Faixa duplicada; " + juce::String (operation->failures)
+                    + " dispositivo(s) nao puderam ser copiados.");
+            return;
+        }
+
+        const auto state = operation->plugins[index];
+        auto description = scanner.list().getTypeForIdentifierString (state.identifier);
+        if (description == nullptr)
+        {
+            ++operation->failures;
+            ++operation->completed;
+            operation->task->setProgress (static_cast<double> (operation->completed)
+                                            / operation->plugins.size());
+            copyNextPlugin (copyNextPlugin, index + 1);
+            return;
+        }
+
+        engine.addDevice (operation->targetTrackId, *description,
+            [this, token, operation, state, index, copyNextPlugin] (
+                const juce::String& error, int deviceId) mutable
+            {
+                const auto callbackAlive = token.lock();
+                if (callbackAlive == nullptr || ! callbackAlive->load())
+                    return;
+                if (error.isNotEmpty())
+                    ++operation->failures;
+                else
+                {
+                    if (! engine.restorePluginState (operation->targetTrackId, deviceId, state.state))
+                        ++operation->failures;
+                    engine.setDeviceBypassed (operation->targetTrackId, deviceId, state.bypassed);
+                    if (state.groupId > 0)
+                        operation->groups[state.groupId].push_back (deviceId);
+                }
+
+                ++operation->completed;
+                operation->task->setProgress (static_cast<double> (operation->completed)
+                                                / operation->plugins.size());
+                copyNextPlugin (copyNextPlugin, index + 1);
+            }, state.order);
+    };
+    copyNextPlugin (copyNextPlugin, 0);
+}
 
 void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetTrackId, int insertionIndex)
 {

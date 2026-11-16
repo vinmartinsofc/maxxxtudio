@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.24 (grupos de faixas com barramento real)
+- **Versão do documento:** 1.25 (duplicação de faixas)
 - **⚠️ Ordem de trabalho vigente:** `PLANO_DE_ACAO_FASE_4.md` (feedback do Marco 3: correções críticas, layout, groove, automação, áudio). **Em caso de conflito com o §14 deste documento, vale o plano.**
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -183,6 +183,7 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Áudio | Grupos planos como barramentos reais: faixas-filhas → mixer/efeitos do grupo → Master ou Ext. Out; Solo respeita grupo e filhos | 🟡 (build/testes; falta validação manual com plugins) |
 | Arranjo | Selecionar múltiplas faixas com Shift/Ctrl+clique, com destaque visual | 🟡 (build/testes; falta validação manual na UI) |
 | Arranjo | Agrupar seleção com Ctrl+G e desagrupar com Ctrl+Shift+G; menu de contexto; grupos sem clips e sem nesting | 🟡 |
+| Arranjo | Duplicar faixa MIDI/áudio com clips, mixer e cadeia de plugins, via Ctrl+D sem clip selecionado ou menu de contexto | 🟡 (build/testes; falta validação manual com VST3) |
 | Transporte | Play/Pause (Espaço), Shift+Espaço retoma da posição pausada/Stop, Home, Ctrl+L alterna loop na seleção, BPM, posição | 🟡 (falta teste manual) |
 | Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar), régua, brace de loop | ✅ |
 | Arranjo | Ctrl+C/X/V em clips de áudio/MIDI, incluindo colar em outra trilha do mesmo tipo; Ctrl+D insere tempo e desloca o conteúdo posterior | 🟡 (build/testes; falta teste manual na UI) |
@@ -376,7 +377,7 @@ Project
 | Redimensionar | Arrastar a borda direita (mín. 1 beat) |
 | Copiar / recortar / colar | Ctrl+C / Ctrl+X / Ctrl+V; cola no playhead e na trilha selecionada, mantendo espaçamento relativo |
 | Copiar por arrasto | Ctrl + arrastar |
-| Duplicar / apagar | Ctrl+D insere uma cópia da seleção e desloca o conteúdo posterior; Delete ou Backspace apaga |
+| Duplicar / apagar | Com clips/intervalo selecionados, Ctrl+D duplica inserindo tempo; sem seleção de clips, duplica a faixa MIDI/áudio ativa; Delete ou Backspace apaga |
 | Trilha acima/abaixo | ↑ / ↓ |
 | Zoom | Ctrl+roda, `+` / `-` |
 | Loop | Arrastar bordas/corpo do brace (faixa fina no topo da régua) |
@@ -690,6 +691,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.25** | Ctrl+D sem clips selecionados duplica a faixa MIDI/áudio com clips, mixer, roteamento e plugins; opção adicionada ao menu de contexto |
 | **Doc 1.24** | Grupos planos de faixas implementados como barramentos reais com mixer/efeitos, roteamento e persistência compatível; Ctrl+G / Ctrl+Shift+G e menu de contexto |
 | **Doc 1.23** | Seleção múltipla de faixas pelo cabeçalho; Solo aplica-se às faixas selecionadas e Ctrl+clique permite solos aditivos |
 | **Doc 1.22** | Consolidar seleção de áudio renderiza a faixa após seus plugins e antes do mixer/Master; inclui progresso, cancelamento e teste offline |

@@ -24,6 +24,7 @@ public:
     std::function<void (const juce::File&, int trackId, double beats)> onAudioDropped;
     std::function<void (const juce::File&)> onLocateAudioFileRequested;
     std::function<void (int trackId, int clipId)> onAudioClipDoubleClicked;
+    std::function<void (int trackId)> onTrackDuplicateRequested;
     std::function<void (double startBeat, double endBeat, int firstTrack, int lastTrack)> onConsolidateRequested;
     std::function<void()> onGridChanged;
     std::function<void (bool)> onLoopToggleRequested;
