@@ -103,6 +103,7 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
     node->setAttribute ("pan", track.pan);
     node->setAttribute ("mute", track.mute);
     node->setAttribute ("solo", track.solo);
+    node->setAttribute ("collapsed", track.collapsed);
     node->setAttribute ("routing", track.outputRouting == roll::TrackOutputRouting::ExtOut ? "external" : "master");
 
     for (const auto& clip : track.clips)
@@ -194,6 +195,7 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
     track.pan = node.getDoubleAttribute ("pan", 0.0);
     track.mute = node.getBoolAttribute ("mute", false);
     track.solo = node.getBoolAttribute ("solo", false);
+    track.collapsed = node.getBoolAttribute ("collapsed", false);
     track.outputRouting = node.getStringAttribute ("routing") == "external"
         ? roll::TrackOutputRouting::ExtOut : roll::TrackOutputRouting::Master;
     if (track.parentGroupId < 0 || ! validNumber (track.volume) || track.volume < 0.0 || track.volume > 1.5

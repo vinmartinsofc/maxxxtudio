@@ -1192,9 +1192,9 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
         audioAssets[path] = data;
         const double sourceBpm = sourceBpmFromFileName (file, engine.graph().getBpm());
         const double lengthBeats = data->durationSeconds * sourceBpm / 60.0;
-        if (project.addAudioClip (trackId, startBeat, lengthBeats, path,
-                                  file.getFileName().toStdString(), data->waveform,
-                                  data->durationSeconds, sourceBpm) == nullptr)
+        if (project.addAudioClipReplacingRange (trackId, startBeat, lengthBeats, path,
+                                                file.getFileName().toStdString(), data->waveform,
+                                                data->durationSeconds, sourceBpm) == nullptr)
         {
             publishAudioTrack (trackId);
             audioBrowser.setStatus ("Nao foi possivel inserir o audio nesse ponto da trilha.");

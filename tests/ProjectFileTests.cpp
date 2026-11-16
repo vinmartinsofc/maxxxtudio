@@ -35,6 +35,7 @@ TEST_CASE ("Project files preserve flat group bus membership")
     child.name = "Kick";
     child.type = roll::TrackType::Audio;
     child.parentGroupId = group.id;
+    child.collapsed = true;
     data.project.tracks.push_back (child);
 
     const auto file = temporary.folder.getChildFile ("group_test.pfs");
@@ -45,4 +46,5 @@ TEST_CASE ("Project files preserve flat group bus membership")
     REQUIRE (loaded.project.tracks.size() == 2);
     REQUIRE (loaded.project.tracks[0].type == roll::TrackType::Group);
     REQUIRE (loaded.project.tracks[1].parentGroupId == 10);
+    REQUIRE (loaded.project.tracks[1].collapsed);
 }

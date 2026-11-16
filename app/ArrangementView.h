@@ -46,7 +46,8 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int headerWidth = 210, overviewHeight = 20, rulerHeight = 28, trackHeight = 94;
+    static constexpr int headerWidth = 210, overviewHeight = 20, rulerHeight = 28,
+                         trackHeight = 94, collapsedTrackHeight = 24;
 
 private:
     class Lanes;
@@ -69,6 +70,11 @@ private:
     void zoomAt (double factor, double anchorBeat, int anchorScreenX);
     void updateAdaptiveGrid();
     void updateGridSelection();
+    int rowTop (int row) const;
+    int rowHeight (int row) const;
+    int rowAt (int y) const;
+    int rowInsertionIndexAt (int y) const;
+    void toggleTrackCollapsed (int trackId);
     static juce::Colour colourFor (int trackId);
 
     ProjectModel& project;

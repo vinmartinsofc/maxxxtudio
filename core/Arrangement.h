@@ -78,6 +78,7 @@ public:
     double      pan = 0.0;        // -1..1
     bool        mute = false;
     bool        solo = false;
+    bool        collapsed = false;
     TrackOutputRouting outputRouting = TrackOutputRouting::Master;
     int         parentGroupId = 0;
 

@@ -3,6 +3,104 @@
 #include <cmath>
 #include <iterator>
 
+namespace
+{
+constexpr double clipOverlapEpsilon = 1.0e-9;
+
+bool replaceMidiRange (roll::Track& track, double start, double end, int ignoredClipId)
+{
+    std::vector<int> overlappingIds;
+    for (const auto& clip : track.clips)
+        if (clip->id != ignoredClipId
+            && start < clip->end() - clipOverlapEpsilon
+            && end > clip->start + clipOverlapEpsilon)
+            overlappingIds.push_back (clip->id);
+
+    for (const int id : overlappingIds)
+    {
+        const auto* clip = track.find (id);
+        if (clip == nullptr)
+            return false;
+        const double clipStart = clip->start;
+        const double clipEnd = clip->end();
+        const bool preserveLeft = clipStart < start - clipOverlapEpsilon;
+        const bool preserveRight = clipEnd > end + clipOverlapEpsilon;
+
+        if (preserveLeft && preserveRight)
+        {
+            const int middleId = track.splitClip (id, start);
+            if (middleId < 0 || track.splitClip (middleId, end) < 0)
+                return false;
+            if (! track.remove (middleId))
+                return false;
+        }
+        else if (preserveLeft)
+        {
+            const int rightId = track.splitClip (id, start);
+            if (rightId < 0 || ! track.remove (rightId))
+                return false;
+        }
+        else if (preserveRight)
+        {
+            if (track.splitClip (id, end) < 0 || ! track.remove (id))
+                return false;
+        }
+        else if (! track.remove (id))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool replaceAudioRange (roll::Track& track, double start, double end, int ignoredClipId)
+{
+    std::vector<int> overlappingIds;
+    for (const auto& clip : track.audioClips)
+        if (clip->id != ignoredClipId
+            && start < clip->end() - clipOverlapEpsilon
+            && end > clip->start + clipOverlapEpsilon)
+            overlappingIds.push_back (clip->id);
+
+    for (const int id : overlappingIds)
+    {
+        const auto* clip = track.findAudioClip (id);
+        if (clip == nullptr)
+            return false;
+        const double clipStart = clip->start;
+        const double clipEnd = clip->end();
+        const bool preserveLeft = clipStart < start - clipOverlapEpsilon;
+        const bool preserveRight = clipEnd > end + clipOverlapEpsilon;
+
+        if (preserveLeft && preserveRight)
+        {
+            const int middleId = track.splitAudioClip (id, start);
+            if (middleId < 0 || track.splitAudioClip (middleId, end) < 0
+                || ! track.removeAudioClip (middleId))
+                return false;
+        }
+        else if (preserveLeft)
+        {
+            const int rightId = track.splitAudioClip (id, start);
+            if (rightId < 0 || ! track.removeAudioClip (rightId))
+                return false;
+        }
+        else if (preserveRight)
+        {
+            if (track.splitAudioClip (id, end) < 0 || ! track.removeAudioClip (id))
+                return false;
+        }
+        else if (! track.removeAudioClip (id))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+}
+
 ProjectModel::ProjectModel()
 {
     masterTrack = std::make_unique<roll::Track>();
@@ -614,21 +712,30 @@ int ProjectModel::copyClip (int fromTrack, int clipId, int toTrack, double start
     auto* sourceTrack = track (fromTrack);
     auto* destinationTrack = track (toTrack);
     auto* source = sourceTrack != nullptr ? sourceTrack->find (clipId) : nullptr;
-    if (source == nullptr || destinationTrack == nullptr)
+    if (source == nullptr || sourceTrack->type != roll::TrackType::Midi
+        || destinationTrack == nullptr || destinationTrack->type != roll::TrackType::Midi
+        || ! std::isfinite (start) || start < 0.0)
         return -1;
 
-    if (! destinationTrack->isFree (start, source->clip.length()))
+    const roll::Placement sourceSnapshot (*source);
+    const double length = sourceSnapshot.clip.length();
+    if (! std::isfinite (length) || length <= 0.0)
         return -1;
-    recordUndo();
-    auto* copy = destinationTrack->copyClip (*source, start);
+    roll::Track updatedDestination (*destinationTrack);
+    if (! replaceMidiRange (updatedDestination, start, start + length, -1))
+        return -1;
+    auto* copy = updatedDestination.copyClip (sourceSnapshot, start);
     if (copy == nullptr)
         return -1;
 
-    growTo (copy->end() + 64.0);
-    selectClip (toTrack, copy->id);
+    const int copyId = copy->id;
+    recordUndo();
+    *destinationTrack = std::move (updatedDestination);
+    growTo (start + length + 64.0);
+    selectClip (toTrack, copyId);
     notifyTrackNotes (toTrack);
     sendChangeMessage();
-    return copy->id;
+    return copyId;
 }
 
 int ProjectModel::copyClip (const roll::Placement& source, int toTrack, double start)
@@ -693,6 +800,34 @@ roll::AudioPlacement* ProjectModel::addAudioClip (int trackId, double start, dou
     selectAudioClip (trackId, clip->id);
     if (onAudioClipsChanged) onAudioClipsChanged (trackId);
     return clip;
+}
+
+roll::AudioPlacement* ProjectModel::addAudioClipReplacingRange (
+    int trackId, double start, double length, const std::string& filePath, const std::string& name,
+    const std::vector<roll::WaveformRange>& waveform, double durationSeconds, double sourceBpm)
+{
+    auto* t = track (trackId);
+    if (t == nullptr || t->type != roll::TrackType::Audio || ! std::isfinite (start)
+        || ! std::isfinite (length) || ! std::isfinite (durationSeconds)
+        || ! std::isfinite (sourceBpm) || start < 0.0 || length <= 0.0
+        || filePath.empty() || durationSeconds < 0.0 || sourceBpm < 20.0 || sourceBpm > 300.0)
+        return nullptr;
+
+    roll::Track updatedTrack (*t);
+    if (! replaceAudioRange (updatedTrack, start, start + length, -1))
+        return nullptr;
+    auto* clip = updatedTrack.addAudioClip (start, length, filePath, name, waveform,
+                                            durationSeconds, sourceBpm);
+    if (clip == nullptr)
+        return nullptr;
+
+    const int clipId = clip->id;
+    recordUndo();
+    *t = std::move (updatedTrack);
+    growTo (start + length + 64.0);
+    selectAudioClip (trackId, clipId);
+    if (onAudioClipsChanged) onAudioClipsChanged (trackId);
+    return t->findAudioClip (clipId);
 }
 
 void ProjectModel::deleteClip (int trackId, int clipId)
@@ -780,21 +915,30 @@ int ProjectModel::copyAudioClip (int fromTrack, int clipId, int toTrack, double 
     auto* sourceTrack = track (fromTrack);
     auto* destinationTrack = track (toTrack);
     auto* source = sourceTrack != nullptr ? sourceTrack->findAudioClip (clipId) : nullptr;
-    if (source == nullptr || destinationTrack == nullptr)
+    if (source == nullptr || sourceTrack->type != roll::TrackType::Audio
+        || destinationTrack == nullptr || destinationTrack->type != roll::TrackType::Audio
+        || ! std::isfinite (start) || start < 0.0)
         return -1;
 
-    if (! destinationTrack->isAudioFree (start, source->lengthBeats))
+    const roll::AudioPlacement sourceSnapshot (*source);
+    const double length = sourceSnapshot.lengthBeats;
+    if (! std::isfinite (length) || length <= 0.0)
         return -1;
-    recordUndo();
-    auto* copy = destinationTrack->copyAudioClip (*source, start);
+    roll::Track updatedDestination (*destinationTrack);
+    if (! replaceAudioRange (updatedDestination, start, start + length, -1))
+        return -1;
+    auto* copy = updatedDestination.copyAudioClip (sourceSnapshot, start);
     if (copy == nullptr)
         return -1;
 
-    growTo (copy->end() + 64.0);
-    selectAudioClip (toTrack, copy->id);
+    const int copyId = copy->id;
+    recordUndo();
+    *destinationTrack = std::move (updatedDestination);
+    growTo (start + length + 64.0);
+    selectAudioClip (toTrack, copyId);
     if (onAudioClipsChanged) onAudioClipsChanged (toTrack);
     sendChangeMessage();
-    return copy->id;
+    return copyId;
 }
 
 int ProjectModel::copyAudioClip (const roll::AudioPlacement& source, int toTrack, double start)
@@ -970,40 +1114,56 @@ int ProjectModel::moveClip (int fromTrack, int clipId, int toTrack, double newSt
     if (src == nullptr || dst == nullptr
         || src->type != roll::TrackType::Midi || dst->type != roll::TrackType::Midi) return -1;
     auto* p = src->find (clipId);
-    if (p == nullptr) return -1;
+    if (p == nullptr || ! std::isfinite (newStart)) return -1;
 
     const double len = p->clip.length();
     newStart = std::max (0.0, newStart);
+    if (! std::isfinite (len) || len <= 0.0)
+        return -1;
+    if (fromTrack == toTrack && std::abs (p->start - newStart) <= clipOverlapEpsilon)
+        return clipId;
 
+    roll::Track updatedDestination (*dst);
+    if (! replaceMidiRange (updatedDestination, newStart, newStart + len,
+                            fromTrack == toTrack ? clipId : -1))
+        return -1;
+    recordUndo();
+    int newId = clipId;
     if (fromTrack == toTrack)
     {
-        if (! src->isFree (newStart, len, clipId)) return -1;
-        if (std::abs (p->start - newStart) <= 1.0e-9) return clipId;
-        recordUndo();
-        p->start = newStart;
-        growTo (p->end() + 64.0);
-        notifyTrackNotes (fromTrack);
-        sendChangeMessage();
-        return clipId;
+        auto* movedClip = updatedDestination.find (clipId);
+        if (movedClip == nullptr)
+            return -1;
+        movedClip->start = newStart;
+        *src = std::move (updatedDestination);
+    }
+    else
+    {
+        auto taken = src->take (clipId);
+        if (taken == nullptr)
+            return -1;
+        taken->start = newStart;
+        updatedDestination.put (std::move (taken));
+        newId = updatedDestination.clips.back()->id;
+        *dst = std::move (updatedDestination);
     }
 
-    if (! dst->isFree (newStart, len)) return -1;
-    recordUndo();
-    auto taken = src->take (clipId);
-    taken->start = newStart;
-    dst->put (std::move (taken));
-    const int newId = dst->clips.back()->id;
-
-    if (selectedTrackId == fromTrack && selectedClipId == clipId)
+    const bool sourceWasSelected = selectedTrackId == fromTrack && selectedClipId == clipId;
+    const bool destinationSelectionRemoved = selectedTrackId == toTrack && selectedClipId > 0
+        && dst->find (selectedClipId) == nullptr;
+    if (sourceWasSelected || destinationSelectionRemoved)
     {
         selectedTrackId = toTrack;
         selectedTrackIds.assign (1, toTrack);
         selectedClipId = newId;
+        selectedAudioClipId = -1;
     }
     growTo (newStart + len + 64.0);
     notifyTrackNotes (fromTrack);
-    notifyTrackNotes (toTrack);
-    if (onSelectionChanged) onSelectionChanged();
+    if (fromTrack != toTrack)
+        notifyTrackNotes (toTrack);
+    if (sourceWasSelected || destinationSelectionRemoved || fromTrack != toTrack)
+        if (onSelectionChanged) onSelectionChanged();
     sendChangeMessage();
     return newId;
 }
@@ -1016,33 +1176,53 @@ int ProjectModel::moveAudioClip (int fromTrack, int clipId, int toTrack, double 
         || src->type != roll::TrackType::Audio || dst->type != roll::TrackType::Audio)
         return -1;
     auto* clip = src->findAudioClip (clipId);
-    if (clip == nullptr) return -1;
+    if (clip == nullptr || ! std::isfinite (newStart)) return -1;
     newStart = std::max (0.0, newStart);
     const double length = clip->lengthBeats;
+    if (! std::isfinite (length) || length <= 0.0)
+        return -1;
 
+    if (fromTrack == toTrack && std::abs (clip->start - newStart) <= clipOverlapEpsilon)
+        return clipId;
+
+    roll::Track updatedDestination (*dst);
+    if (! replaceAudioRange (updatedDestination, newStart, newStart + length,
+                             fromTrack == toTrack ? clipId : -1))
+        return -1;
+    recordUndo();
+    int newId = clipId;
     if (fromTrack == toTrack)
     {
-        if (! src->isAudioFree (newStart, length, clipId)) return -1;
-        if (std::abs (clip->start - newStart) <= 1.0e-9) return clipId;
-        recordUndo();
-        clip->start = newStart;
-        growTo (clip->end() + 64.0);
-        if (onAudioClipsChanged) onAudioClipsChanged (fromTrack);
-        sendChangeMessage();
-        return clipId;
+        auto* movedClip = updatedDestination.findAudioClip (clipId);
+        if (movedClip == nullptr)
+            return -1;
+        movedClip->start = newStart;
+        *src = std::move (updatedDestination);
     }
-
-    if (! dst->isAudioFree (newStart, length)) return -1;
-    recordUndo();
-    auto moved = src->takeAudioClip (clipId);
-    moved->start = newStart;
-    dst->putAudioClip (std::move (moved));
-    const int newId = dst->audioClips.back()->id;
-    if (selectedTrackId == fromTrack && selectedAudioClipId == clipId)
-        selectAudioClip (toTrack, newId);
+    else
+    {
+        auto moved = src->takeAudioClip (clipId);
+        if (moved == nullptr)
+            return -1;
+        moved->start = newStart;
+        updatedDestination.putAudioClip (std::move (moved));
+        newId = updatedDestination.audioClips.back()->id;
+        *dst = std::move (updatedDestination);
+    }
+    const bool sourceWasSelected = selectedTrackId == fromTrack && selectedAudioClipId == clipId;
+    const bool destinationSelectionRemoved = selectedTrackId == toTrack && selectedAudioClipId > 0
+        && dst->findAudioClip (selectedAudioClipId) == nullptr;
+    if (sourceWasSelected || destinationSelectionRemoved)
+    {
+        selectedTrackId = toTrack;
+        selectedTrackIds.assign (1, toTrack);
+        selectedClipId = -1;
+        selectedAudioClipId = newId;
+        if (onSelectionChanged) onSelectionChanged();
+    }
     growTo (newStart + length + 64.0);
     if (onAudioClipsChanged) onAudioClipsChanged (fromTrack);
-    if (onAudioClipsChanged) onAudioClipsChanged (toTrack);
+    if (fromTrack != toTrack && onAudioClipsChanged) onAudioClipsChanged (toTrack);
     sendChangeMessage();
     return newId;
 }

@@ -5,8 +5,8 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.25 (duplicação de faixas)
-- **⚠️ Ordem de trabalho vigente:** `PLANO_DE_ACAO_FASE_4.md` (feedback do Marco 3: correções críticas, layout, groove, automação, áudio). **Em caso de conflito com o §14 deste documento, vale o plano.**
+- **Versão do documento:** 1.33 (Ctrl+arrastar pode substituir parcialmente a própria origem)
+- **⚠️ Ordem de trabalho vigente:** fila de pendências do usuário no §4.3. O documento `PLANO_DE_ACAO_FASE_4.md`, citado em versões antigas, não está presente no repositório. O §4.3 prevalece sobre o roadmap legado do §14.
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
 
@@ -16,12 +16,12 @@
 
 ### 0.1 Fluxo SDD (obrigatório para cada tarefa)
 
-1. **Ler** a tarefa em §14 (objetivo, especificação, critérios de aceite).
+1. **Ler** a próxima tarefa aberta em §4.3; consultar §14 somente para contexto arquitetural legado.
 2. **Ler** as seções de arquitetura (§5–§7) e as regras de tempo real (§10) relevantes.
 3. **Escrever os testes primeiro** quando a lógica couber no `core/` (ver §11).
 4. **Implementar** com o menor diff possível; não refatorar o que não faz parte da tarefa.
 5. **Compilar e rodar os testes** (§3). Nunca declarar "pronto" sem compilar.
-6. **Atualizar este documento:** marcar a tarefa como concluída em §14, ajustar §4 (matriz de estado) e §13 (dívida técnica) se mudou.
+6. **Atualizar este documento:** ajustar o status em §4.3 e na matriz §4; atualizar o changelog.
 7. **Entregar** o diff (ou um `.zip`), explicando em linguagem simples o que mudou e **o que não foi testado**.
 
 ### 0.2 Regras de ouro para quem for implementar
@@ -42,7 +42,7 @@ Ao concluir uma tarefa: troque `- [ ]` por `- [x]` em §14, atualize a matriz de
 Você vai continuar o desenvolvimento do "Project Freedom", um DAW open source em C++20 + JUCE 8 + CMake,
 inspirado no fluxo do Ableton Live 10/11 (somente Arrangement View). O documento docs/SPEC.md é a fonte
 da verdade: leia-o inteiro antes de qualquer coisa. Siga o fluxo SDD da seção 0.1.
-Trabalhe UMA tarefa da seção 14 por vez (comece pela primeira não concluída, a menos que eu indique outra).
+Trabalhe UMA tarefa por vez, começando pela primeira pendência aberta em §4.3, a menos que o dono indique outra.
 Responda em português (Brasil), em linguagem simples: o dono está aprendendo C++ (vem de Java/OOP).
 Dê comandos exatos de terminal (Windows PowerShell). Diga sempre o que foi e o que NÃO foi testado.
 Antes de codar, me mostre um plano curto (arquivos que vai tocar + testes que vai escrever).
@@ -186,12 +186,13 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Arranjo | Agrupar seleção com Ctrl+G e desagrupar com Ctrl+Shift+G; menu de contexto; grupos sem clips e sem nesting | 🟡 |
 | Arranjo | Duplicar faixa MIDI/áudio com clips, mixer e cadeia de plugins, via Ctrl+D sem clip selecionado ou menu de contexto | 🟡 (build/testes; falta validação manual com VST3) |
 | Transporte | Play/Pause (Espaço), Shift+Espaço retoma da posição pausada/Stop, Home, Ctrl+L alterna loop na seleção, BPM, posição | 🟡 (falta teste manual) |
-| Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar), régua, brace de loop | ✅ |
+| Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar); mover/copiar sobre conteúdo substitui apenas a região sobreposta; prévia visual no arraste | ✅ (build/testes; falta QA manual na UI) |
 | Arranjo | Ctrl+C/X/V em clips de áudio/MIDI, incluindo colar em outra trilha do mesmo tipo; Ctrl+D duplica a seleção e substitui clips no destino sem deslocar outras faixas | 🟡 (build/testes; falta teste manual na UI) |
 | Arranjo | Tecla `0` ativa/desativa o clip selecionado | ✅ |
 | Arranjo | Clique no fundo posiciona o cursor na grade; arrastar seleciona intervalo e Espaço inicia do começo da seleção | 🟡 |
 | Arranjo | Grade adaptativa acompanha o zoom e mantém o snap ativo; Ctrl+5 alterna para grade fixa | 🟡 (build/testes; falta validação manual na UI) |
 | Arranjo | Visão geral no topo, navegação horizontal e cores customizáveis por trilha | 🟡 visão geral implementada nesta versão / ⬜ cores customizáveis |
+| Arranjo | Recolher/expandir trilhas individualmente; recolher um grupo também oculta as trilhas-filhas; estado salvo no projeto | 🟡 (build/testes; falta validação manual na UI) |
 | Arranjo | Visão geral com zoom vertical e enquadramento do arrangement; bandeiras de locator destacadas e botão Del remove o mais recente sem seleção | 🟡 |
 | Piano roll | Notas, seleção, mover/redimensionar, rubber band, copiar/colar, duplicar, quantizar | ✅ |
 | Piano roll | Escala: Scale mode, Destacar (K), Fold, Fold escala, tônica enfatizada | ✅ |
@@ -209,6 +210,43 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Config. | Seleção de dispositivo de áudio, buffer, taxa de amostragem | ⬜ (usa o padrão do sistema) |
 | Acessibilidade | Anel de foco, F6 alterna painéis, setas selecionam trilha | 🟡 parcial |
 | Tarefas em background | `TaskRegistry`/`TaskScope`, indicador por target e barra global; carregamento por faixa; scan com progresso/cancelamento; progresso ao abrir/salvar projetos | ✅ etapas a–b e d / 🟡 etapa c (falta QA com plugins reais) |
+
+### 4.3 Fila atual de features do usuário (2026-11-16)
+
+Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedido explícito do usuário e o código atual; “parcial” significa que existe uma base, mas o pedido ainda não está completamente atendido.
+
+**Concluído — não reimplementar sem novo relato de falha**
+
+| Feature | Estado / escopo confirmado |
+|---|---|
+| Organização de plugins por pasta/fabricante, filtros de instrumento/efeito e bypass individual | Concluído; carregamento real de VST3 ainda requer QA manual |
+| Navegador de áudio, pré-escuta e drag/drop de áudio | Concluído |
+| Canais, grupos/barramentos, roteamento e comportamento de solo/Ctrl | Concluído |
+| Ctrl+D de regiões substitui o destino sem deslocar outras faixas; copiar/colar entre faixas e seleção múltipla | Concluído |
+| Abrir `.pfs` por duplo clique; Ctrl+L para alternar loop; Shift+Espaço para retomar | Concluído |
+| Consolidar áudio após a cadeia de dispositivos da faixa e antes do mixer/Master | Implementado; falta QA com VST3 real |
+| Grade adaptativa (“narrow”) e recolhimento individual de trilhas; recolher grupo oculta suas filhas | Implementado; falta QA visual manual |
+
+**Pendências — ordem original do usuário, com duplicatas agrupadas**
+
+| Ordem | Feature | Estado / nota para evitar ambiguidade |
+|---:|---|---|
+| 1 | Posicionamento e snap de clips MIDI/áudio | Snap em beats já existe; mover clips agora substitui somente a região ocupada, preservando as partes restantes. Ainda falta QA manual para os casos de encaixe reportados. |
+| 2 | Ctrl+arrastar para copiar clips selecionados | Ctrl+arrastar copia um clip e mostra a prévia do destino; o projeto só altera os clips ao soltar. Se a cópia se sobrepuser à própria origem, a área sobreposta é substituída e as partes restantes são preservadas. Cópia por arraste de seleção múltipla ainda pendente de confirmação. |
+| 3 | Popups de pitch/velocity interceptando Ctrl+C/Ctrl+V no Arrangement | Pendente de reprodução e correção. |
+| 4 | Mostrar minutos/tempo do projeto na parte inferior do Arrangement | Pendente. |
+| 5 | Auto-scroll/expansão do Arrangement enquanto se arrasta além da borda visível | Pendente. |
+| 6 | Drag/drop de MIDI/áudio sobre conteúdo existente para substituí-lo | Ao mover/copiar clips e soltar arquivos de áudio em trilhas de áudio, só a região sobreposta é substituída e o restante é preservado. Importar arquivos MIDI continua sendo uma feature futura separada. |
+| 7 | Grade sincronizada ao BPM | A grade musical do Arrangement e do editor de áudio já usa beats e o BPM do projeto; falta confirmar se o pedido significa outro comportamento. |
+| 8 | Favoritos de plugins | Pendente; os favoritos atuais cobrem apenas arquivos/pastas de áudio. |
+| 9 | Cores customizáveis para trilhas MIDI/áudio | Pendente; hoje as cores são geradas automaticamente e não podem ser escolhidas. |
+| 10 | Iniciar reprodução/escuta de trechos específicos pelo Piano Roll | Pendente; clicar na régua reposiciona o playhead, mas não inicia reprodução local. |
+| 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | **IMPORTANTE — pendente.** |
+| 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp existem; controle independente de pitch ainda está pendente. |
+| 13 | Groove MIDI (8th/16th e ritmos não quantizados) | **IMPORTANTE — pendente.** |
+| Futuro | Gravação de áudio em tempo real e importação/exportação MIDI | Pendente; exportação MIDI também aparece no §14. |
+
+**Próxima tarefa sugerida:** testar o encaixe e o feedback visual na UI e investigar os casos ainda difíceis de posicionamento (ordem 1); Ctrl+arrastar uma seleção múltipla também precisa de confirmação (ordem 2).
 
 ---
 
@@ -508,9 +546,9 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 
 ---
 
-## 14. Roadmap — tarefas especificadas
+## 14. Roadmap legado — tarefas especificadas
 
-> Ordem recomendada: **M4 → M5 → M6 → M7 → M8 → M9 → M10 → M11**. Cada tarefa deve ser entregue como incremento **compilável e testado**.
+> Esta seção preserva o roadmap técnico antigo. A ordem atual de trabalho e o status das solicitações do usuário estão em §4.3; use aquela fila em caso de conflito.
 
 ### Trilha paralela V — Identidade visual e ícones (independente dos marcos de funcionalidade)
 
@@ -607,6 +645,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
   - Consolidação de seleção de áudio implementada: renderiza a cadeia de plugins da própria faixa e substitui os clips no trecho; falta validação manual com plugin VST3 real.
 - [ ] **T8.3 — Seleção por tempo** arrastando em área vazia; comandos "Duplicar tempo", etc.
 - [ ] **T8.4 — Reordenar trilhas** (arrastar cabeçalho); altura de trilha; "zoom para caber".
+  - Recolhimento/expansão individual de trilhas pelo cabeçalho foi implementado; altura compacta persiste no `.pfs`. Ajuste de altura e "zoom para caber" continuam pendentes.
 - [ ] **T8.5 — Pan na UI** (knob/slider); lei de pan *constant-power*; medidor com *clip indicator*.
 - [ ] **T8.6 — Assinatura de compasso** (D5): `numerador/denominador` no projeto; régua, grade e relógio parametrizados (testes de `core/`).
 - [ ] **T8.7 — Marcadores/localizadores** (opcional).
@@ -637,9 +676,9 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 - [ ] **T11.5 — Ícone e *branding* próprio** (sem semelhança com o Live).
 - [ ] **T11.6 — Assinatura de código** (opcional, quando houver certificado; **nunca** commitar certificados/chaves — já cobertos pelo `.gitignore`).
 
-### Backlog (sem prioridade definida)
+### Backlog legado (sem prioridade definida)
 
-Clips de áudio/samples; automação de parâmetros e de volume; efeitos MIDI (arpejador, acorde, escala); ferramentas de acorde/progressão; CLAP; macOS; tradução da UI (en/pt); temas claro/escuro configuráveis; tabela de atalhos configurável; Link/sincronização.
+Para as features atuais de áudio, Arrangement, automação, groove e MIDI, consulte §4.3. Os demais itens deste backlog antigo não têm prioridade definida.
 
 ---
 
@@ -693,6 +732,12 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.33** | Ctrl+arrastar pode substituir a própria origem no destino final; o trecho sobreposto é substituído sem alterações durante o gesto |
+| **Doc 1.32** | Arraste de clips usa prévia sem aplicar substituições durante o gesto; Ctrl+cópia preserva a origem e recusa sobreposição dela mesma na mesma trilha |
+| **Doc 1.31** | Ctrl+arrastar copia clips sobre conteúdo ocupado com substituição parcial; inclui prévia visual de destino e aplica substituição parcial a drops de áudio |
+| **Doc 1.30** | Movimento de clips MIDI/áudio substitui apenas a região sobreposta e preserva as partes restantes; documenta que drops de arquivos externos ainda precisam ser tratados |
+| **Doc 1.29** | Fila de features do usuário consolidada em §4.3; documenta itens concluídos, parciais e pendentes e substitui a referência a um plano ausente |
+| **Doc 1.28** | Recolher/expandir trilhas individualmente; ao recolher grupo, ocultar as trilhas-filhas; estado persistido em `.pfs` |
 | **Doc 1.27** | Ctrl+D com clips/intervalo selecionados substitui o conteúdo no destino sem deslocar clips em outras faixas |
 | **Doc 1.26** | Grade adaptativa do Arrangement acompanha o zoom; Ctrl+5 alterna entre grade adaptativa e fixa |
 | **Doc 1.25** | Ctrl+D sem clips selecionados duplica a faixa MIDI/áudio com clips, mixer, roteamento e plugins; opção adicionada ao menu de contexto |

@@ -74,6 +74,10 @@ public:
                                         const std::string& filePath, const std::string& name,
                                         const std::vector<roll::WaveformRange>& waveform,
                                         double durationSeconds = 0.0, double sourceBpm = 120.0);
+    roll::AudioPlacement* addAudioClipReplacingRange (
+        int trackId, double start, double length, const std::string& filePath, const std::string& name,
+        const std::vector<roll::WaveformRange>& waveform,
+        double durationSeconds = 0.0, double sourceBpm = 120.0);
     void deleteAudioClip (int trackId, int clipId);
     int copyAudioClip (int fromTrack, int clipId, int toTrack, double start);
     int copyAudioClip (const roll::AudioPlacement& source, int toTrack, double start);
@@ -85,7 +89,8 @@ public:
     bool setAudioClipSourceBpm (int trackId, int clipId, double sourceBpm);
     bool setAudioClipWarpEnabled (int trackId, int clipId, bool enabled);
     bool setClipEnabled (int trackId, int clipId, bool audio, bool enabled);
-    // move para outra trilha/posição; devolve o novo id do clip (ou -1 se não coube)
+    // Move para outra trilha/posição, substituindo apenas o trecho sobreposto.
+    // Devolve o novo id do clip (ou -1 se os argumentos forem inválidos).
     int  moveClip (int fromTrack, int clipId, int toTrack, double newStart);
     int  moveAudioClip (int fromTrack, int clipId, int toTrack, double newStart);
     void selectAudioClip (int trackId, int clipId);
