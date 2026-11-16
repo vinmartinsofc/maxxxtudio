@@ -177,9 +177,16 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 
 void TransportBar::togglePlay()
 {
-    if (! graph.isPlaying() && onBeforePlay)
+    const bool wasPlaying = graph.isPlaying();
+    if (wasPlaying)
+    {
+        if (onBeforePause)
+            onBeforePause();
+    }
+    else if (onBeforePlay)
         onBeforePlay();
-    graph.setPlaying (! graph.isPlaying());
+
+    graph.setPlaying (! wasPlaying);
     updateButtons();
 }
 
@@ -195,8 +202,17 @@ void TransportBar::rewind() { graph.rewind(); }
 
 void TransportBar::stop()
 {
+    if (onBeforeStop)
+        onBeforeStop();
     graph.setPlaying (false);
     graph.rewind();
+    updateButtons();
+}
+
+void TransportBar::resumeFromPosition (double beats)
+{
+    graph.seek (beats);
+    graph.setPlaying (true);
     updateButtons();
 }
 

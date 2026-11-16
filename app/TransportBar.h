@@ -28,6 +28,7 @@ public:
 
     void togglePlay();
     void stop();
+    void resumeFromPosition (double beats);
     void rewind();                      // volta ao início sem mudar play/pause
     void setLoopEnabled (bool);
     std::function<void (bool)> onLoopToggled;
@@ -38,6 +39,7 @@ public:
     std::function<void (bool)> onComputerMidiKeyboardToggled;
     std::function<void (double beats)> onPosition;   // chamado ~30x/s com o playhead
     std::function<void()> onBeforePlay;
+    std::function<void()> onBeforePause, onBeforeStop;
     void setBrowserVisible (bool);
     void setFileBrowserVisible (bool);
     void setFavoritesVisible (bool);

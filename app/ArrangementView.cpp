@@ -1130,7 +1130,7 @@ public:
             }
             if (hasRangeSelection)
             {
-                editRange (false);
+                deleteRangeSelection();
                 return true;
             }
             if (t != nullptr && project.selectedAudioClipId >= 0)
@@ -1149,28 +1149,18 @@ public:
 
         if (ctrl && key == 'D')
         {
-            if (selectedClips.size() > 1)
-            {
-                duplicateSelectedClips();
-                return true;
-            }
-            if (hasRangeSelection)
-            {
-                editRange (true);
-                return true;
-            }
-            if (t != nullptr && project.selectedAudioClipId >= 0)
-            {
-                project.duplicateAudioClip (t->id, project.selectedAudioClipId);
-                return true;
-            }
-            if (auto* p = project.selectedClip())
-            {
-                project.duplicateClip (t->id, p->id);
-                return true;
-            }
-            return false;
+            if (selectedClips.empty() && ! hasRangeSelection)
+                return false;
+            duplicateSelectedClips();
+            return true;
         }
+
+        if (ctrl && key == 'C')
+            return copySelection (false);
+        if (ctrl && key == 'X')
+            return copySelection (true);
+        if (ctrl && key == 'V')
+            return pasteClipboard();
 
         if (ctrl && key == 'J')
         {
@@ -1268,6 +1258,15 @@ private:
         int trackId = -1;
         int clipId = -1;
         bool audio = false;
+    };
+
+    struct ClipboardClip
+    {
+        int trackOffset = 0;
+        double relativeStart = 0.0;
+        bool audio = false;
+        std::unique_ptr<roll::Placement> midiClip;
+        std::unique_ptr<roll::AudioPlacement> audioClip;
     };
 
     bool isClipSelected (int trackId, int clipId, bool audio) const
@@ -1461,31 +1460,324 @@ private:
     void duplicateSelectedClips()
     {
         double start = 0.0, end = 0.0;
-        if (! getSelectedClipBounds (start, end) || end <= start)
+        const bool duplicateRange = selectedClips.empty();
+        std::vector<ClipSelection> sources = selectedClips;
+        std::vector<int> selectedTrackIds;
+
+        if (duplicateRange)
+        {
+            if (project.tracks.empty())
+                return;
+            start = std::min (rangeStartBeat, rangeEndBeat);
+            end = std::max (rangeStartBeat, rangeEndBeat);
+            const int first = std::clamp (std::min (rangeStartTrack, rangeEndTrack), 0,
+                                          static_cast<int> (project.tracks.size()) - 1);
+            const int last = std::clamp (std::max (rangeStartTrack, rangeEndTrack), first,
+                                         static_cast<int> (project.tracks.size()) - 1);
+            for (int row = first; row <= last; ++row)
+            {
+                const auto& track = *project.tracks[static_cast<std::size_t> (row)];
+                selectedTrackIds.push_back (track.id);
+                if (track.type == roll::TrackType::Audio)
+                {
+                    for (const auto& clip : track.audioClips)
+                        if (clip->start < end - 1.0e-9 && clip->end() > start + 1.0e-9)
+                            sources.push_back ({ track.id, clip->id, true });
+                }
+                else
+                {
+                    for (const auto& clip : track.clips)
+                        if (clip->start < end - 1.0e-9 && clip->end() > start + 1.0e-9)
+                            sources.push_back ({ track.id, clip->id, false });
+                }
+            }
+        }
+        else
+        {
+            if (! getSelectedClipBounds (start, end))
+                return;
+            for (const auto& selected : sources)
+                if (std::find (selectedTrackIds.begin(), selectedTrackIds.end(), selected.trackId) == selectedTrackIds.end())
+                    selectedTrackIds.push_back (selected.trackId);
+        }
+
+        if (end <= start || sources.empty())
             return;
-        const auto sources = selectedClips;
+
         const double offset = end - start;
+        struct CopyAction { ClipSelection selected; double start; };
+        std::vector<CopyAction> copyActions;
         std::vector<ClipSelection> copies;
         project.beginEdit();
-        for (const auto& source : sources)
+
+        const auto splitBoundary = [this] (double beat, const std::vector<int>* tracksToSplit)
         {
-            double clipStart = 0.0, clipEnd = 0.0;
-            if (! getClipBounds (source, clipStart, clipEnd))
-                continue;
-            const int id = source.audio
-                ? project.copyAudioClip (source.trackId, source.clipId, source.trackId, clipStart + offset)
-                : project.copyClip (source.trackId, source.clipId, source.trackId, clipStart + offset);
-            if (id >= 0)
-                copies.push_back ({ source.trackId, id, source.audio });
+            for (const auto& track : project.tracks)
+            {
+                if (tracksToSplit != nullptr
+                    && std::find (tracksToSplit->begin(), tracksToSplit->end(), track->id) == tracksToSplit->end())
+                    continue;
+
+                std::vector<int> midiIds, audioIds;
+                for (const auto& clip : track->clips)
+                    if (clip->start < beat - 1.0e-9 && clip->end() > beat + 1.0e-9)
+                        midiIds.push_back (clip->id);
+                for (const auto& clip : track->audioClips)
+                    if (clip->start < beat - 1.0e-9 && clip->end() > beat + 1.0e-9)
+                        audioIds.push_back (clip->id);
+
+                for (const int id : midiIds)
+                    if (project.splitClip (track->id, id, beat) < 0)
+                        return false;
+                for (const int id : audioIds)
+                    if (project.splitAudioClip (track->id, id, beat) < 0)
+                        return false;
+            }
+            return true;
+        };
+
+        bool succeeded = splitBoundary (end, nullptr);
+        if (succeeded && duplicateRange)
+            succeeded = splitBoundary (start, &selectedTrackIds);
+
+        if (succeeded)
+        {
+            if (duplicateRange)
+            {
+                sources.clear();
+                for (const auto& track : project.tracks)
+                {
+                    if (std::find (selectedTrackIds.begin(), selectedTrackIds.end(), track->id) == selectedTrackIds.end())
+                        continue;
+                    if (track->type == roll::TrackType::Audio)
+                    {
+                        for (const auto& clip : track->audioClips)
+                            if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                                sources.push_back ({ track->id, clip->id, true });
+                    }
+                    else
+                    {
+                        for (const auto& clip : track->clips)
+                            if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                                sources.push_back ({ track->id, clip->id, false });
+                    }
+                }
+            }
+
+            for (const auto& source : sources)
+            {
+                double clipStart = 0.0, clipEnd = 0.0;
+                if (getClipBounds (source, clipStart, clipEnd) && clipStart < end - 1.0e-9)
+                    copyActions.push_back ({ source, clipStart + offset });
+            }
+            succeeded = ! copyActions.empty();
         }
+
+        struct ShiftAction { int trackId; int clipId; double start; bool audio; };
+        std::vector<ShiftAction> clipsToShift;
+        if (succeeded)
+        {
+            for (const auto& track : project.tracks)
+            {
+                for (const auto& clip : track->clips)
+                    if (clip->start >= end - 1.0e-9)
+                        clipsToShift.push_back ({ track->id, clip->id, clip->start, false });
+                for (const auto& clip : track->audioClips)
+                    if (clip->start >= end - 1.0e-9)
+                        clipsToShift.push_back ({ track->id, clip->id, clip->start, true });
+            }
+            std::sort (clipsToShift.begin(), clipsToShift.end(),
+                       [] (const auto& a, const auto& b) { return a.start > b.start; });
+            for (const auto& clip : clipsToShift)
+            {
+                const int movedId = clip.audio
+                    ? project.moveAudioClip (clip.trackId, clip.clipId, clip.trackId, clip.start + offset)
+                    : project.moveClip (clip.trackId, clip.clipId, clip.trackId, clip.start + offset);
+                if (movedId < 0)
+                {
+                    succeeded = false;
+                    break;
+                }
+            }
+        }
+
+        if (succeeded)
+        {
+            for (const auto& action : copyActions)
+            {
+                int id = -1;
+                if (action.selected.audio)
+                {
+                    if (const auto* track = project.track (action.selected.trackId))
+                        if (const auto* source = track->findAudioClip (action.selected.clipId))
+                            id = project.copyAudioClip (*source, action.selected.trackId, action.start);
+                }
+                else if (const auto* track = project.track (action.selected.trackId))
+                    if (const auto* source = track->find (action.selected.clipId))
+                        id = project.copyClip (*source, action.selected.trackId, action.start);
+
+                if (id < 0)
+                {
+                    succeeded = false;
+                    break;
+                }
+                copies.push_back ({ action.selected.trackId, id, action.selected.audio });
+            }
+        }
+
         project.endEdit();
-        if (copies.empty())
+        if (! succeeded)
+        {
+            project.undo();
+            notifyAction ("Nao foi possivel duplicar a selecao", icons::Icon::Pointer, false, 900);
             return;
+        }
+
         selectedClips = std::move (copies);
         selectionAnchor = selectedClips.front();
         setProjectSelection (selectedClips.back());
         updateRangeFromSelection (true);
         repaint();
+    }
+
+    bool copySelection (bool cut)
+    {
+        double start = 0.0, end = 0.0;
+        const bool rangeSelection = selectedClips.empty() && hasRangeSelection;
+        std::vector<ClipSelection> sources = selectedClips;
+        if (rangeSelection)
+        {
+            if (project.tracks.empty())
+                return false;
+            start = std::min (rangeStartBeat, rangeEndBeat);
+            end = std::max (rangeStartBeat, rangeEndBeat);
+            const int first = std::clamp (std::min (rangeStartTrack, rangeEndTrack), 0,
+                                          static_cast<int> (project.tracks.size()) - 1);
+            const int last = std::clamp (std::max (rangeStartTrack, rangeEndTrack), first,
+                                         static_cast<int> (project.tracks.size()) - 1);
+            for (int row = first; row <= last; ++row)
+            {
+                const auto& track = *project.tracks[static_cast<std::size_t> (row)];
+                if (track.type == roll::TrackType::Audio)
+                {
+                    for (const auto& clip : track.audioClips)
+                        if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                            sources.push_back ({ track.id, clip->id, true });
+                }
+                else
+                {
+                    for (const auto& clip : track.clips)
+                        if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                            sources.push_back ({ track.id, clip->id, false });
+                }
+            }
+        }
+        else if (! getSelectedClipBounds (start, end))
+            return false;
+
+        if (sources.empty() || end <= start)
+            return false;
+
+        int baseTrackRow = static_cast<int> (project.tracks.size());
+        if (rangeSelection)
+            baseTrackRow = std::min (rangeStartTrack, rangeEndTrack);
+        else
+            for (const auto& source : sources)
+                baseTrackRow = std::min (baseTrackRow, project.trackIndex (source.trackId));
+        if (baseTrackRow < 0 || baseTrackRow >= static_cast<int> (project.tracks.size()))
+            return false;
+
+        clipboard.clear();
+        for (const auto& source : sources)
+        {
+            const auto* track = project.track (source.trackId);
+            if (track == nullptr)
+                continue;
+            const int trackOffset = project.trackIndex (source.trackId) - baseTrackRow;
+            if (source.audio)
+            {
+                if (const auto* clip = track->findAudioClip (source.clipId))
+                    clipboard.push_back ({ trackOffset, clip->start - start, true, nullptr,
+                                           std::make_unique<roll::AudioPlacement> (*clip) });
+            }
+            else if (const auto* clip = track->find (source.clipId))
+                clipboard.push_back ({ trackOffset, clip->start - start, false,
+                                       std::make_unique<roll::Placement> (*clip), nullptr });
+        }
+        if (clipboard.empty())
+            return false;
+
+        if (cut)
+        {
+            if (rangeSelection)
+                deleteRangeSelection();
+            else
+                deleteSelectedClips();
+        }
+        return true;
+    }
+
+    bool pasteClipboard()
+    {
+        if (clipboard.empty())
+            return false;
+
+        const int baseTrackRow = project.trackIndex (project.selectedTrackId);
+        if (baseTrackRow < 0)
+            return false;
+
+        std::vector<int> targetTrackIds;
+        targetTrackIds.reserve (clipboard.size());
+        for (const auto& item : clipboard)
+        {
+            const int targetRow = baseTrackRow + item.trackOffset;
+            if (targetRow < 0 || targetRow >= static_cast<int> (project.tracks.size()))
+            {
+                notifyAction ("Nao ha trilha de destino para todos os clips", icons::Icon::Pointer, false, 900);
+                return true;
+            }
+            const auto& targetTrack = *project.tracks[static_cast<std::size_t> (targetRow)];
+            if ((item.audio && targetTrack.type != roll::TrackType::Audio)
+                || (! item.audio && targetTrack.type != roll::TrackType::Midi))
+            {
+                notifyAction ("O tipo da trilha nao corresponde ao clip copiado", icons::Icon::Pointer, false, 900);
+                return true;
+            }
+            targetTrackIds.push_back (targetTrack.id);
+        }
+
+        project.beginEdit();
+        std::vector<ClipSelection> pasted;
+        bool succeeded = true;
+        for (std::size_t i = 0; i < clipboard.size(); ++i)
+        {
+            const auto& item = clipboard[i];
+            const int targetTrackId = targetTrackIds[i];
+            const double start = owner.playhead + item.relativeStart;
+            const int id = item.audio
+                ? (item.audioClip != nullptr ? project.copyAudioClip (*item.audioClip, targetTrackId, start) : -1)
+                : (item.midiClip != nullptr ? project.copyClip (*item.midiClip, targetTrackId, start) : -1);
+            if (id < 0)
+            {
+                succeeded = false;
+                break;
+            }
+            pasted.push_back ({ targetTrackId, id, item.audio });
+        }
+        project.endEdit();
+        if (! succeeded)
+        {
+            project.undo();
+            notifyAction ("Nao foi possivel colar os clips nesse local", icons::Icon::Pointer, false, 900);
+            return true;
+        }
+
+        selectedClips = std::move (pasted);
+        selectionAnchor = selectedClips.front();
+        setProjectSelection (selectedClips.back());
+        updateRangeFromSelection (true);
+        repaint();
+        return true;
     }
 
     void selectAll()
@@ -1536,17 +1828,16 @@ private:
         repaint();
     }
 
-    void editRange (bool duplicate)
+    void deleteRangeSelection()
     {
         const double start = std::min (rangeStartBeat, rangeEndBeat);
         const double end = std::max (rangeStartBeat, rangeEndBeat);
-        const double length = end - start;
-        if (length <= 1.0e-9)
+        if (end - start <= 1.0e-9)
             return;
 
         const int first = std::min (rangeStartTrack, rangeEndTrack);
         const int last = std::max (rangeStartTrack, rangeEndTrack);
-        struct ClipAction { int trackId; int clipId; double start; bool audio; };
+        struct ClipAction { int trackId; int clipId; bool audio; };
         std::vector<ClipAction> actions;
         for (int row = first; row <= last && row < static_cast<int> (project.tracks.size()); ++row)
         {
@@ -1554,16 +1845,14 @@ private:
             if (track->type == roll::TrackType::Audio)
             {
                 for (const auto& clip : track->audioClips)
-                    if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9
-                        && (! duplicate || track->isAudioFree (clip->start + length, clip->lengthBeats)))
-                        actions.push_back ({ track->id, clip->id, clip->start, true });
+                    if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                        actions.push_back ({ track->id, clip->id, true });
             }
             else
             {
                 for (const auto& clip : track->clips)
-                    if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9
-                        && (! duplicate || track->isFree (clip->start + length, clip->clip.length())))
-                        actions.push_back ({ track->id, clip->id, clip->start, false });
+                    if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                        actions.push_back ({ track->id, clip->id, false });
             }
         }
         if (actions.empty())
@@ -1573,14 +1862,7 @@ private:
         for (const auto& action : actions)
         {
             if (action.audio)
-            {
-                if (duplicate)
-                    project.copyAudioClip (action.trackId, action.clipId, action.trackId, action.start + length);
-                else
-                    project.deleteAudioClip (action.trackId, action.clipId);
-            }
-            else if (duplicate)
-                project.copyClip (action.trackId, action.clipId, action.trackId, action.start + length);
+                project.deleteAudioClip (action.trackId, action.clipId);
             else
                 project.deleteClip (action.trackId, action.clipId);
         }
@@ -1800,6 +2082,7 @@ private:
     double rangeStartBeat = 0.0, rangeEndBeat = 0.0;
     int rangeStartTrack = 0, rangeEndTrack = 0;
     std::vector<ClipSelection> selectedClips;
+    std::vector<ClipboardClip> clipboard;
     ClipSelection selectionAnchor, pendingSelection;
     juce::Point<float> selectionDownPosition;
 };

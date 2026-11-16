@@ -277,6 +277,12 @@ public:
     void previewAudio (std::shared_ptr<const AudioFileData> source);
     void stopAudioPreview();
     void setAudioPreviewGain (float gain);
+    bool beginOfflineRender (juce::String& error);
+    juce::Result renderMasterToWav (const juce::File&,
+                                   double durationSeconds,
+                                   std::function<void (double)> onProgress,
+                                   std::function<bool()> shouldCancel);
+    void finishOfflineRender();
     bool canAcceptPlugin (int trackId, const juce::PluginDescription&) const;
     void removeDevice (int trackId, int deviceId);
     bool moveDevice (int trackId, int deviceId, int direction);
@@ -329,4 +335,9 @@ private:
     std::map<int, TrackNodes> tracks;
     std::set<std::pair<int, std::string>> pendingPluginLoads;
     int nextDeviceId = 1, nextDeviceGroupId = 1;
+    bool offlineRenderActive = false, previousLoopEnabled = true, previousMetronomeEnabled = false;
+    double previousPosition = 0.0;
+    float previousMetronomeGain = 1.0f;
+    double offlineRenderSampleRate = 44100.0;
+    int offlineRenderBlockSize = 512;
 };

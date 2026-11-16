@@ -703,6 +703,12 @@ MainComponent::MainComponent()
             editor.setPlayhead (marker->beat - model.clipStartBeats);
         }
     };
+    const auto rememberPausedPosition = [this]
+    {
+        pausedPosition = engine.graph().positionBeats();
+    };
+    transport.onBeforePause = rememberPausedPosition;
+    transport.onBeforeStop = rememberPausedPosition;
     transport.onLoopToggled = [this] (bool on) { arrangement.setLoopEnabled (on); };
     arrangement.onLoopToggleRequested = [this] (bool on) { transport.setLoopEnabled (on); };
     transport.onBrowserToggled = [this] (bool visible) { setBrowserVisible (visible); };
@@ -840,6 +846,11 @@ MainComponent::~MainComponent()
     lifetimeToken->store (false);
     scanner.stopScan();
     projectFilePool.removeAllJobs (true, -1);
+    if (audioRenderInProgress)
+    {
+        engine.finishOfflineRender();
+        audioRenderInProgress = false;
+    }
     if (projectLoadTask != nullptr)
     {
         projectLoadTask->end();
@@ -1423,6 +1434,18 @@ void MainComponent::playSelectedTrack()
     transport.togglePlay();
 }
 
+void MainComponent::resumeFromPausedPosition()
+{
+    if (engine.graph().isPlaying())
+        return;
+
+    pendingArrangementSeek = false;
+    transportPosition = pausedPosition;
+    arrangement.setPlayhead (pausedPosition);
+    editor.setPlayhead (pausedPosition - model.clipStartBeats);
+    transport.resumeFromPosition (pausedPosition);
+}
+
 void MainComponent::loopSelectedTrack()
 {
     double start = 0.0, end = 0.0;
@@ -1451,6 +1474,9 @@ void MainComponent::loopSelectedTrack()
 
 bool MainComponent::keyPressed (const juce::KeyPress& k)
 {
+    if (audioRenderInProgress)
+        return true;
+
 #if JUCE_DEBUG
     if (k.getKeyCode() == juce::KeyPress::F10Key
         && k.getModifiers().isCtrlDown() && k.getModifiers().isAltDown())
@@ -1462,6 +1488,15 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
 
     const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
+    const bool zeroKey = k.getKeyCode() == '0'
+                      || k.getKeyCode() == juce::KeyPress::numberPad0
+                      || k.getTextCharacter() == '0';
+    if (zeroKey && ! ctrl && ! k.getModifiers().isAltDown()
+        && ! k.getModifiers().isShiftDown() && editor.hasKeyboardFocus (true))
+    {
+        model.toggleMuteSelected();
+        return true;
+    }
 
     if (juce::Process::isForegroundProcess() && ! isTextEditorFocused()
         && ! ctrl && ! k.getModifiers().isAltDown() && keyCode == 'M')
@@ -1514,6 +1549,11 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
         && juce::CharacterFunctions::toLowerCase (k.getKeyCode()) == 'l')
     {
         loopSelectedTrack();
+        return true;
+    }
+    if (k.isKeyCode (juce::KeyPress::spaceKey) && k.getModifiers().isShiftDown())
+    {
+        resumeFromPausedPosition();
         return true;
     }
     if (k == juce::KeyPress::spaceKey) { playSelectedTrack(); return true; }
@@ -1582,12 +1622,15 @@ void MainComponent::showProjectMenu()
     menu.addSeparator();
     menu.addItem (4, "Associar arquivos .pfs ao Project Freedom");
 #endif
+    menu.addSeparator();
+    menu.addItem (5, "Exportar Master como WAV...", ! audioRenderInProgress);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transport),
         [this] (int result)
         {
             if (result == 1) chooseProjectFile (true);
             else if (result == 2) saveProject (currentProjectFile);
             else if (result == 3) chooseProjectFile (false);
+            else if (result == 5) chooseWavExportFile();
             else if (result == 4)
             {
                 const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
@@ -1603,6 +1646,170 @@ void MainComponent::showProjectMenu()
                     : "Nao foi possivel associar arquivos .pfs.");
             }
         });
+}
+
+void MainComponent::chooseWavExportFile()
+{
+    if (audioRenderInProgress || projectFileOperationInProgress)
+    {
+        setProjectStatus ("Aguarde a operacao atual terminar antes de exportar.");
+        return;
+    }
+
+    const auto suggestedFile = currentProjectFile.existsAsFile()
+        ? currentProjectFile.withFileExtension (".wav")
+        : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+              .getChildFile ("Project Freedom.wav");
+    audioExportChooser = std::make_unique<juce::FileChooser> (
+        "Exportar Master como WAV", suggestedFile, "*.wav");
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    audioExportChooser->launchAsync (
+        juce::FileBrowserComponent::saveMode
+            | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this, token] (const juce::FileChooser& chooser)
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+                return;
+
+            const auto result = chooser.getResult();
+            audioExportChooser.reset();
+            if (result == juce::File())
+                return;
+
+            showWavRenderOptions (result.withFileExtension (".wav"));
+        });
+}
+
+void MainComponent::showWavRenderOptions (const juce::File& file)
+{
+    auto* alert = new juce::AlertWindow (
+        "Exportar Master como WAV", "Cauda apos o fim do arrangement (segundos):",
+        juce::AlertWindow::NoIcon);
+    alert->addTextEditor ("tailSeconds", "2.0");
+    alert->addButton ("Exportar", 1);
+    alert->addButton ("Cancelar", 0);
+
+    juce::Component::SafePointer<MainComponent> safeThis (this);
+    alert->enterModalState (true,
+        juce::ModalCallbackFunction::create ([safeThis, alert, file] (int result)
+        {
+            if (safeThis == nullptr || result != 1)
+                return;
+
+            const auto tailText = alert->getTextEditorContents ("tailSeconds")
+                                      .trim().replaceCharacter (',', '.');
+            const bool hasDigit = std::any_of (tailText.begin(), tailText.end(),
+                [] (juce::juce_wchar character) { return juce::CharacterFunctions::isDigit (character); });
+            const double tailSeconds = tailText.getDoubleValue();
+            if (! hasDigit || ! std::isfinite (tailSeconds) || tailSeconds < 0.0 || tailSeconds > 60.0)
+            {
+                safeThis->setProjectStatus ("A cauda deve ser um valor entre 0 e 60 segundos.");
+                return;
+            }
+
+            safeThis->startWavRender (file, tailSeconds);
+        }), true);
+}
+
+void MainComponent::startWavRender (const juce::File& file, double tailSeconds)
+{
+    if (audioRenderInProgress || projectFileOperationInProgress
+        || ! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
+        || pendingAudioLoads > 0 || scanningPlugins)
+    {
+        setProjectStatus ("Aguarde os carregamentos e operacoes atuais antes de exportar.");
+        return;
+    }
+
+    double endBeat = 0.0;
+    for (const auto& track : project.tracks)
+    {
+        if (track->type == roll::TrackType::Audio)
+        {
+            for (const auto& clip : track->audioClips)
+                if (clip->enabled)
+                    endBeat = std::max (endBeat, clip->end());
+        }
+        else
+        {
+            for (const auto& clip : track->clips)
+                if (clip->enabled)
+                    endBeat = std::max (endBeat, clip->end());
+        }
+    }
+
+    const double bpm = engine.graph().getBpm();
+    if (endBeat <= 0.0 || ! std::isfinite (bpm) || bpm <= 0.0)
+    {
+        setProjectStatus ("O projeto nao possui audio ou clips para exportar.");
+        return;
+    }
+
+    releaseComputerMidiNotes();
+    juce::String error;
+    if (! engine.beginOfflineRender (error))
+    {
+        setProjectStatus ("Nao foi possivel iniciar a exportacao: " + error);
+        return;
+    }
+
+    audioRenderInProgress = true;
+    setAudioRenderUiEnabled (false);
+    auto cancelled = std::make_shared<std::atomic<bool>> (false);
+    auto task = std::make_shared<TaskScope> (
+        taskRegistry, "Renderizando Master: " + file.getFileName(), "global", 0.0, true,
+        [cancelled] { cancelled->store (true, std::memory_order_release); });
+    const auto durationSeconds = endBeat * 60.0 / bpm + tailSeconds;
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+
+    projectFilePool.addJob ([this, token, task, cancelled, file, durationSeconds]
+    {
+        const auto result = engine.renderMasterToWav (
+            file, durationSeconds,
+            [task] (double progress) { task->setProgress (progress); },
+            [cancelled] { return cancelled->load (std::memory_order_acquire); });
+
+        juce::MessageManager::callAsync ([this, token, task, cancelled, file, result]
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+                return;
+
+            engine.finishOfflineRender();
+            audioRenderInProgress = false;
+            setAudioRenderUiEnabled (true);
+            task->end();
+
+            if (cancelled->load (std::memory_order_acquire))
+                setProjectStatus ("Exportacao de audio cancelada.");
+            else if (result.failed())
+                setProjectStatus ("Falha ao exportar WAV: " + result.getErrorMessage());
+            else
+                setProjectStatus ("Master exportado: " + file.getFullPathName());
+        });
+    });
+}
+
+void MainComponent::setAudioRenderUiEnabled (bool enabled)
+{
+    transport.setEnabled (enabled);
+    browser.setEnabled (enabled);
+    audioBrowser.setEnabled (enabled);
+    arrangement.setEnabled (enabled);
+    editor.setEnabled (enabled);
+    audioClipEditor.setEnabled (enabled);
+    deviceView.setEnabled (enabled);
+    clipTab.setEnabled (enabled);
+    deviceTab.setEnabled (enabled);
+    for (auto* control : clipControls)
+        control->setEnabled (enabled);
+    for (auto& [deviceId, window] : windows)
+    {
+        juce::ignoreUnused (deviceId);
+        window->setEnabled (enabled);
+    }
 }
 
 void MainComponent::openProjectFromFile (const juce::File& file)
@@ -1641,7 +1848,7 @@ void MainComponent::chooseProjectFile (bool open)
 void MainComponent::saveProject (const juce::File& requestedFile)
 {
     if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
-        || pendingAudioLoads > 0 || projectFileOperationInProgress)
+        || pendingAudioLoads > 0 || projectFileOperationInProgress || audioRenderInProgress)
     {
         setProjectStatus ("Aguarde o fim dos carregamentos antes de salvar.");
         return;
@@ -1710,7 +1917,7 @@ void MainComponent::saveProject (const juce::File& requestedFile)
 void MainComponent::loadProject (const juce::File& file)
 {
     if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
-        || pendingAudioLoads > 0 || projectFileOperationInProgress)
+        || pendingAudioLoads > 0 || projectFileOperationInProgress || audioRenderInProgress)
     {
         setProjectStatus ("Aguarde o fim dos carregamentos antes de abrir outro projeto.");
         return;
@@ -1789,6 +1996,7 @@ void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData 
     transport.setMetronomeState (data.metronomeEnabled, data.metronomeGain);
     transport.setLoopEnabled (data.loopEnabled);
     transportPosition = data.transportPosition;
+    pausedPosition = data.transportPosition;
     engine.graph().seek (transportPosition);
     arrangement.setPlayhead (transportPosition);
 
@@ -2136,13 +2344,14 @@ void MainComponent::updateComputerMidiKeyboard()
     const bool textFocused = isTextEditorFocused();
     const bool appForeground = juce::Process::isForegroundProcess();
 
-    const bool modeKeyDown = appForeground && ! textFocused && ! hasShortcutModifier
+    const bool modeKeyDown = appForeground && ! audioRenderInProgress && ! textFocused && ! hasShortcutModifier
                           && juce::KeyPress::isKeyCurrentlyDown ('M');
     if (modeKeyDown && ! computerMidiModeKeyDown)
         setComputerMidiKeyboardEnabled (! computerMidiKeyboardEnabled);
     computerMidiModeKeyDown = modeKeyDown;
 
-    const bool acceptKeys = computerMidiKeyboardEnabled && appForeground && ! textFocused && ! hasShortcutModifier;
+    const bool acceptKeys = computerMidiKeyboardEnabled && appForeground && ! audioRenderInProgress
+                         && ! textFocused && ! hasShortcutModifier;
     // Z/X mudam a oitava e C/V ajustam a velocity em passos de 20, como no Live.
     const std::array<int, 4> controlKeys { 'Z', 'X', 'C', 'V' };
     bool statusChanged = false;

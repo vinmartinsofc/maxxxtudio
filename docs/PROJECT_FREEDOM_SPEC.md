@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.14 (zoom da visão geral e melhoria visual/remoção de locators)
+- **Versão do documento:** 1.18 (retomar reprodução pausada com Shift+Espaço)
 - **⚠️ Ordem de trabalho vigente:** `PLANO_DE_ACAO_FASE_4.md` (feedback do Marco 3: correções críticas, layout, groove, automação, áudio). **Em caso de conflito com o §14 deste documento, vale o plano.**
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -180,8 +180,10 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Plugins | Host VST2 e diretórios customizados | ⬜ (depende de SDK compatível/licenciado; diretórios customizados serão exclusivos do VST2) |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
 | Áudio | Mixer por trilha: volume, pan (sem UI), mute, solo, medidor de pico | 🟡 |
-| Transporte | Play/Pause (Espaço), Stop, Voltar ao início (Home), Loop, BPM, posição | ✅ UI / 🟡 áudio |
+| Transporte | Play/Pause (Espaço), Shift+Espaço retoma da posição pausada/Stop, Home, Loop, BPM, posição | 🟡 (falta teste manual) |
 | Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar), régua, brace de loop | ✅ |
+| Arranjo | Ctrl+C/X/V em clips de áudio/MIDI, incluindo colar em outra trilha do mesmo tipo; Ctrl+D insere tempo e desloca o conteúdo posterior | 🟡 (build/testes; falta teste manual na UI) |
+| Arranjo | Tecla `0` ativa/desativa o clip selecionado | ✅ |
 | Arranjo | Clique no fundo posiciona o cursor na grade; arrastar seleciona intervalo e Espaço inicia do começo da seleção | 🟡 |
 | Arranjo | Visão geral no topo, navegação horizontal e cores customizáveis por trilha | 🟡 visão geral implementada nesta versão / ⬜ cores customizáveis |
 | Arranjo | Visão geral com zoom vertical e enquadramento do arrangement; bandeiras de locator destacadas e botão Del remove o mais recente sem seleção | 🟡 |
@@ -190,11 +192,13 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Piano roll | Régua, teclas (C3 = nota 60) que **acendem** ao clicar e durante playback, velocity lane | ✅ |
 | Piano roll | Zoom H/V (botões, Ctrl+roda, Alt+roda, arrastar régua, +/−), grade 1/64–1 compasso + tripleto | ✅ |
 | Piano roll | Marcador de inserção (clique no fundo), Preview on/off | ✅ |
+| Piano roll | Tecla `0` ativa/desativa as notas selecionadas sem removê-las | 🟡 (build/testes; falta teste manual na UI) |
 | Projeto | **Salvar/abrir** (`.pfs`, leitura legada `.freedom`, progresso global) | ✅ |
 | Projeto | **Desfazer global** (arranjo/mixer/dispositivos) | ⬜ |
 | Entrada | Teclado do computador: modo M; notas A–L com teclas pretas; Z/X oitava; C/V velocidade | ✅ (pendente teste sonoro manual) |
 | Entrada | MIDI de teclado/controlador, gravação | ⬜ |
-| Exportação | MIDI / áudio (render Master em WAV) | ⬜ |
+| Exportação | Master em WAV 24-bit, offline, com cauda configurável e progresso/cancelamento | ✅ |
+| Exportação | MIDI (clip/trilha/projeto) | ⬜ |
 | Config. | Seleção de dispositivo de áudio, buffer, taxa de amostragem | ⬜ (usa o padrão do sistema) |
 | Acessibilidade | Anel de foco, F6 alterna painéis, setas selecionam trilha | 🟡 parcial |
 | Tarefas em background | `TaskRegistry`/`TaskScope`, indicador por target e barra global; carregamento por faixa; scan com progresso/cancelamento; progresso ao abrir/salvar projetos | ✅ etapas a–b e d / 🟡 etapa c (falta QA com plugins reais) |
@@ -354,6 +358,7 @@ Project
 | Atalho | Ação |
 |---|---|
 | Espaço | Play/Pause (botões **não** roubam o foco ao clicar, para o Espaço continuar funcionando) |
+| Shift+Espaço | Retoma exatamente da posição pausada/Stop, sem aplicar o início da seleção ou do locator |
 | Home | Volta ao início do projeto (fora do piano roll) |
 | Ctrl+Shift+T | Nova trilha MIDI |
 | Shift+Tab ou F12 | Alterna Clip ↔ Dispositivos |
@@ -365,8 +370,9 @@ Project
 | Criar clip | Duplo clique numa trilha vazia |
 | Mover / mudar de trilha | Arrastar (snap 1 beat; **Alt** = sem snap) |
 | Redimensionar | Arrastar a borda direita (mín. 1 beat) |
-| Copiar | Ctrl + arrastar |
-| Duplicar / apagar | Ctrl+D / Delete ou Backspace |
+| Copiar / recortar / colar | Ctrl+C / Ctrl+X / Ctrl+V; cola no playhead e na trilha selecionada, mantendo espaçamento relativo |
+| Copiar por arrasto | Ctrl + arrastar |
+| Duplicar / apagar | Ctrl+D insere uma cópia da seleção e desloca o conteúdo posterior; Delete ou Backspace apaga |
 | Trilha acima/abaixo | ↑ / ↓ |
 | Zoom | Ctrl+roda, `+` / `-` |
 | Loop | Arrastar bordas/corpo do brace (faixa fina no topo da régua) |
@@ -388,7 +394,7 @@ Project
 | Delete / Backspace | Apagar seleção |
 | ↑ ↓ | Transpor 1 semitom (**Shift** = oitava) |
 | ← → | Mover pela grade (**Shift** = alongar/encurtar) |
-| `0` | Ativar/desativar notas selecionadas |
+| `0` | Ativar/desativar notas selecionadas sem removê-las (quando o Piano Roll tem foco) |
 | Ctrl+U | Quantizar início das notas à grade |
 | `B` | Modo desenho (cria nota ao clicar e arrastar estica) |
 | `K` | Destacar escala |
@@ -611,7 +617,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 ### Marco 10 — Exportação
 
 - [ ] **T10.1 — Exportar MIDI** (clip/trilha/projeto) com `juce::MidiFile` (PPQ 960).
-- [ ] **T10.2 — Renderizar áudio (offline):** processar o grafo em blocos sem tempo real, do início ao fim (+ cauda configurável), escrever WAV 24-bit (`WavAudioFormat`); barra de progresso; respeitar mute/solo.
+- [x] **T10.2 — Renderizar áudio (offline):** processar o grafo em blocos sem tempo real, do início ao fim (+ cauda configurável), escrever WAV 24-bit (`WavAudioFormat`); barra de progresso; respeitar mute/solo.
 - **Aceite:** o WAV exportado soa igual ao tempo real (comparar pico/RMS aproximado).
 
 ### Marco 11 — Distribuição e qualidade (portfólio)
@@ -677,6 +683,10 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.18** | Shift+Espaço retoma diretamente da posição capturada ao pausar ou pressionar Stop, inclusive com loop e seleção |
+| **Doc 1.17** | Atalho `0` no Piano Roll aceita teclado numérico e encaminha a ação para as notas selecionadas quando a grade tem foco |
+| **Doc 1.16** | Ctrl+C/X/V para clips de áudio e MIDI, com colagem em outra trilha compatível; Ctrl+D duplica inserindo tempo e deslocando o conteúdo posterior |
+| **Doc 1.15** | Exportação offline do Master em WAV 24-bit com cauda configurável e progresso/cancelamento |
 | **Doc 1.14** | Zoom vertical e enquadramento pela visão geral; bandeiras de locator mais visíveis; Del remove o locator mais recente quando nenhum está selecionado |
 | **Doc 1.13** | Ao pressionar Espaço com um intervalo temporal selecionado, a reprodução inicia no começo da seleção |
 | **Doc 1.12** | Clique no fundo do Arrangement posiciona o cursor na grade; arrastar seleciona um intervalo com feedback visual, conforme o manual do Live |

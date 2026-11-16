@@ -58,6 +58,7 @@ public:
 
     roll::Placement* addClip (int trackId, double start, double length);
     int copyClip (int fromTrack, int clipId, int toTrack, double start);
+    int copyClip (const roll::Placement& source, int toTrack, double start);
     int duplicateClip (int trackId, int clipId);
     void deleteClip (int trackId, int clipId);
     int splitClip (int trackId, int clipId, double beat);
@@ -67,6 +68,7 @@ public:
                                         double durationSeconds = 0.0, double sourceBpm = 120.0);
     void deleteAudioClip (int trackId, int clipId);
     int copyAudioClip (int fromTrack, int clipId, int toTrack, double start);
+    int copyAudioClip (const roll::AudioPlacement& source, int toTrack, double start);
     int duplicateAudioClip (int trackId, int clipId);
     int splitAudioClip (int trackId, int clipId, double beat);
     bool resizeAudioClip (int trackId, int clipId, double length);

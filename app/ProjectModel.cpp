@@ -373,6 +373,26 @@ int ProjectModel::copyClip (int fromTrack, int clipId, int toTrack, double start
     return copy->id;
 }
 
+int ProjectModel::copyClip (const roll::Placement& source, int toTrack, double start)
+{
+    auto* destinationTrack = track (toTrack);
+    if (destinationTrack == nullptr || destinationTrack->type != roll::TrackType::Midi
+        || ! std::isfinite (start) || start < 0.0 || source.clip.length() <= 0.0
+        || ! destinationTrack->isFree (start, source.clip.length()))
+        return -1;
+
+    recordUndo();
+    auto* copy = destinationTrack->copyClip (source, start);
+    if (copy == nullptr)
+        return -1;
+
+    growTo (copy->end() + 64.0);
+    selectClip (toTrack, copy->id);
+    notifyTrackNotes (toTrack);
+    sendChangeMessage();
+    return copy->id;
+}
+
 int ProjectModel::duplicateClip (int trackId, int clipId)
 {
     auto* t = track (trackId);
@@ -509,6 +529,26 @@ int ProjectModel::copyAudioClip (int fromTrack, int clipId, int toTrack, double 
         return -1;
     recordUndo();
     auto* copy = destinationTrack->copyAudioClip (*source, start);
+    if (copy == nullptr)
+        return -1;
+
+    growTo (copy->end() + 64.0);
+    selectAudioClip (toTrack, copy->id);
+    if (onAudioClipsChanged) onAudioClipsChanged (toTrack);
+    sendChangeMessage();
+    return copy->id;
+}
+
+int ProjectModel::copyAudioClip (const roll::AudioPlacement& source, int toTrack, double start)
+{
+    auto* destinationTrack = track (toTrack);
+    if (destinationTrack == nullptr || destinationTrack->type != roll::TrackType::Audio
+        || ! std::isfinite (start) || start < 0.0 || source.lengthBeats <= 0.0
+        || ! destinationTrack->isAudioFree (start, source.lengthBeats))
+        return -1;
+
+    recordUndo();
+    auto* copy = destinationTrack->copyAudioClip (source, start);
     if (copy == nullptr)
         return -1;
 

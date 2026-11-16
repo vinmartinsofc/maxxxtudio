@@ -50,6 +50,43 @@ target_link_libraries(ProjectFreedom
         juce::juce_recommended_warning_flags)
 
 if(ROLL_BUILD_TESTS)
+    add_executable(piano_roll_tests
+        ../tests/PianoRollTests.cpp
+        Icons.cpp
+        PianoRollEditor.cpp
+        RollModel.cpp)
+    target_include_directories(piano_roll_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(piano_roll_tests PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(piano_roll_tests
+        PRIVATE
+            roll_core
+            Catch2::Catch2WithMain
+            ProjectFreedomIcons
+            juce::juce_gui_basics
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    add_test(NAME PianoRollTests COMMAND piano_roll_tests)
+
+    add_executable(project_model_tests
+        ../tests/ProjectModelTests.cpp
+        ProjectModel.cpp)
+    target_include_directories(project_model_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(project_model_tests PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(project_model_tests
+        PRIVATE
+            roll_core
+            Catch2::Catch2WithMain
+            juce::juce_gui_basics
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    add_test(NAME ProjectModelTests COMMAND project_model_tests)
+
     add_executable(task_registry_tests
         ../tests/TaskRegistryTests.cpp
         ActivityIndicator.cpp
@@ -68,4 +105,25 @@ if(ROLL_BUILD_TESTS)
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
     add_test(NAME TaskRegistryTests COMMAND task_registry_tests)
+
+    add_executable(audio_engine_tests
+        ../tests/AudioEngineTests.cpp
+        AudioEngine.cpp)
+    target_include_directories(audio_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(audio_engine_tests PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_PLUGINHOST_VST3=1)
+    target_link_libraries(audio_engine_tests
+        PRIVATE
+            roll_core
+            Catch2::Catch2WithMain
+            juce::juce_audio_utils
+            juce::juce_audio_devices
+            juce::juce_audio_processors
+            juce::juce_gui_basics
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    add_test(NAME AudioEngineTests COMMAND audio_engine_tests)
 endif()

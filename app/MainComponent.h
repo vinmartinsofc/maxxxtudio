@@ -55,10 +55,15 @@ private:
     void publishAudioTrack (int trackId);
     bool selectedTrackSpan (double& start, double& end) const;
     void playSelectedTrack();
+    void resumeFromPausedPosition();
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
     void showProjectMenu();
     void chooseProjectFile (bool open);
+    void chooseWavExportFile();
+    void showWavRenderOptions (const juce::File&);
+    void startWavRender (const juce::File&, double tailSeconds);
+    void setAudioRenderUiEnabled (bool);
     void saveProject (const juce::File&);
     void loadProject (const juce::File&);
     void applyLoadedProject (const juce::File&, ProjectFileData, const std::shared_ptr<TaskScope>&);
@@ -112,6 +117,7 @@ private:
     std::map<int, std::unique_ptr<PluginWindow>> windows;
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
+    std::unique_ptr<juce::FileChooser> audioExportChooser;
     juce::File currentProjectFile;
     std::shared_ptr<TaskScope> projectLoadTask;
     std::vector<PluginState> pendingProjectPlugins;
@@ -129,6 +135,7 @@ private:
     int pendingAudioLoads = 0, pendingPreviewLoads = 0;
     bool scanningPlugins = false;
     bool projectFileOperationInProgress = false;
+    bool audioRenderInProgress = false;
     size_t projectLoadWorkTotal = 0, projectLoadWorkDone = 0;
     juce::String scanMessage;
 
@@ -140,6 +147,7 @@ private:
     double pendingArrangementSeekBeat = 0.0;
     double arrangementRatio = 0.42;
     double transportPosition = 0.0;
+    double pausedPosition = 0.0;
     double displayedBpm = 120.0;
     juce::Rectangle<int> splitterRect;
     int rightTop = 0, rightHeight = 1;

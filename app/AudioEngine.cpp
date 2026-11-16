@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 
@@ -834,6 +835,138 @@ void AudioEngine::stopAudioPreview()
 void AudioEngine::setAudioPreviewGain (float gain)
 {
     previewSourcePtr->setGain (gain);
+}
+
+bool AudioEngine::beginOfflineRender (juce::String& error)
+{
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
+    if (offlineRenderActive)
+    {
+        error = "An audio export is already in progress.";
+        return false;
+    }
+    if (seqGraph.isPlaying())
+    {
+        error = "Stop playback before exporting audio.";
+        return false;
+    }
+
+    auto* device = deviceManager.getCurrentAudioDevice();
+    offlineRenderSampleRate = device != nullptr ? device->getCurrentSampleRate() : seqGraph.getSampleRate();
+    offlineRenderBlockSize = device != nullptr ? device->getCurrentBufferSizeSamples() : seqGraph.getBlockSize();
+    if (! std::isfinite (offlineRenderSampleRate) || offlineRenderSampleRate <= 0.0
+        || offlineRenderBlockSize <= 0)
+    {
+        error = "The audio device has no valid sample rate or buffer size.";
+        return false;
+    }
+
+    previousPosition = seqGraph.positionBeats();
+    previousLoopEnabled = seqGraph.isLoop();
+    previousMetronomeEnabled = seqGraph.isMetronomeEnabled();
+    previousMetronomeGain = seqGraph.getMetronomeGain();
+
+    deviceManager.removeAudioCallback (&player);
+    seqGraph.setPlayConfigDetails (0, 2, offlineRenderSampleRate, offlineRenderBlockSize);
+    seqGraph.setNonRealtime (true);
+    seqGraph.prepareToPlay (offlineRenderSampleRate, offlineRenderBlockSize);
+    seqGraph.setLoop (false);
+    seqGraph.setMetronomeEnabled (false);
+    previewSourcePtr->stop();
+    seqGraph.seek (0.0);
+    seqGraph.setPlaying (true);
+    offlineRenderActive = true;
+    return true;
+}
+
+juce::Result AudioEngine::renderMasterToWav (const juce::File& file,
+                                             double durationSeconds,
+                                             std::function<void (double)> onProgress,
+                                             std::function<bool()> shouldCancel)
+{
+    if (! offlineRenderActive)
+        return juce::Result::fail ("Offline rendering was not prepared.");
+    if (! std::isfinite (durationSeconds) || durationSeconds <= 0.0)
+        return juce::Result::fail ("The requested render duration is invalid.");
+
+    const double frameCount = std::ceil (durationSeconds * offlineRenderSampleRate);
+    constexpr std::uint64_t maxWavDataBytes = 0xffffffffULL - 4096;
+    constexpr std::uint64_t bytesPerStereoFrame = 2 * 3;
+    const auto maxFrames = maxWavDataBytes / bytesPerStereoFrame;
+    if (! std::isfinite (frameCount) || frameCount < 1.0
+        || frameCount > static_cast<double> (maxFrames))
+        return juce::Result::fail ("The render is too long for a standard WAV file.");
+
+    auto fileStream = std::make_unique<juce::FileOutputStream> (file);
+    if (! fileStream->openedOk())
+        return juce::Result::fail ("Could not create the WAV file.");
+
+    std::unique_ptr<juce::OutputStream> outputStream (std::move (fileStream));
+    juce::WavAudioFormat wavFormat;
+    const juce::AudioFormatWriterOptions writerOptions;
+    auto writer = wavFormat.createWriterFor (outputStream,
+        writerOptions.withSampleRate (offlineRenderSampleRate)
+                     .withNumChannels (2)
+                     .withBitsPerSample (24));
+    if (writer == nullptr)
+    {
+        outputStream.reset();
+        file.deleteFile();
+        return juce::Result::fail ("Could not initialise the WAV writer.");
+    }
+
+    const auto totalFrames = static_cast<std::uint64_t> (frameCount);
+    juce::AudioBuffer<float> buffer (2, offlineRenderBlockSize);
+    juce::MidiBuffer midi;
+    std::uint64_t renderedFrames = 0;
+    while (renderedFrames < totalFrames)
+    {
+        if (shouldCancel && shouldCancel())
+        {
+            writer.reset();
+            outputStream.reset();
+            file.deleteFile();
+            return juce::Result::fail ("Audio export cancelled.");
+        }
+
+        buffer.clear();
+        midi.clear();
+        seqGraph.processBlock (buffer, midi);
+
+        const int framesToWrite = static_cast<int> (std::min<std::uint64_t> (
+            static_cast<std::uint64_t> (offlineRenderBlockSize), totalFrames - renderedFrames));
+        if (! writer->writeFromAudioSampleBuffer (buffer, 0, framesToWrite))
+        {
+            writer.reset();
+            outputStream.reset();
+            file.deleteFile();
+            return juce::Result::fail ("Failed while writing the WAV file.");
+        }
+
+        renderedFrames += static_cast<std::uint64_t> (framesToWrite);
+        if (onProgress)
+            onProgress (static_cast<double> (renderedFrames) / static_cast<double> (totalFrames));
+    }
+
+    writer.reset();
+    return juce::Result::ok();
+}
+
+void AudioEngine::finishOfflineRender()
+{
+    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
+    if (! offlineRenderActive)
+        return;
+
+    seqGraph.setPlaying (false);
+    seqGraph.setLoop (previousLoopEnabled);
+    seqGraph.setMetronomeEnabled (previousMetronomeEnabled);
+    seqGraph.setMetronomeGain (previousMetronomeGain);
+    seqGraph.seek (previousPosition);
+    seqGraph.setNonRealtime (false);
+    seqGraph.releaseResources();
+    deviceManager.addAudioCallback (&player);
+    offlineRenderActive = false;
 }
 
 bool AudioEngine::canAcceptPlugin (int trackId, const juce::PluginDescription& description) const

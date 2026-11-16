@@ -603,7 +603,13 @@ bool NoteGrid::keyPressed (const juce::KeyPress& k)
 
     if (! ctrl && isLetter (k, 'B')) { model.drawMode = ! model.drawMode; model.sendChangeMessage(); return true; }
     if (! ctrl && isLetter (k, 'K')) { model.highlight = ! model.highlight; model.sendChangeMessage(); return true; }
-    if (! ctrl && code == '0')       { model.toggleMuteSelected(); return true; }
+    const bool zeroKey = code == '0' || code == juce::KeyPress::numberPad0
+                      || k.getTextCharacter() == '0';
+    if (! ctrl && ! shift && ! mods.isAltDown() && zeroKey)
+    {
+        model.toggleMuteSelected();
+        return true;
+    }
 
     if (k.isKeyCode (juce::KeyPress::escapeKey)) { model.selection.clear(); model.sendChangeMessage(); return true; }
     if (k.isKeyCode (juce::KeyPress::homeKey))   { model.setInsertMarker (0.0);                return true; }
