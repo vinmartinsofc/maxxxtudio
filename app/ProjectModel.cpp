@@ -343,6 +343,21 @@ void ProjectModel::removeTrack (int id)
     sendChangeMessage();
 }
 
+bool ProjectModel::moveTrack (int id, int newIndex)
+{
+    const int oldIndex = trackIndex (id);
+    if (oldIndex < 0 || newIndex < 0 || newIndex >= static_cast<int> (tracks.size())
+        || oldIndex == newIndex)
+        return false;
+
+    recordUndo();
+    auto moved = std::move (tracks[static_cast<std::size_t> (oldIndex)]);
+    tracks.erase (tracks.begin() + oldIndex);
+    tracks.insert (tracks.begin() + newIndex, std::move (moved));
+    sendChangeMessage();
+    return true;
+}
+
 int ProjectModel::duplicateTrack (int id)
 {
     const int index = trackIndex (id);

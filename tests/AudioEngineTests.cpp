@@ -62,6 +62,23 @@ TEST_CASE ("Offline WAV export renders the master bus")
     reader.reset();
 }
 
+TEST_CASE ("Audio engine registers only VST3")
+{
+    AudioEngine engine;
+    bool hasVst2 = false;
+    bool hasVst3 = false;
+
+    for (int index = 0; index < engine.formats().getNumFormats(); ++index)
+    {
+        const auto name = engine.formats().getFormat (index)->getName();
+        hasVst2 = hasVst2 || name == "VST";
+        hasVst3 = hasVst3 || name == "VST3";
+    }
+
+    REQUIRE (hasVst3);
+    REQUIRE_FALSE (hasVst2);
+}
+
 TEST_CASE ("Offline track rendering captures audio before the master bus")
 {
     AudioEngine engine;

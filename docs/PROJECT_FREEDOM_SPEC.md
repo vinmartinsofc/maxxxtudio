@@ -70,7 +70,7 @@ O dono do projeto produz música há 13+ anos no Ableton Live e estuda programa�
 
 ### 1.4 Não-objetivos (por enquanto)
 
-Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch de áudio, gravação de áudio, automação (até o §14 chegar lá), AU, CLAP, suporte a macOS (o código é portável, mas **não é testado** lá). VST2 é planejado, mas depende de um SDK compatível e licenciado.
+Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch de áudio, gravação de áudio, automação (até o §14 chegar lá), VST2, AU, CLAP, suporte a macOS (o código é portável, mas **não é testado** lá).
 
 ### 1.5 Restrições
 
@@ -177,7 +177,8 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Plugins | Navegador com busca e filtros Todos/Instrumentos/Efeitos; duplo clique carrega | ✅ UI / 🟡 carregamento |
 | Plugins | Cadeia por trilha (1 instrumento + N efeitos), UI do plugin em janela (minimizar+fechar; janelas permanecem à frente enquanto o app está ativo) | 🟡 |
 | Plugins | Favoritos de plugins | ⬜ (favoritos atuais são arquivos/pastas de áudio) |
-| Plugins | Host VST2 e diretórios customizados | ⬜ (depende de SDK compatível/licenciado; diretórios customizados serão exclusivos do VST2) |
+| Plugins | Host e scan VST3 | ✅ |
+| Plugins | Pastas de busca customizadas VST3, persistidas e editáveis pelo navegador | 🟡 |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
 | Áudio | Mixer por trilha: volume, pan, mute, medidor; Solo exclusivo, por seleção múltipla e Ctrl+clique aditivo | 🟡 (build/testes; falta validação manual na UI) |
 | Áudio | Grupos planos como barramentos reais: faixas-filhas → mixer/efeitos do grupo → Master ou Ext. Out; Solo respeita grupo e filhos | 🟡 (build/testes; falta validação manual com plugins) |
@@ -296,7 +297,7 @@ TrackSource(MIDI) ──midi──► [instrumento] ──audio──► [efeito
 ### 6.2 `app/` — Motor de áudio (`AudioEngine.h/.cpp`)
 
 - `TrackSource`, `TrackMixer`, `SequencerGraph`, `AudioEngine` (ver §5).
-- `AudioEngine` é dono do `AudioDeviceManager` (`initialiseWithDefaultDevices(0, 2)`), `AudioPluginFormatManager` (**somente VST3**), `AudioProcessorGraph`, `AudioProcessorPlayer`.
+- `AudioEngine` é dono do `AudioDeviceManager` (`initialiseWithDefaultDevices(0, 2)`), `AudioPluginFormatManager` (VST3), `AudioProcessorGraph`, `AudioProcessorPlayer`.
 - API pública (message thread): `addTrack/removeTrack`, `publishNotes`, `setMixer`, `previewNote`, `activeMask`, `peak`, `addDevice(trackId, desc, cb(error, deviceId))`, `removeDevice`, `devices(trackId)`, `createDeviceEditor`.
 - Regras de cadeia: instrumento novo **substitui** o anterior; efeito vai **ao fim**.
 - Peak do mixer: máximo do bloco com decaimento suave (`*0.92`).
@@ -325,8 +326,8 @@ TrackSource(MIDI) ──midi──► [instrumento] ──audio──► [efeito
 
 ### 6.6 `app/` — Demais
 
-- `PluginScanner`: thread própria; `PluginDirectoryScanner` com `getDefaultLocationsToSearch()` do VST3; arquivo *dead-man's pedal* `scan-crash-guard.txt` bloqueia automaticamente plugins que travam o scan; lista salva em `%APPDATA%\ProjectFreedom\plugins.xml` (`userApplicationDataDirectory/ProjectFreedom`).
-- `BrowserPanel`: `ListBoxModel`; filtros; marca roxa nos efeitos; Enter/duplo clique carrega.
+- `PluginScanner`: thread própria; `PluginDirectoryScanner` com locais padrão e pastas VST3 customizadas; arquivo *dead-man's pedal* `scan-crash-guard.txt` bloqueia automaticamente plugins que travam o scan; lista e pastas customizadas salvas em `%APPDATA%\ProjectFreedom` (`userApplicationDataDirectory/ProjectFreedom`).
+- `BrowserPanel`: plugins VST3 agrupados por pasta; menu `Pastas` para adicionar/remover locais customizados; filtros; marca roxa nos efeitos; Enter/duplo clique carrega.
 - `DeviceView`: caixas de dispositivos com Abrir/remover.
 - `TransportBar`: `IconButton` desenhado à mão (sem fontes/emoji); posição em "compasso . beat . 16avo".
 - `MainComponent`: monta tudo; atalhos globais; divisor arrastável entre arranjo e detalhe; abas Clip/Dispositivos; mapeia posição global ↔ local do clip.
@@ -637,7 +638,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 
 ### Backlog (sem prioridade definida)
 
-Clips de áudio/samples; automação de parâmetros e de volume; efeitos MIDI (arpejador, acorde, escala); ferramentas de acorde/progressão; CLAP; VST2; macOS; tradução da UI (en/pt); temas claro/escuro configuráveis; tabela de atalhos configurável; Link/sincronização.
+Clips de áudio/samples; automação de parâmetros e de volume; efeitos MIDI (arpejador, acorde, escala); ferramentas de acorde/progressão; CLAP; macOS; tradução da UI (en/pt); temas claro/escuro configuráveis; tabela de atalhos configurável; Link/sincronização.
 
 ---
 

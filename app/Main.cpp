@@ -11,6 +11,7 @@
 
 #if defined(_WIN32)
  #include <windows.h>
+ #include <shlobj_core.h>
 #endif
 
 namespace
@@ -36,6 +37,24 @@ std::vector<roll::Rect> getDisplayUserAreas()
 
     return areas;
 }
+
+#if defined(_WIN32)
+bool registerProjectFileAssociation (const juce::String& extension,
+                                     const juce::String& programId,
+                                     const juce::String& description,
+                                     const juce::File& executable)
+{
+    const bool registered = juce::WindowsRegistry::registerFileAssociation (
+        extension, programId, description, executable, 0, true);
+    if (! registered)
+        return false;
+
+    const auto command = "\"" + executable.getFullPathName() + "\" \"%1\"";
+    return juce::WindowsRegistry::setValue (
+        "HKEY_CURRENT_USER\\Software\\Classes\\" + programId + "\\shell\\open\\command",
+        command);
+}
+#endif
 }
 
 class FreedomApplication : public juce::JUCEApplication
@@ -46,6 +65,18 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+#if defined(_WIN32)
+        const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
+        const bool pfsRegistered = registerProjectFileAssociation (
+            ".pfs", "ProjectFreedomProject", "Project Freedom Session", executable);
+        const bool legacyRegistered = registerProjectFileAssociation (
+            ".freedom", "ProjectFreedomLegacyProject", "Project Freedom Legacy Session", executable);
+        if (! pfsRegistered || ! legacyRegistered)
+            juce::Logger::writeToLog ("ProjectFreedom: nao foi possivel registrar as associacoes de projeto.");
+        else
+            SHChangeNotify (SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
+#endif
+
         if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
         {
             laf->setColourScheme (juce::LookAndFeel_V4::getMidnightColourScheme());
@@ -72,7 +103,13 @@ public:
         openProjectArgument (commandLine);
     }
     void shutdown() override                       { window.reset(); }
-    void systemRequestedQuit() override            { quit(); }
+    void systemRequestedQuit() override
+    {
+        if (window != nullptr)
+            window->requestClose();
+        else
+            quit();
+    }
     void anotherInstanceStarted (const juce::String& commandLine) override
     {
         openProjectArgument (commandLine);
@@ -136,7 +173,23 @@ private:
         void closeButtonPressed() override
         {
             saveWindowState();
-            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            requestClose();
+        }
+
+        void requestClose()
+        {
+            juce::Component::SafePointer<MainWindow> safeThis (this);
+            if (mainComponent == nullptr)
+            {
+                juce::JUCEApplication::getInstance()->quit();
+                return;
+            }
+
+            mainComponent->requestClose ([safeThis]
+            {
+                if (safeThis != nullptr)
+                    juce::JUCEApplication::getInstance()->quit();
+            });
         }
 
         void activeWindowStatusChanged() override

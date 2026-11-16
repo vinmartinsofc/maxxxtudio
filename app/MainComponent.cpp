@@ -1708,6 +1708,18 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
         chooseProjectFile (true);
         return true;
     }
+    if (ctrl && keyCode == 'D' && ! isTextEditorFocused()
+        && ! arrangement.hasKeyboardFocus (true) && ! editor.hasKeyboardFocus (true)
+        && project.selectedTrackId > 0 && project.selectedClipId < 0
+        && project.selectedAudioClipId < 0)
+    {
+        double selectionStart = 0.0;
+        if (! arrangement.getTimeSelectionStart (selectionStart))
+        {
+            duplicateSelectedTrack (project.selectedTrackId);
+            return true;
+        }
+    }
     if (ctrl && keyCode == 'Z' && ! k.getModifiers().isShiftDown())
         return project.undo();
     if (ctrl && (keyCode == 'Y' || (keyCode == 'Z' && k.getModifiers().isShiftDown())))
@@ -1806,10 +1818,6 @@ void MainComponent::showProjectMenu()
     menu.addItem (1, "Abrir projeto...");
     menu.addItem (2, "Salvar", currentProjectFile.existsAsFile());
     menu.addItem (3, "Salvar como...");
-#if JUCE_WINDOWS
-    menu.addSeparator();
-    menu.addItem (4, "Associar arquivos .pfs ao Project Freedom");
-#endif
     menu.addSeparator();
     menu.addItem (5, "Exportar Master como WAV...", ! audioRenderInProgress);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transport),
@@ -1819,20 +1827,6 @@ void MainComponent::showProjectMenu()
             else if (result == 2) saveProject (currentProjectFile);
             else if (result == 3) chooseProjectFile (false);
             else if (result == 5) chooseWavExportFile();
-            else if (result == 4)
-            {
-                const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
-                const bool registered = juce::WindowsRegistry::registerFileAssociation (
-                    ".pfs", "ProjectFreedomProject", "Project Freedom Session",
-                    executable, 0, true);
-                const auto command = "\"" + executable.getFullPathName() + "\" \"%1\"";
-                const bool quotedCommandSet = registered && juce::WindowsRegistry::setValue (
-                    "HKEY_CURRENT_USER\\Software\\Classes\\ProjectFreedomProject\\shell\\open\\command",
-                    command);
-                setProjectStatus (quotedCommandSet
-                    ? "Arquivos .pfs associados ao Project Freedom."
-                    : "Nao foi possivel associar arquivos .pfs.");
-            }
         });
 }
 
@@ -2006,7 +2000,46 @@ void MainComponent::openProjectFromFile (const juce::File& file)
         loadProject (file);
 }
 
-void MainComponent::chooseProjectFile (bool open)
+void MainComponent::requestClose (std::function<void()> onCloseApproved)
+{
+    const juce::Component::SafePointer<MainComponent> safeThis (this);
+    juce::AlertWindow::showAsync (
+        juce::MessageBoxOptions()
+            .withIconType (juce::MessageBoxIconType::QuestionIcon)
+            .withTitle ("Salvar projeto?")
+            .withMessage ("Deseja salvar o projeto antes de fechar?")
+            .withButton ("Salvar")
+            .withButton ("Nao salvar")
+            .withButton ("Cancelar")
+            .withAssociatedComponent (this),
+        [safeThis, onCloseApproved = std::move (onCloseApproved)] (int result) mutable
+        {
+            if (safeThis == nullptr)
+                return;
+
+            if (result == 2)
+            {
+                if (onCloseApproved)
+                    onCloseApproved();
+                return;
+            }
+
+            if (result != 1)
+                return;
+
+            const auto saved = [onCloseApproved] (bool success)
+            {
+                if (success && onCloseApproved)
+                    onCloseApproved();
+            };
+            if (safeThis->currentProjectFile.existsAsFile())
+                safeThis->saveProject (safeThis->currentProjectFile, saved);
+            else
+                safeThis->chooseProjectFile (false, saved);
+        });
+}
+
+void MainComponent::chooseProjectFile (bool open, std::function<void (bool)> onSaveComplete)
 {
     const auto start = currentProjectFile.existsAsFile()
         ? currentProjectFile : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
@@ -2016,7 +2049,9 @@ void MainComponent::chooseProjectFile (bool open)
     const auto chooserFlags = open ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                                    : juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles;
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
-    projectFileChooser->launchAsync (chooserFlags, [this, open, token] (const juce::FileChooser& chooser)
+    projectFileChooser->launchAsync (chooserFlags, [this, open, token,
+                                                     onSaveComplete = std::move (onSaveComplete)]
+                                                   (const juce::FileChooser& chooser) mutable
     {
         const auto alive = token.lock();
         if (alive == nullptr || ! alive->load()) return;
@@ -2025,20 +2060,26 @@ void MainComponent::chooseProjectFile (bool open)
         if (! result.exists() && open)
             return;
         if (result == juce::File())
+        {
+            if (onSaveComplete)
+                onSaveComplete (false);
             return;
+        }
         if (open)
             loadProject (result);
         else
-            saveProject (result);
+            saveProject (result, std::move (onSaveComplete));
     });
 }
 
-void MainComponent::saveProject (const juce::File& requestedFile)
+void MainComponent::saveProject (const juce::File& requestedFile, std::function<void (bool)> onComplete)
 {
     if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
         || pendingAudioLoads > 0 || projectFileOperationInProgress || audioRenderInProgress)
     {
         setProjectStatus ("Aguarde o fim dos carregamentos antes de salvar.");
+        if (onComplete)
+            onComplete (false);
         return;
     }
 
@@ -2051,7 +2092,8 @@ void MainComponent::saveProject (const juce::File& requestedFile)
         taskRegistry, theme::ui ("Salvando projeto: ") + file.getFileName(), "global");
     auto snapshot = std::make_shared<ProjectFileData>();
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
-    if (! juce::MessageManager::callAsync ([this, token, file, task, snapshot]
+    if (! juce::MessageManager::callAsync ([this, token, file, task, snapshot,
+                                            onComplete = std::move (onComplete)] () mutable
     {
         const auto alive = token.lock();
         if (alive == nullptr || ! alive->load())
@@ -2065,14 +2107,16 @@ void MainComponent::saveProject (const juce::File& requestedFile)
         snapshot->metronomeEnabled = engine.graph().isMetronomeEnabled();
         snapshot->metronomeGain = engine.graph().getMetronomeGain();
 
-        projectFilePool.addJob ([this, token, file, task, snapshot]
+        projectFilePool.addJob ([this, token, file, task, snapshot,
+                                 onComplete = std::move (onComplete)] () mutable
         {
             const auto result = ProjectFile::save (file, *snapshot, [task] (double progress)
             {
                 task->setProgress (progress);
             });
 
-            if (! juce::MessageManager::callAsync ([this, token, file, task, result]
+            if (! juce::MessageManager::callAsync ([this, token, file, task, result,
+                                                    onComplete = std::move (onComplete)] () mutable
             {
                 task->end();
                 const auto alive = token.lock();
@@ -2083,11 +2127,15 @@ void MainComponent::saveProject (const juce::File& requestedFile)
                 if (result.failed())
                 {
                     setProjectStatus ("Falha ao salvar projeto: " + result.getErrorMessage());
+                    if (onComplete)
+                        onComplete (false);
                     return;
                 }
 
                 currentProjectFile = file;
                 setProjectStatus ("Projeto salvo: " + file.getFileName());
+                if (onComplete)
+                    onComplete (true);
             }))
             {
                 juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado do salvamento.");
@@ -2099,6 +2147,8 @@ void MainComponent::saveProject (const juce::File& requestedFile)
         projectFileOperationInProgress = false;
         juce::Logger::writeToLog ("MainComponent: nao foi possivel iniciar o salvamento do projeto.");
         setProjectStatus ("Falha ao iniciar o salvamento do projeto.");
+        if (onComplete)
+            onComplete (false);
     }
 }
 

@@ -32,6 +32,7 @@ target_sources(ProjectFreedom PRIVATE
 target_compile_definitions(ProjectFreedom PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
+    JUCE_PLUGINHOST_VST=0
     JUCE_PLUGINHOST_VST3=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:ProjectFreedom,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:ProjectFreedom,JUCE_VERSION>")
@@ -48,6 +49,10 @@ target_link_libraries(ProjectFreedom
     PRIVATE
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+if(WIN32)
+    target_link_libraries(ProjectFreedom PRIVATE shell32)
+endif()
 
 if(ROLL_BUILD_TESTS)
     add_executable(piano_roll_tests
@@ -114,6 +119,7 @@ if(ROLL_BUILD_TESTS)
         JUCE_MODAL_LOOPS_PERMITTED=1
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
+        JUCE_PLUGINHOST_VST=0
         JUCE_PLUGINHOST_VST3=1)
     target_link_libraries(audio_engine_tests
         PRIVATE

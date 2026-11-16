@@ -28,5 +28,6 @@ if(ROLL_BUILD_APP)
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
         GIT_TAG 8.0.15)
     FetchContent_MakeAvailable(JUCE)
+
     add_subdirectory(app)
 endif()

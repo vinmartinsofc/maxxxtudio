@@ -66,6 +66,8 @@ cmake --build build --config Release
 ```
 Executável: `build\app\ProjectFreedom_artefacts\Release\Project Freedom.exe`
 
+No navegador, **Pastas** permite adicionar ou remover diretórios de busca VST3. Os caminhos ficam salvos nas configurações do usuário.
+
 **Linux (Ubuntu/Debian):**
 ```
 sudo apt install build-essential cmake ninja-build pkg-config libasound2-dev libfreetype-dev \

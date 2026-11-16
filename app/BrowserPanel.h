@@ -33,12 +33,16 @@ private:
     void load (const juce::PluginDescription&);
     void saveTreeState();
     juce::File treeStateFile() const;
+    void showSearchPathsMenu();
+    void chooseSearchPath (const juce::String& formatName);
 
     PluginScanner& scanner;
     juce::Label title { {}, "Plugins" };
     juce::TextEditor search;
     std::unique_ptr<PluginTree> tree;
+    std::unique_ptr<juce::FileChooser> pathChooser;
     juce::TextButton rescanButton { "Rescan" };
+    juce::TextButton foldersButton { "Pastas" };
     juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" }, effectsButton { "Efeitos" };
     enum class Filter { All, Instruments, Effects } filter = Filter::All;
     void setFilter (Filter f);

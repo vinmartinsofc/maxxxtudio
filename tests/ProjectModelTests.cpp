@@ -75,6 +75,30 @@ TEST_CASE ("ProjectModel toggles multi-track selection without losing the primar
     REQUIRE (project.selectedTrackIds.size() == 1);
 }
 
+TEST_CASE ("ProjectModel reorders audio and MIDI tracks and supports undo")
+{
+    ProjectModel project;
+    const int firstMidi = project.addTrack (roll::TrackType::Midi)->id;
+    const int audio = project.addTrack (roll::TrackType::Audio)->id;
+    const int lastMidi = project.addTrack (roll::TrackType::Midi)->id;
+
+    REQUIRE (project.moveTrack (audio, 0));
+    REQUIRE (project.tracks[0]->id == audio);
+    REQUIRE (project.tracks[1]->id == firstMidi);
+    REQUIRE (project.tracks[2]->id == lastMidi);
+
+    REQUIRE (project.undo());
+    REQUIRE (project.tracks[0]->id == firstMidi);
+    REQUIRE (project.tracks[1]->id == audio);
+    REQUIRE (project.tracks[2]->id == lastMidi);
+
+    REQUIRE (project.redo());
+    REQUIRE (project.tracks[0]->id == audio);
+    REQUIRE (project.tracks[1]->id == firstMidi);
+    REQUIRE (project.tracks[2]->id == lastMidi);
+    REQUIRE_FALSE (project.moveTrack (audio, 0));
+}
+
 TEST_CASE ("Solo toggles selected tracks together or adds one track with Control")
 {
     ProjectModel project;
@@ -159,6 +183,8 @@ TEST_CASE ("ProjectModel duplicates a track's mix and clips within its group")
     audio->volume = 0.7;
     audio->pan = -0.25;
     audio->mute = true;
+    audio->solo = true;
+    audio->outputRouting = roll::TrackOutputRouting::ExtOut;
     const int audioId = audio->id;
     const int groupId = project.groupTracks ({ midiId, audioId });
 
@@ -173,12 +199,35 @@ TEST_CASE ("ProjectModel duplicates a track's mix and clips within its group")
     REQUIRE (duplicate->volume == 0.7);
     REQUIRE (duplicate->pan == -0.25);
     REQUIRE (duplicate->mute);
+    REQUIRE (duplicate->solo);
+    REQUIRE (duplicate->outputRouting == roll::TrackOutputRouting::ExtOut);
     REQUIRE (duplicate->audioClips.size() == 1);
     REQUIRE (duplicate->audioClips.front()->filePath == "C:/audio/kick.wav");
     REQUIRE (duplicate->audioClips.front()->waveform.size() == 1);
     REQUIRE (project.selectedTrackId == duplicateId);
     REQUIRE (project.undo());
     REQUIRE (project.track (duplicateId) == nullptr);
+}
+
+TEST_CASE ("ProjectModel duplicates a MIDI track's clips and note data")
+{
+    ProjectModel project;
+    auto* original = project.addTrack (roll::TrackType::Midi);
+    auto* clip = project.addClip (original->id, 4.0, 8.0);
+    REQUIRE (clip != nullptr);
+    clip->clip.addNote ({ 67, 1.0, 2.0, 96 });
+    const int originalId = original->id;
+
+    const int duplicateId = project.duplicateTrack (originalId);
+
+    REQUIRE (duplicateId > 0);
+    const auto* duplicate = project.track (duplicateId);
+    REQUIRE (duplicate != nullptr);
+    REQUIRE (duplicate->type == roll::TrackType::Midi);
+    REQUIRE (duplicate->clips.size() == 1);
+    REQUIRE (duplicate->clips.front()->start == 4.0);
+    REQUIRE (duplicate->clips.front()->clip.notes().size() == 1);
+    REQUIRE (duplicate->clips.front()->clip.notes().front().pitch == 67);
 }
 
 TEST_CASE ("ProjectModel does not duplicate a group bus by itself")

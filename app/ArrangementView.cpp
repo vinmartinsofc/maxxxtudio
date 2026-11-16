@@ -368,6 +368,13 @@ public:
             g.drawText (message, hint.reduced (7, 0), juce::Justification::centredLeft, true);
         }
 
+        if (owner.trackReorderSourceId >= 0 && owner.trackReorderDropIndex >= 0)
+        {
+            const int y = owner.trackReorderDropIndex * trackHeight;
+            g.setColour (theme::accent());
+            g.fillRect (0, y - 2, getWidth(), 4);
+        }
+
         drawActionHint (g);
     }
 
@@ -2716,6 +2723,7 @@ public:
         name.setEditable (false, true, false);
         name.setColour (juce::Label::textColourId, theme::text());
         name.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+        name.setTooltip (theme::ui ("Arraste o nome para reordenar a trilha; duplo clique para renomear."));
         name.addMouseListener (this, false);
         name.onTextChange = [this]
         {
@@ -2882,6 +2890,20 @@ public:
         g.fillRect (static_cast<float> (getWidth() - 12), 6.0f, 6.0f, h);
         g.setColour (level > 0.9f ? theme::warning() : theme::accent());
         g.fillRect (static_cast<float> (getWidth() - 12), 6.0f + h * (1.0f - level), 6.0f, h * level);
+
+        if (owner.trackReorderSourceId >= 0 && owner.trackReorderDropIndex >= 0)
+        {
+            const int index = project.trackIndex (trackId);
+            if (owner.trackReorderDropIndex == index)
+                g.fillAll (theme::accent().withAlpha (0.08f));
+            if (owner.trackReorderDropIndex == index
+                || owner.trackReorderDropIndex == index + 1)
+            {
+                g.setColour (theme::accent());
+                g.fillRect (0, owner.trackReorderDropIndex == index ? 0 : getHeight() - 3,
+                            getWidth(), 3);
+            }
+        }
     }
 
     void resized() override
@@ -2915,6 +2937,9 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        reorderPending = e.originalComponent == &name && ! e.mods.isPopupMenu();
+        reorderDragging = false;
+
         if (e.originalComponent == &name)
         {
             owner.lanes->clearSelection();
@@ -2950,6 +2975,44 @@ public:
         owner.lanes->clearSelection();
         project.selectTrack (trackId, toggleSelection);
         owner.grabFocus();
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! reorderPending || e.originalComponent != &name)
+            return;
+        if (! reorderDragging && e.getDistanceFromDragStart() < 5.0f)
+            return;
+
+        reorderDragging = true;
+        owner.trackReorderSourceId = trackId;
+        updateReorderDropIndex (e);
+    }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! reorderPending || e.originalComponent != &name)
+            return;
+
+        reorderPending = false;
+        if (! reorderDragging)
+            return;
+
+        updateReorderDropIndex (e);
+        const int sourceIndex = project.trackIndex (trackId);
+        int targetIndex = owner.trackReorderDropIndex;
+        owner.trackReorderSourceId = -1;
+        owner.trackReorderDropIndex = -1;
+        owner.headerHolder.repaint();
+        owner.lanes->repaint();
+        reorderDragging = false;
+
+        if (sourceIndex < 0 || targetIndex < 0)
+            return;
+        if (targetIndex > sourceIndex)
+            --targetIndex;
+        project.moveTrack (trackId, std::clamp (targetIndex, 0,
+                                                static_cast<int> (project.tracks.size()) - 1));
     }
 
     void showTrackMenu()
@@ -2991,9 +3054,20 @@ public:
     }
 
 private:
+    void updateReorderDropIndex (const juce::MouseEvent& e)
+    {
+        const auto position = e.getEventRelativeTo (&owner.headerHolder).position;
+        const auto contentY = position.y + static_cast<float> (owner.viewport.getViewPositionY());
+        owner.trackReorderDropIndex = std::clamp (
+            juce::roundToInt (contentY / trackHeight), 0, static_cast<int> (project.tracks.size()));
+        owner.headerHolder.repaint();
+        owner.lanes->repaint();
+    }
+
     ProjectModel& project;
     ArrangementView& owner;
     int trackId;
+    bool reorderPending = false, reorderDragging = false;
     juce::Rectangle<int> volumeIconBounds;
     juce::Label name, volumeDb, panLabel, panValue;
     juce::TextButton mute { "ON" }, solo { "S" };
@@ -3665,7 +3739,11 @@ void ArrangementView::navigateLocator (bool forward)
 
 void ArrangementView::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    if (headers.size() != project.tracks.size()) { refresh(); }
+    bool orderChanged = headers.size() != project.tracks.size();
+    for (size_t i = 0; ! orderChanged && i < headers.size(); ++i)
+        orderChanged = headers[i]->id() != project.tracks[i]->id;
+
+    if (orderChanged) { refresh(); }
     else
     {
         updateSizes();

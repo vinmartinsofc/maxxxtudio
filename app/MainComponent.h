@@ -32,6 +32,7 @@ public:
     void setMainWindow (juce::TopLevelWindow*);
     void updatePluginWindowZOrder();
     void openProjectFromFile (const juce::File&);
+    void requestClose (std::function<void()> onCloseApproved);
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
@@ -63,12 +64,12 @@ private:
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
     void showProjectMenu();
-    void chooseProjectFile (bool open);
+    void chooseProjectFile (bool open, std::function<void (bool)> onSaveComplete = {});
     void chooseWavExportFile();
     void showWavRenderOptions (const juce::File&);
     void startWavRender (const juce::File&, double tailSeconds);
     void setAudioRenderUiEnabled (bool);
-    void saveProject (const juce::File&);
+    void saveProject (const juce::File&, std::function<void (bool)> onComplete = {});
     void loadProject (const juce::File&);
     void applyLoadedProject (const juce::File&, ProjectFileData, const std::shared_ptr<TaskScope>&);
     void advanceProjectLoadTask();

@@ -86,4 +86,6 @@ private:
     juce::TextButton locatorPreviousButton { "<" }, locatorSetButton { "+" }, locatorNextButton { ">" },
                      locatorDeleteButton { "Del" };
     juce::ComboBox gridBox;
+    int trackReorderSourceId = -1;
+    int trackReorderDropIndex = -1;
 };
