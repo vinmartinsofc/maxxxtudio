@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.47 (Recuperação automática de sessões após falha)
+- **Versão do documento:** 1.50 (histórico do Drum Rack, transporte em foco e autoplay de grooves)
 - **⚠️ Ordem de trabalho vigente:** fila de pendências do usuário no §4.3. O documento `PLANO_DE_ACAO_FASE_4.md`, citado em versões antigas, não está presente no repositório. O §4.3 prevalece sobre o roadmap legado do §14.
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -180,6 +180,8 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Plugins | Host e scan VST3 | ✅ |
 | Plugins | Pastas de busca customizadas VST3, persistidas e editáveis pelo navegador | 🟡 |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
+| Sampler | Drum Rack com 15 pads mapeados às teclas A/W/S/E/D/F/T/G/Y/H/U/J/K/O/L; arrastar samples do navegador/favoritos e arrastar o card nativo para um canal MIDI; feedback visual dos pads, Delete limpa somente o selecionado, undo/redo e confirmação para limpar o rack; Espaço controla play/pause/resume do Arrangement mesmo com a janela do rack ativa | 🟡 (build/testes; faltam slicing, envelopes ADSR, cadeias de dispositivos por pad e QA manual) |
+| Áudio | Editor de clip com BPM de origem e Warp ligado/desligado; o playback atual equivale a Re-Pitch e não preserva formantes | 🟡 (controles e integração presentes; pitch independente e modos Beats/Tones/Texture/Complex/Complex Pro pendentes) |
 | Áudio | Mixer por trilha: volume, pan, mute, medidor; Solo exclusivo, por seleção múltipla e Ctrl+clique aditivo | 🟡 (build/testes; falta validação manual na UI) |
 | Áudio | Grupos planos como barramentos reais: faixas-filhas → mixer/efeitos do grupo → Master ou Ext. Out; Solo respeita grupo e filhos | 🟡 (build/testes; falta validação manual com plugins) |
 | Automação | Modo `A`, escolha de volume/pan/mute ou parâmetro VST3 por slot, edição de breakpoints no Arrangement, atualização dos controles de mixer durante playback e persistência `.pfs` | Implementado; falta QA manual com plugins reais |
@@ -235,6 +237,7 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | Seleção de clip inteiro versus foco/seleção de tempo | Clique na faixa superior seleciona o clip inteiro; clique no conteúdo posiciona o playhead naquele ponto; arrastar no conteúdo seleciona um intervalo que pode atravessar vários clips/faixas, incluindo fragmentos de áudio. O indicador diferencia clip inteiro, região e playhead; Play inicia conforme esse estado. |
 | Menu de preferências | Botão Opções na barra superior, menu Projeto ou `Ctrl+,`; abas Áudio, Plugins VST3 e Record/Warp/Launch; permite configurar dispositivo/buffer/canais, adicionar/remover pastas VST3, reescanear plugins e habilitar fades de borda de 4 ms em novos áudios importados. |
 | Recuperação de sessão | Autosave a cada 2 minutos em `%APPDATA%\ProjectFreedom\autosave`; mantém duas cópias completas, pergunta na inicialização e remove os snapshots ao salvar ou fechar normalmente. |
+| Groove MIDI | **Concluído**: suporte a importação de `.agr`, carregamento de grooves da biblioteca do Ableton, pré-escuta, aplicação ao clip MIDI selecionado e persistência no projeto. Verificados em `GrooveLibraryTests` e pela integração em `MainComponent`/`core/Groove.h`. |
 
 **Pendências — ordem original do usuário, com duplicatas agrupadas**
 
@@ -251,11 +254,12 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | 9 | Cores customizáveis para trilhas MIDI/áudio | Pendente; hoje as cores são geradas automaticamente e não podem ser escolhidas. |
 | 10 | Iniciar reprodução/escuta de trechos específicos pelo Piano Roll | Pendente; clicar na régua reposiciona o playhead, mas não inicia reprodução local. |
 | 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | `A` exibe os parâmetros automatizáveis e seus valores atuais; todas as curvas salvas ficam visíveis, com o parâmetro ativo destacado. Os controles de volume, pan e mute do mixer acompanham os valores automatizados; o AudioEngine aplica parâmetros VST3 durante a reprodução, restaura o valor manual ao parar e protege bindings ao remover/reordenar plugins. Persistido no `.pfs`; falta QA manual com plugins reais. |
-| 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp existem; controle independente de pitch ainda está pendente. |
-| 13 | Groove MIDI (8th/16th e ritmos não quantizados) | **IMPORTANTE — pendente.** |
+| 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp on/off existem; playback é atualmente Re-Pitch, sem modos de time-stretch nem transpose independente. |
+| 13 | Groove MIDI (8th/16th e ritmos não quantizados) | **Concluído** no código atual: `GrooveLibrary`/`GrooveBrowser` importam `.agr`, reproduzem automaticamente por padrão ao navegar e aplicam grooves sem alterar as notas originais; qualquer revisão futura deve validar o comportamento manual real em UI. |
+| Nova | Ferramentas de sampler e efeitos nativos | Drum Rack limitado às 15 notas do teclado do computador. Utility e Auto Pan nativos ainda pendentes. |
 | Futuro | Gravação de áudio em tempo real e importação/exportação MIDI | Pendente; exportação MIDI também aparece no §14. |
 
-**Próxima tarefa sugerida:** validar visualmente o clique, movimento e cópia de seleções múltiplas, além das mudanças recentes de exclusão/agrupamento; depois investigar os casos difíceis de encaixe e posicionamento (ordem 1).
+**Próxima tarefa sugerida:** criar as ferramentas nativas Utility e Auto Pan, incluindo controles de fase e modulação de pan.
 
 ---
 
@@ -741,6 +745,9 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.50** | Drum Rack arrastável para canais MIDI, com undo/redo, limpeza individual por Delete, confirmação de limpeza total, feedback visual e transporte com Espaço ao focar o plugin; autoplay padrão no navegador de grooves |
+| **Doc 1.49** | Drum Rack restrito às 15 notas do teclado, pads com as teclas correspondentes e cards nativos com banner |
+| **Doc 1.48** | Drum Rack com 128 notas MIDI em bancos de 16, seleção/edição de pad, One-Shot e Classic com loop sustentado, e migração de estado legado |
 | **Doc 1.47** | Autosave de sessão completa a cada 2 minutos, duas gerações em AppData, recuperação oferecida na inicialização e remoção após saída normal |
 | **Doc 1.46** | Fade de segurança curto (4 ms) no início dos clips de áudio; controles de mixer acompanham em tempo real os valores automatizados de volume, pan e mute |
 | **Doc 1.45** | Monitor ao vivo de automação e curvas simultâneas; atualização segura de parâmetros VST3 e restauração de valores ao parar; roteamento de áudio tolerante a plugins sem canais de áudio |

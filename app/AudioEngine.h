@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-// Dados do bloco atual, escritos pelo grafo e lidos pelas trilhas (mesmo thread de áudio).
+// Dados do bloco atual, escritos pelo grafo e lidos pelas trilhas (mesmo thread de audio).
 struct BlockShared
 {
     roll::BlockPlan plan;
@@ -19,7 +19,7 @@ struct BlockShared
     bool flush = false;       // soltar todas as notas neste bloco (pausa, stop, seek)
 };
 
-// Fonte MIDI de UMA trilha: toca as notas dela e mistura o MIDI de pré-escuta.
+// Fonte MIDI de UMA trilha: toca as notas dela e mistura o MIDI de pre-escuta.
 class TrackSource : public juce::AudioProcessor
 {
 public:
@@ -61,7 +61,7 @@ private:
     std::atomic<std::uint64_t> maskLo { 0 }, maskHi { 0 };
 };
 
-// Volume / pan / mute da trilha (estéreo).
+// Volume / pan / mute da trilha (estereo).
 class TrackMixer : public juce::AudioProcessor
 {
 public:
@@ -104,7 +104,7 @@ private:
     float currentGain = 1.0f;
 };
 
-// Grafo principal: dono do relógio do transporte.
+// Grafo principal: dono do relogio do transporte.
 class SequencerGraph : public juce::AudioProcessorGraph
 {
 public:
@@ -127,7 +127,7 @@ public:
     double audioCpuAverage() const { return audioCpuAverageValue.load (std::memory_order_relaxed); }
     const BlockShared& sharedBlock() const { return shared; }
 
-    // ---- áudio thread ----
+    // ---- audio thread ----
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using juce::AudioProcessorGraph::processBlock;
 
@@ -266,6 +266,7 @@ class AudioEngine : private juce::ChangeListener
 {
 public:
     static constexpr int masterTrackId = 0;
+    static constexpr const char* drumRackPluginIdentifier = "ProjectFreedom.DrumRack";
 
     AudioEngine();
     ~AudioEngine();
@@ -297,6 +298,11 @@ public:
     void addDevice (int trackId, const juce::PluginDescription&,
                     std::function<void (const juce::String& error, int deviceId)> onDone,
                     int insertionIndex = -1);
+    int addDrumRack (int trackId);
+    void addPadEffect (int trackId, int rackDeviceId, int pad,
+                       const juce::PluginDescription&, std::function<void (const juce::String&)> onDone);
+    std::unique_ptr<juce::AudioProcessorEditor> createPadEffectEditor (int trackId, int rackDeviceId,
+                                                                       int pad, int effectIndex);
     void loadAudioFileAsync (const juce::File&, std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)>);
     void previewAudio (std::shared_ptr<const AudioFileData> source);
     void stopAudioPreview();

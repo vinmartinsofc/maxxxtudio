@@ -92,6 +92,18 @@ void RollModel::selectAll()
     sendChangeMessage();
 }
 
+void RollModel::selectNotesAtPitch (int pitch, bool additive)
+{
+    if (! additive)
+        selection.clear();
+
+    for (const auto& note : clip().notes())
+        if (note.pitch == pitch)
+            selection.insert (note.id);
+
+    sendChangeMessage();
+}
+
 void RollModel::deleteSelected()
 {
     if (selection.empty()) return;

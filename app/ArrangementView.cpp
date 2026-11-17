@@ -226,6 +226,19 @@ public:
         return true;
     }
 
+    bool hasSelectionToDuplicate() const
+    {
+        return hasRangeSelection
+            || (! selectedClips.empty()
+                && (project.selectedClipId >= 0 || project.selectedAudioClipId >= 0));
+    }
+
+    void duplicateSelection()
+    {
+        if (hasSelectionToDuplicate())
+            duplicateSelectedClips();
+    }
+
     void paint (juce::Graphics& g) override
     {
         const auto cb = g.getClipBounds();
@@ -262,7 +275,7 @@ public:
             g.drawHorizontalLine (y + height - 1, static_cast<float> (cb.getX()), static_cast<float> (cb.getRight()));
         }
 
-        // região de loop
+        // regiao de loop
         const float lx0 = static_cast<float> (project.loopStart * ppb), lx1 = static_cast<float> (project.loopEnd * ppb);
         g.setColour (theme::accent().withAlpha (owner.loopEnabled ? 0.07f : 0.03f));
         g.fillRect (lx0, 0.0f, lx1 - lx0, static_cast<float> (getHeight()));
@@ -2945,7 +2958,9 @@ private:
 
         juce::String message;
         if (mode == Mode::Resize)
-            message = "Tamanho: " + juce::String (clipLength / 4.0, 1) + " compassos";
+            message = "Clipe: " + juce::String (clipLength / 4.0, 1)
+                    + " compassos; loop: "
+                    + juce::String ((project.loopEnd - project.loopStart) / 4.0, 1);
         else if (mode == Mode::FadeIn || mode == Mode::FadeOut)
         {
             const auto* clip = track->findAudioClip (curAudioClipId);
@@ -2973,10 +2988,11 @@ private:
         else
             message = "Movendo: compasso " + juce::String (static_cast<int> (std::floor (clipStart / 4.0)) + 1);
         const int targetRow = movePreviewActive ? movePreviewTrackIndex : project.trackIndex (curTrack);
+        const int hintWidth = mode == Mode::Resize ? 310 : 230;
         const int x = std::clamp (static_cast<int> ((clipStart + clipLength) * owner.pixelsPerBeat) + 8,
-                                  4, std::max (4, getWidth() - 234));
+                                  4, std::max (4, getWidth() - hintWidth - 4));
         const int y = owner.rowTop (targetRow) + 8;
-        const auto hint = juce::Rectangle<int> (x, y, 230, 24);
+        const auto hint = juce::Rectangle<int> (x, y, hintWidth, 24);
         g.setColour (theme::panel().withAlpha (0.96f));
         g.fillRoundedRectangle (hint.toFloat(), 5.0f);
         g.setColour (theme::accent());
@@ -3015,14 +3031,14 @@ private:
     juce::Point<float> selectionDownPosition;
 };
 
-// ============================================================ Ruler (régua + brace de loop)
+// ============================================================ Ruler (regua + brace de loop)
 
 class ArrangementView::Ruler : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     Ruler (ProjectModel& p, ArrangementView& o) : project (p), owner (o)
     {
-        setTooltip ("Na régua: arraste verticalmente para ajustar o zoom e horizontalmente para navegar.");
+        setTooltip ("Na regua: arraste verticalmente para ajustar o zoom e horizontalmente para navegar.");
     }
 
     void paint (juce::Graphics& g) override
@@ -3126,7 +3142,7 @@ public:
                 g.fillRoundedRectangle (lx1 - 3.0f, 0.0f, 5.0f, 10.0f, 2.0f);
         }
 
-        const int labelStep = ppb < 10.0 ? 16 : ppb < 18.0 ? 8 : 4;          // beats entre rótulos
+        const int labelStep = ppb < 10.0 ? 16 : ppb < 18.0 ? 8 : 4;          // beats entre rotulos
         g.setFont (juce::FontOptions (12.5f));
         const int firstBeat = std::max (0, static_cast<int> (std::floor (cb.getX() / ppb)) - 1);
         const int lastBeat = static_cast<int> (std::ceil (cb.getRight() / ppb));
@@ -3386,9 +3402,36 @@ private:
     {
         if (position.y >= rulerHeight)
             return nullptr;
-        for (auto it = project.locators.rbegin(); it != project.locators.rend(); ++it)
-            if (std::abs (position.x - static_cast<float> (it->beat * owner.pixelsPerBeat)) < 16.0f)
-                return project.locator (it->id);
+        for (std::size_t reverseIndex = project.locators.size(); reverseIndex > 0; --reverseIndex)
+        {
+            const auto index = reverseIndex - 1;
+            const auto& marker = project.locators[index];
+            const float x = static_cast<float> (marker.beat * owner.pixelsPerBeat);
+            if (std::abs (position.x - x) < 5.0f && position.y <= 26.0f)
+                return project.locator (marker.id);
+
+            const bool emphasized = marker.id == project.selectedLocatorId || marker.id == hoveredLocatorId;
+            const bool hasGeneratedName = marker.name.empty() || marker.name == std::to_string (marker.id);
+            const juce::String label = hasGeneratedName ? juce::String (static_cast<int> (index + 1))
+                                                        : juce::String (marker.name);
+            int labelWidth = std::clamp (label.length() * 7 + 12, 24, 76);
+            if (! emphasized && index + 1 < project.locators.size())
+            {
+                const auto gap = static_cast<int> (
+                    (project.locators[index + 1].beat - marker.beat) * owner.pixelsPerBeat) - 18;
+                labelWidth = std::min (labelWidth, gap);
+            }
+            if (labelWidth < 20)
+                continue;
+
+            int labelX = static_cast<int> (x) + 16;
+            if (labelX + labelWidth > getWidth() - 2)
+                labelX = static_cast<int> (x) - labelWidth - 2;
+            labelX = std::clamp (labelX, 2, std::max (2, getWidth() - labelWidth - 2));
+            if (juce::Rectangle<float> (static_cast<float> (labelX), 1.0f,
+                                        static_cast<float> (labelWidth), 14.0f).contains (position))
+                return project.locator (marker.id);
+        }
         return nullptr;
     }
 
@@ -3622,7 +3665,7 @@ private:
     ArrangementView& owner;
 };
 
-// ============================================================ Header (cabeçalho de trilha)
+// ============================================================ Header (cabecalho de trilha)
 
 class ArrangementView::Header : public juce::Component
 {
@@ -3679,7 +3722,7 @@ public:
         mute.setColour (juce::TextButton::buttonOnColourId, theme::accent());
         mute.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
         solo.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
-        mute.setTooltip (theme::ui ("Ativador da trilha: desativa a saída MIDI/áudio"));
+        mute.setTooltip (theme::ui ("Ativador da trilha: desativa a saida MIDI/audio"));
         solo.setTooltip (theme::ui ("Clique para solo exclusivo; Ctrl+clique adiciona/remove solo. "
                                     "Com varias trilhas selecionadas, clique aplica a todas."));
         mute.setToggleState (t->mute, juce::dontSendNotification);
@@ -4262,7 +4305,7 @@ public:
         g.setColour (juce::Colours::black.withAlpha (0.4f));
         g.fillRect (meterX, barY, meterW, barH);
 
-        // Nível em dB (-48 dB até 0 dB)
+        // Nivel em dB (-48 dB ate 0 dB)
         const float db = roll::gainToDecibels (peak);
         const float norm = std::clamp ((db + 48.0f) / 48.0f, 0.0f, 1.0f);
         const int fillH = static_cast<int> (norm * barH);
@@ -4564,18 +4607,9 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     automationModeButton.setTooltip ("Alternar modo de automacao (A)");
     automationTargetButton.setTooltip ("Selecionar parametro para visualizar e editar");
     locatorPreviousButton.onClick = [this] { navigateLocator (false); };
-    locatorSetButton.onClick = [this] { project.addLocator (snapBeat (playhead)); };
+    locatorSetButton.onClick = [this] { addLocatorAtPlayhead(); };
     locatorNextButton.onClick = [this] { navigateLocator (true); };
-    locatorDeleteButton.onClick = [this]
-    {
-        int locatorId = project.locator (project.selectedLocatorId) != nullptr
-            ? project.selectedLocatorId : -1;
-        if (locatorId < 0 && ! project.locators.empty())
-            locatorId = std::max_element (project.locators.begin(), project.locators.end(),
-                [] (const auto& a, const auto& b) { return a.id < b.id; })->id;
-        if (locatorId >= 0)
-            project.removeLocator (locatorId);
-    };
+    locatorDeleteButton.onClick = [this] { deleteSelectedLocator(); };
     automationModeButton.onClick = [this]
     {
         setAutomationMode (automationModeButton.getToggleState());
@@ -4586,7 +4620,7 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     timeReadout.setColour (juce::Label::textColourId, theme::text());
     timeReadout.setFont (juce::FontOptions (11.5f));
     timeReadout.setJustificationType (juce::Justification::centred);
-    timeReadout.setTooltip ("Posição atual no projeto");
+    timeReadout.setTooltip ("Posicao atual no projeto");
     addTrackButton.onClick = [this] { project.addTrack(); };
     addAudioTrackButton.onClick = [this] { project.addTrack (roll::TrackType::Audio); };
     static constexpr double gridValues[] { 1.0, 0.5, 0.25, 0.125, 0.0625,
@@ -5049,6 +5083,17 @@ bool ArrangementView::getTimeSelectionStart (double& startBeat) const
     return lanes->getTimeSelectionStart (startBeat);
 }
 
+bool ArrangementView::hasSelectionToDuplicate() const
+{
+    return lanes != nullptr && lanes->hasSelectionToDuplicate();
+}
+
+void ArrangementView::duplicateSelection()
+{
+    if (lanes != nullptr)
+        lanes->duplicateSelection();
+}
+
 void ArrangementView::refresh()
 {
     for (auto& h : headers) headerHolder.removeChildComponent (h.get());
@@ -5102,6 +5147,22 @@ void ArrangementView::updateLocatorControls()
     locatorPreviousButton.setEnabled (anyLocators);
     locatorNextButton.setEnabled (anyLocators);
     locatorDeleteButton.setEnabled (anyLocators);
+}
+
+void ArrangementView::addLocatorAtPlayhead()
+{
+    project.addLocator (snapBeat (playhead));
+}
+
+void ArrangementView::deleteSelectedLocator()
+{
+    int locatorId = project.locator (project.selectedLocatorId) != nullptr
+        ? project.selectedLocatorId : -1;
+    if (locatorId < 0 && ! project.locators.empty())
+        locatorId = std::max_element (project.locators.begin(), project.locators.end(),
+            [] (const auto& a, const auto& b) { return a.id < b.id; })->id;
+    if (locatorId >= 0)
+        project.removeLocator (locatorId);
 }
 
 void ArrangementView::navigateLocator (bool forward)

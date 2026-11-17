@@ -6,6 +6,7 @@
 #include "ArrangementView.h"
 #include "BrowserPanel.h"
 #include "DeviceView.h"
+#include "GrooveBrowser.h"
 #include "PianoRollEditor.h"
 #include "PluginScanner.h"
 #include "ProjectFile.h"
@@ -17,6 +18,7 @@
 #include <array>
 #include <map>
 #include <thread>
+#include <tuple>
 
 class MainComponent : public juce::Component, public juce::DragAndDropContainer,
                       private juce::ChangeListener, private juce::Timer
@@ -46,6 +48,7 @@ private:
 
     void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
+    void addNativeDrumRackToTrack (int trackId);
     void duplicateSelectedTrack (int trackId);
     void openDeviceEditor (int trackId, int deviceId);
     void updateActionIndicator();
@@ -56,6 +59,11 @@ private:
     void loadAudioFile (const juce::File&, int trackId, double startBeat);
     void consolidateAudioRange (double startBeat, double endBeat, int firstTrack, int lastTrack);
     void openAudioClipEditor (int trackId, int clipId);
+    void openGrooveBrowser();
+    void previewGroove (const roll::GrooveTemplate&);
+    void stopGroovePreview();
+    juce::String applyGrooveToSelectedClip (const roll::GrooveTemplate&);
+    juce::String removeGrooveFromSelectedClip();
     void refreshAudioClipEditor();
     void publishAudioTrack (int trackId);
     bool selectedTrackSpan (double& start, double& end) const;
@@ -64,6 +72,8 @@ private:
     bool handleTransportKeyPress (const juce::KeyPress&);
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
+    void closeWindowsOfRack (int trackId, int rackDeviceId);
+    void closeWindowsOfPad (int trackId, int rackDeviceId, int pad);
     void showProjectMenu();
     void showOptionsWindow();
     void chooseProjectFile (bool open, std::function<void (bool)> onSaveComplete = {});
@@ -85,6 +95,9 @@ private:
     void applyMixers();
     void applyScale();
     void applyLength();
+    void navigatePianoRollLocator (bool forward);
+    void addPianoRollLocatorAtPlayhead();
+    void deletePianoRollLocator (int id = -1);
     void onSelectionChanged();
     void showDetail (bool devices);
     void cycleFocus();
@@ -119,16 +132,22 @@ private:
     juce::ComboBox rootBox, modeBox, lengthBox;
     juce::TextButton scaleButton { "Scale" }, highlightButton { "Destacar (K)" }, foldButton { "Fold" }, foldScaleButton { "Fold escala" },
                      drawButton { "Draw (B)" }, snapButton { "Snap" }, previewButton { "Preview" },
+                     groovesButton { "Grooves..." },
                      zoomHMinus { "H -" }, zoomHPlus { "H +" }, zoomVMinus { "V -" }, zoomVPlus { "V +" };
+    juce::TextButton pianoLocatorPreviousButton { "<" }, pianoLocatorAddButton { "+" },
+                     pianoLocatorNextButton { ">" }, pianoLocatorDeleteButton { "Del" };
     juce::Label gridLabel;
     std::vector<juce::Component*> clipControls;
 
     juce::TopLevelWindow* mainWindow = nullptr;
     std::map<int, std::unique_ptr<PluginWindow>> windows;
+    std::map<std::tuple<int, int, int, int>, int> padEffectWindowIds;
+    std::map<int, std::tuple<int, int, int>> padEffectWindowOwners;
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
     std::unique_ptr<juce::FileChooser> audioExportChooser;
     std::unique_ptr<class OptionsWindow> optionsWindow;
+    std::unique_ptr<GrooveBrowserWindow> grooveBrowserWindow;
     juce::File currentProjectFile;
     double nextRecoverySaveTime = 0.0;
     std::shared_ptr<TaskScope> projectLoadTask;
@@ -143,6 +162,7 @@ private:
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
     std::jthread taskSimulationThread;
     int nextPluginCascadeIndex = 0;
+    int nextPadEffectWindowId = -1;
     int previewLoadToken = 0;
     int pendingAudioLoads = 0, pendingPreviewLoads = 0;
     bool scanningPlugins = false;
@@ -159,8 +179,10 @@ private:
     bool pianoRollVisible = true;
     bool suppressSongStartOnce = false;
     bool pendingArrangementSeek = false;
+    bool transportPaused = false;
     double pendingArrangementSeekBeat = 0.0;
     double arrangementRatio = 0.42;
+    int arrangementHeight = -1;
     double transportPosition = 0.0;
     double pausedPosition = 0.0;
     double displayedBpm = 120.0;
@@ -171,6 +193,7 @@ private:
     std::array<bool, 15> computerMidiKeyDown {}, computerMidiNoteActive {};
     std::array<int, 15> computerMidiKeyPitch {}, computerMidiTrackIds {};
     std::array<bool, 4> computerMidiControlKeyDown {};
+    bool groovePreviewAudioActive = false;
     juce::String lastComputerMidiNote;
     bool computerMidiModeKeyDown = false, computerMidiKeyboardEnabled = false;
     int computerMidiOctaveOffset = 0, computerMidiVelocity = 100;

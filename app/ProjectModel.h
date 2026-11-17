@@ -13,8 +13,8 @@ struct ArrangementLocator
     std::string name, info;
 };
 
-// Estado do projeto: trilhas, clips, seleção e região de loop. Vive na thread principal.
-// O engine de áudio e as views ouvem os callbacks.
+// Estado do projeto: trilhas, clips, selecao e regiao de loop. Vive na thread principal.
+// O engine de audio e as views ouvem os callbacks.
 class ProjectModel : public juce::ChangeBroadcaster
 {
 public:
@@ -37,7 +37,7 @@ public:
     std::vector<int> selectedTrackIds;
     int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
     double loopStart = 0.0, loopEnd = 16.0;
-    double totalBeats = 256.0;                       // 64 compassos visíveis (cresce com os clips)
+    double totalBeats = 256.0;                       // 64 compassos visiveis (cresce com os clips)
     std::vector<ArrangementLocator> locators;
     int selectedLocatorId = -1, songStartLocatorId = -1;
 
@@ -95,8 +95,8 @@ public:
     bool setClipEnabled (int trackId, int clipId, bool audio, bool enabled);
     bool setAutomationEnvelope (int trackId, roll::AutomationEnvelope);
     bool removeAutomationEnvelope (int trackId, const roll::AutomationTarget&);
-    // Move para outra trilha/posição, substituindo apenas o trecho sobreposto.
-    // Devolve o novo id do clip (ou -1 se os argumentos forem inválidos).
+    // Move para outra trilha/posicao, substituindo apenas o trecho sobreposto.
+    // Devolve o novo id do clip (ou -1 se os argumentos forem invalidos).
     int  moveClip (int fromTrack, int clipId, int toTrack, double newStart);
     int  moveAudioClip (int fromTrack, int clipId, int toTrack, double newStart);
     void selectAudioClip (int trackId, int clipId);

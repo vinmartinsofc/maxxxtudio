@@ -7,7 +7,7 @@ namespace roll
 {
 struct MidiEvent
 {
-    int  offset   = 0;      // amostras desde o início do bloco
+    int  offset   = 0;      // amostras desde o inicio do bloco
     bool on       = true;
     int  pitch    = 60;
     int  velocity = 100;
@@ -21,11 +21,11 @@ struct TransportSettings
     double loopEnd   = 16.0;
 };
 
-// Um trecho contínuo de tempo dentro de um bloco de áudio (o loop pode dividir o bloco em dois).
+// Um trecho continuo de tempo dentro de um bloco de audio (o loop pode dividir o bloco em dois).
 struct Segment
 {
     double a = 0.0, b = 0.0;      // beats [a, b)
-    int    offset = 0;            // amostra em que o trecho começa no bloco
+    int    offset = 0;            // amostra em que o trecho comeca no bloco
     int    samples = 0;
     bool   flushBefore = false;   // soltar notas antes do trecho (volta do loop)
     bool   flushAfter  = false;   // soltar notas ao fim do trecho (fim do loop)
@@ -40,7 +40,7 @@ struct BlockPlan
     double beatsPerSample = 0.0;
 };
 
-// Relógio do transporte: UM por projeto. Decide que trecho de tempo cada bloco cobre.
+// Relogio do transporte: UM por projeto. Decide que trecho de tempo cada bloco cobre.
 class TransportClock
 {
 public:
@@ -52,7 +52,7 @@ private:
     double pos = 0.0;
 };
 
-// Gerador de eventos MIDI: UM por trilha. Lógica pura, sem JUCE e sem alocação no caminho normal.
+// Gerador de eventos MIDI: UM por trilha. Logica pura, sem JUCE e sem alocacao no caminho normal.
 class Sequencer
 {
 public:

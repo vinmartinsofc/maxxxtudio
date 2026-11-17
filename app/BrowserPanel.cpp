@@ -1,4 +1,5 @@
 #include "BrowserPanel.h"
+#include "DrumRackProcessor.h"
 #include "PluginFolderGrouping.h"
 #include <algorithm>
 
@@ -108,11 +109,105 @@ private:
     BrowserPanel& owner;
 };
 
-BrowserPanel::BrowserPanel (PluginScanner& s) : scanner (s), tree (std::make_unique<PluginTree> (*this))
+BrowserPanel::NativeToolCard::NativeToolCard (const juce::String& name,
+                                               const juce::String& description,
+                                               const juce::String& sourceDescription)
+    : juce::TextButton (name), detail (description), dragDescription (sourceDescription)
+{
+    setMouseClickGrabsKeyboardFocus (false);
+    setTooltip ("Clique para adicionar ao canal selecionado ou arraste para um canal MIDI.");
+}
+
+void BrowserPanel::NativeToolCard::mouseDown (const juce::MouseEvent& event)
+{
+    dragStarted = false;
+    juce::TextButton::mouseDown (event);
+}
+
+void BrowserPanel::NativeToolCard::mouseDrag (const juce::MouseEvent& event)
+{
+    if (! dragStarted && event.mods.isLeftButtonDown() && event.getDistanceFromDragStart() >= 6)
+    {
+        if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
+        {
+            const auto image = juce::ScaledImage (createComponentSnapshot (getLocalBounds()));
+            container->startDragging (dragDescription, this, image, false, nullptr, &event.source);
+            dragStarted = true;
+            setState (juce::Button::buttonNormal);
+            return;
+        }
+    }
+
+    if (! dragStarted)
+        juce::TextButton::mouseDrag (event);
+}
+
+void BrowserPanel::NativeToolCard::mouseUp (const juce::MouseEvent& event)
+{
+    if (dragStarted)
+        setState (juce::Button::buttonNormal);
+    else
+        juce::TextButton::mouseUp (event);
+    dragStarted = false;
+}
+
+void BrowserPanel::NativeToolCard::paintButton (juce::Graphics& graphics,
+                                                bool isMouseOverButton,
+                                                bool isButtonDown)
+{
+    const auto bounds = getLocalBounds().toFloat();
+    juce::ColourGradient background (theme::control(), bounds.getX(), bounds.getY(),
+                                    theme::panelLight(), bounds.getRight(), bounds.getBottom(), false);
+    graphics.setGradientFill (background);
+    graphics.fillRoundedRectangle (bounds, 4.0f);
+
+    juce::Path ribbon;
+    ribbon.startNewSubPath (bounds.getRight() * 0.62f, bounds.getY());
+    ribbon.cubicTo (bounds.getRight() * 0.78f, bounds.getY() + 8.0f,
+                    bounds.getRight() * 0.58f, bounds.getBottom() - 8.0f,
+                    bounds.getRight() * 0.78f, bounds.getBottom());
+    graphics.setColour (theme::accent().withAlpha (isButtonDown ? 0.95f : 0.75f));
+    graphics.strokePath (ribbon, juce::PathStrokeType (5.0f));
+    graphics.setColour (theme::textDim().withAlpha (0.7f));
+    graphics.drawLine (bounds.getRight() * 0.81f, bounds.getY() + 5.0f,
+                       bounds.getRight() * 0.98f, bounds.getBottom() - 5.0f, 2.0f);
+
+    if (isMouseOverButton)
+    {
+        graphics.setColour (juce::Colours::white.withAlpha (0.08f));
+        graphics.fillRoundedRectangle (bounds, 4.0f);
+    }
+
+    auto textArea = getLocalBounds().reduced (14, 8);
+    graphics.setColour (theme::text());
+    graphics.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+    graphics.drawText (getButtonText(), textArea.removeFromTop (28),
+                       juce::Justification::centredLeft, true);
+    graphics.setColour (theme::textDim());
+    graphics.setFont (juce::FontOptions (11.5f));
+    graphics.drawText (detail, textArea, juce::Justification::centredLeft, true);
+}
+
+BrowserPanel::BrowserPanel (PluginScanner& s)
+    : scanner (s), tree (std::make_unique<PluginTree> (*this)),
+      drumRackCard ("Drum Rack", "Arraste para o canal MIDI desejado",
+                    "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier))
 {
     title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
     addAndMakeVisible (title);
+
+    for (auto* tab : { &vstTab, &projectFreedomTab })
+    {
+        tab->setClickingTogglesState (true);
+        tab->setRadioGroupId (4710);
+        tab->setColour (juce::TextButton::buttonOnColourId, theme::accent());
+        tab->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        addAndMakeVisible (tab);
+    }
+    vstTab.setToggleState (true, juce::dontSendNotification);
+    vstTab.onClick = [this] { setProjectFreedomTab (false); };
+    projectFreedomTab.onClick = [this] { setProjectFreedomTab (true); };
 
     search.setTextToShowWhenEmpty ("Buscar (nome ou fabricante)", theme::textDim());
     search.onTextChange = [this] { refresh(); };
@@ -142,6 +237,18 @@ BrowserPanel::BrowserPanel (PluginScanner& s) : scanner (s), tree (std::make_uni
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
 
+    projectFreedomDescription.setText ("Instrumentos e efeitos nativos.", juce::dontSendNotification);
+    projectFreedomDescription.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    projectFreedomDescription.setColour (juce::Label::textColourId, theme::text());
+    addAndMakeVisible (projectFreedomDescription);
+    drumRackCard.onClick = [this]
+    {
+        if (onAddDrumRackRequested)
+            setStatus (onAddDrumRackRequested());
+    };
+    addAndMakeVisible (drumRackCard);
+    setProjectFreedomTab (false);
+
     scanner.list().addChangeListener (this);
     refresh();
 }
@@ -154,12 +261,15 @@ BrowserPanel::~BrowserPanel()
 
 void BrowserPanel::grabFocus()
 {
-    tree->grabKeyboardFocus();
+    if (showingProjectFreedomTools)
+        drumRackCard.grabKeyboardFocus();
+    else
+        tree->grabKeyboardFocus();
 }
 
 bool BrowserPanel::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
-    if (key.getModifiers().isCommandDown()
+    if (! showingProjectFreedomTools && key.getModifiers().isCommandDown()
         && juce::CharacterFunctions::toLowerCase (key.getKeyCode()) == 'f')
     {
         search.grabKeyboardFocus();
@@ -172,6 +282,23 @@ void BrowserPanel::setFilter (Filter f)
 {
     filter = f;
     refresh();
+}
+
+void BrowserPanel::setProjectFreedomTab (bool showTools)
+{
+    showingProjectFreedomTools = showTools;
+    vstTab.setToggleState (! showTools, juce::dontSendNotification);
+    projectFreedomTab.setToggleState (showTools, juce::dontSendNotification);
+    title.setText (showTools ? "Ferramentas do Project Freedom" : "Plugins VST",
+                   juce::dontSendNotification);
+    search.setVisible (! showTools);
+    allButton.setVisible (! showTools);
+    instrumentsButton.setVisible (! showTools);
+    effectsButton.setVisible (! showTools);
+    tree->setVisible (! showTools);
+    projectFreedomDescription.setVisible (showTools);
+    drumRackCard.setVisible (showTools);
+    resized();
 }
 
 juce::File BrowserPanel::treeStateFile() const
@@ -388,15 +515,32 @@ void BrowserPanel::resized()
     auto head = area.removeFromTop (24);
     title.setBounds (head);
     area.removeFromTop (6);
-    search.setBounds (area.removeFromTop (26));
-    area.removeFromTop (6);
-    auto tabs = area.removeFromTop (24);
-    allButton.setBounds (tabs.removeFromLeft (52));
-    tabs.removeFromLeft (3);
-    instrumentsButton.setBounds (tabs.removeFromLeft (92));
-    tabs.removeFromLeft (3);
-    effectsButton.setBounds (tabs);
+    auto tabs = area.removeFromTop (26);
+    vstTab.setBounds (tabs.removeFromLeft (62));
+    tabs.removeFromLeft (4);
+    projectFreedomTab.setBounds (tabs.removeFromLeft (144));
+
+    if (showingProjectFreedomTools)
+    {
+        area.removeFromTop (12);
+        projectFreedomDescription.setBounds (area.removeFromTop (24));
+        area.removeFromTop (8);
+        drumRackCard.setBounds (area.removeFromTop (78));
+    }
+    else
+    {
+        area.removeFromTop (6);
+        search.setBounds (area.removeFromTop (26));
+        area.removeFromTop (6);
+        tabs = area.removeFromTop (24);
+        allButton.setBounds (tabs.removeFromLeft (52));
+        tabs.removeFromLeft (3);
+        instrumentsButton.setBounds (tabs.removeFromLeft (92));
+        tabs.removeFromLeft (3);
+        effectsButton.setBounds (tabs);
+    }
+
     area.removeFromTop (6);
     status.setBounds (area.removeFromBottom (20));
-    tree->setBounds (area);
+    tree->setBounds (showingProjectFreedomTools ? juce::Rectangle<int>() : area);
 }

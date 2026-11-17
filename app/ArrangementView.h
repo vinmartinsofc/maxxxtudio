@@ -7,7 +7,7 @@
 #include <memory>
 #include <vector>
 
-// Vista de arranjo: cabeçalhos de trilha, régua com o loop, e os clips na linha do tempo.
+// Vista de arranjo: cabecalhos de trilha, regua com o loop, e os clips na linha do tempo.
 class ArrangementView : public juce::Component, private juce::ChangeListener, private juce::Timer
 {
 public:
@@ -53,7 +53,9 @@ public:
     void setLoopEnabled (bool on);
     void setGridBeat (double beats);
     bool getTimeSelectionStart (double& startBeat) const;
-    void refresh();                       // recria os cabeçalhos
+    bool hasSelectionToDuplicate() const;
+    void duplicateSelection();
+    void refresh();                       // recria os cabecalhos
     void grabFocus();
     void toggleAutomationMode();
     void toggleAutomationModeFromKey();
@@ -61,6 +63,9 @@ public:
     double gridBeats() const { return gridBeat; }
     double snapBeat (double beat) const;
     void setAdaptiveGrid (bool enabled);
+    void navigateLocator (bool forward);
+    void addLocatorAtPlayhead();
+    void deleteSelectedLocator();
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -87,7 +92,6 @@ private:
     void syncPositions();
     void updateSizes();
     void updateLocatorControls();
-    void navigateLocator (bool forward);
     void zoomAt (double factor, double anchorBeat, int anchorScreenX);
     void updateAdaptiveGrid();
     void updateGridSelection();

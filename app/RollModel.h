@@ -8,8 +8,8 @@
 #include <set>
 #include <vector>
 
-// Estado compartilhado pelo piano roll (grade, teclas, régua, velocity).
-// Todas as edições passam por aqui: assim desfazer/refazer, o engine de áudio
+// Estado compartilhado pelo piano roll (grade, teclas, regua, velocity).
+// Todas as edicoes passam por aqui: assim desfazer/refazer, o engine de audio
 // e as views ficam sempre sincronizados.
 class RollModel : public juce::ChangeBroadcaster
 {
@@ -20,19 +20,19 @@ public:
 
     int rowHeight = 16;                         // zoom vertical
 
-    // Clip em edição (pertence ao arranjo). Sem clip selecionado, o piano roll fica inativo.
+    // Clip em edicao (pertence ao arranjo). Sem clip selecionado, o piano roll fica inativo.
     roll::Clip& clip()              { return *clipPtr; }
     const roll::Clip& clip() const  { return *clipPtr; }
     bool hasClip() const            { return clipPtr != &dummyClip; }
     void setClip (roll::Clip* c);
-    double clipStartBeats = 0.0;                // posição do clip no arranjo (para o playhead)
+    double clipStartBeats = 0.0;                // posicao do clip no arranjo (para o playhead)
     roll::History history;
     roll::Scale   scale { 0, roll::Mode::Major };
 
     bool   scaleOn   = false;    // "Scale Mode": escolhe raiz/escala do clip
     bool   highlight = true;     // tecla K: destaca as linhas da escala (vale com scaleOn)
-    bool   fold      = false;    // Fold: só linhas que têm notas
-    bool   foldScale = false;    // botão Scale ao lado do Fold: linhas da escala + linhas com notas
+    bool   fold      = false;    // Fold: so linhas que tem notas
+    bool   foldScale = false;    // botao Scale ao lado do Fold: linhas da escala + linhas com notas
     bool   drawMode  = false;
     bool   snap      = true;
     bool   previewOn = true;     // ouvir as notas ao selecionar/mover
@@ -40,7 +40,7 @@ public:
     bool   triplet   = false;
     double baseGrid      = 0.25;   // 1/16
     double gridBeats     = 0.25;   // grade efetiva (baseGrid, ou 2/3 dela em tripleto)
-    double insertBeat    = 0.0;    // marcador de inserção (onde cola; de onde o play começa)
+    double insertBeat    = 0.0;    // marcador de insercao (onde cola; de onde o play comeca)
     double pixelsPerBeat = 56.0;
 
     std::set<int> selection;
@@ -53,12 +53,12 @@ public:
         return p == pressedPitch || (p < 64 ? ((activeLo >> p) & 1u) : ((activeHi >> (p - 64)) & 1u));
     }
 
-    std::function<void()>          onNotesChanged;   // engine de áudio
+    std::function<void()>          onNotesChanged;   // engine de audio
     std::function<void()>          onLengthChanged;  // loop do transporte
     std::function<void (int, bool)> onPreview;       // pitch, ligar/desligar
-    std::function<void (double)>   onInsertMarker;   // marcador de inserção mudou
+    std::function<void (double)>   onInsertMarker;   // marcador de insercao mudou
 
-    // --- layout vertical (linhas visíveis, da mais aguda para a mais grave) ---
+    // --- layout vertical (linhas visiveis, da mais aguda para a mais grave) ---
     const std::vector<int>& rows() const { return rowPitches; }
     void rebuildRows();
     int  pitchToRow (int pitch) const;           // -1 se escondida
@@ -70,7 +70,7 @@ public:
     double minLength() const           { return snap ? gridBeats : 1.0 / 16.0; }
     juce::String gridLabel() const;
 
-    // --- edição (cada uma registra desfazer e notifica engine + views) ---
+    // --- edicao (cada uma registra desfazer e notifica engine + views) ---
     void beginEdit();                         // snapshot para desfazer
     void notify (bool rebuildRowLayout);      // publica notas + atualiza views
     void undo();
@@ -78,6 +78,7 @@ public:
     bool isSelected (int id) const { return selection.count (id) > 0; }
 
     void selectAll();
+    void selectNotesAtPitch (int pitch, bool additive);
     void deleteSelected();
     void duplicateSelected();
     void nudgeSelected (double dBeats, int dPitch);

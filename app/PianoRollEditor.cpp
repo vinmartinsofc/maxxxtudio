@@ -11,7 +11,7 @@ bool isBlackKey (int pitch)
     return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
 }
 
-// Convenção do Live: nota 60 = C3.
+// Convencao MIDI: nota 60 = C3.
 juce::String pitchName (int pitch, RollModel::NoteSpelling spelling, int root, bool scaleOn)
 {
     static const char* sharps[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -212,7 +212,7 @@ void NoteGrid::paint (juce::Graphics& g)
         if (showScale && ! model.foldScale && model.scale.contains (pitch))
             bg = theme::rowInScale().withMultipliedBrightness (isBlackKey (pitch) ? 0.85f : 1.0f);
         if (showScale && pitch % 12 == model.scale.root())
-            bg = bg.brighter (0.12f);                       // tônica em destaque
+            bg = bg.brighter (0.12f);                       // tonica em destaque
         g.setColour (bg);
         g.fillRect (clipBox.getX(), r * model.rowHeight, clipBox.getWidth(), model.rowHeight);
 
@@ -250,7 +250,7 @@ void NoteGrid::paint (juce::Graphics& g)
         g.drawRoundedRectangle (r, 2.0f, 1.0f);
     }
 
-    if (drag == Drag::Rubber)
+    if (drag == Drag::RubberPending || drag == Drag::Rubber)
     {
         g.setColour (theme::accent().withAlpha (0.18f));
         g.fillRect (rubberRect);
@@ -275,7 +275,7 @@ void NoteGrid::paint (juce::Graphics& g)
             g.drawText (message, hint.reduced (6, 0), juce::Justification::centredLeft, true);
         }
 
-    g.setColour (theme::accent().withAlpha (0.9f));                      // marcador de inserção
+    g.setColour (theme::accent().withAlpha (0.9f));                      // marcador de insercao
     g.drawVerticalLine (static_cast<int> (beatsToX (model.insertBeat)), 0.0f, static_cast<float> (getHeight()));
 
     g.setColour (theme::playhead());
@@ -327,10 +327,15 @@ void NoteGrid::mouseDown (const juce::MouseEvent& e)
 
     if (id >= 0)
     {
-        if (e.mods.isShiftDown() && model.isSelected (id))
+        if (e.mods.isShiftDown())
         {
-            model.selection.erase (id);
-            model.sendChangeMessage();
+            baseSelection = model.selection;
+            pendingRubberNoteId = id;
+            rubberStart = p;
+            rubberRect = {};
+            drag = Drag::RubberPending;
+            if (const auto* note = model.clip().find (id))
+                setPreview (note->pitch);
             updateCursor (p);
             return;
         }
@@ -375,7 +380,7 @@ void NoteGrid::mouseDown (const juce::MouseEvent& e)
     }
 
     if (! e.mods.isShiftDown())
-        model.setInsertMarker (model.snapBeats (downBeat));       // clique no fundo = marcador de inserção
+        model.setInsertMarker (model.snapBeats (downBeat));       // clique no fundo = marcador de insercao
 
     baseSelection = e.mods.isShiftDown() ? model.selection : std::set<int>{};
     model.selection = baseSelection;
@@ -444,6 +449,14 @@ void NoteGrid::mouseDrag (const juce::MouseEvent& e)
 {
     const auto p = e.position;
 
+    if (drag == Drag::RubberPending)
+    {
+        if (e.getDistanceFromDragStart() < 4)
+            return;
+        drag = Drag::Rubber;
+        model.selection = baseSelection;
+    }
+
     if (drag == Drag::Rubber)
     {
         rubberRect = juce::Rectangle<float> (rubberStart, p);
@@ -468,7 +481,7 @@ void NoteGrid::mouseDrag (const juce::MouseEvent& e)
 
     if (drag == Drag::Move)
     {
-        if (e.mods.isCtrlDown() && ! copied)                       // Ctrl+arrastar: deixa cópias no lugar
+        if (e.mods.isCtrlDown() && ! copied)                       // Ctrl+arrastar: deixa copias no lugar
         {
             for (const auto& [id, o] : original)
             {
@@ -518,6 +531,15 @@ void NoteGrid::mouseDrag (const juce::MouseEvent& e)
 void NoteGrid::mouseUp (const juce::MouseEvent& e)
 {
     setPreview (-1);
+    if (drag == Drag::RubberPending && pendingRubberNoteId >= 0)
+    {
+        if (baseSelection.count (pendingRubberNoteId) > 0)
+            baseSelection.erase (pendingRubberNoteId);
+        else
+            baseSelection.insert (pendingRubberNoteId);
+        model.selection = baseSelection;
+        model.sendChangeMessage();
+    }
     if (editBegun)
     {
         model.resolveOverlaps (model.selection);
@@ -526,6 +548,7 @@ void NoteGrid::mouseUp (const juce::MouseEvent& e)
     drag = Drag::None;
     editBegun = false;
     rubberRect = {};
+    pendingRubberNoteId = -1;
     original.clear();
     updateCursor (e.position);
     repaint();
@@ -651,7 +674,7 @@ bool NoteGrid::keyPressed (const juce::KeyPress& k)
         if (k.isKeyCode (juce::KeyPress::leftKey))  { shift ? model.resizeSelected (-model.gridBeats) : model.nudgeSelected (-model.gridBeats, 0); return true; }
         if (k.isKeyCode (juce::KeyPress::rightKey)) { shift ? model.resizeSelected ( model.gridBeats) : model.nudgeSelected ( model.gridBeats, 0); return true; }
     }
-    return false;                                  // Espaço etc: sobe para a janela principal
+    return false;                                  // Espaco etc: sobe para a janela principal
 }
 
 // ============================================================ KeyColumn
@@ -721,7 +744,14 @@ void KeyColumn::mouseDown (const juce::MouseEvent& e)
         return;
     }
 
-    setPitch (model.rowToPitch (e.y / model.rowHeight));
+    const int pitch = model.rowToPitch (e.y / model.rowHeight);
+    if (pitch >= 0)
+    {
+        model.selectNotesAtPitch (pitch, e.mods.isShiftDown());
+        if (auto* editor = findParentComponentOfClass<PianoRollEditor>())
+            editor->grabFocus();
+    }
+    setPitch (pitch);
 }
 
 void KeyColumn::mouseMove (const juce::MouseEvent& e)
@@ -798,11 +828,78 @@ void RulerBar::paint (juce::Graphics& g)
         else if (ppb >= 40)
             g.drawText (juce::String (b / 4 + 1) + "." + juce::String (b % 4 + 1), static_cast<int> (x) + 3, 12, 40, getHeight() - 12, juce::Justification::centredLeft);
     }
+
+    for (std::size_t index = 0; index < locators.size(); ++index)
+    {
+        const double localBeat = locators[index].second;
+        if (localBeat < 0.0 || localBeat > model.clip().length())
+            continue;
+
+        const float x = static_cast<float> (localBeat * ppb);
+        const auto colour = locators[index].first == selectedLocatorId
+            ? juce::Colour (0xffff8585) : juce::Colour (0xffe64b4b);
+        g.setColour (colour);
+        g.drawVerticalLine (static_cast<int> (x), 0.0f, static_cast<float> (getHeight()));
+        juce::Path flag;
+        flag.startNewSubPath (x + 1.0f, 1.0f);
+        flag.lineTo (x + 12.0f, 1.0f);
+        flag.lineTo (x + 10.0f, 6.0f);
+        flag.lineTo (x + 12.0f, 11.0f);
+        flag.lineTo (x + 1.0f, 11.0f);
+        flag.closeSubPath();
+        g.fillPath (flag);
+        g.setColour (theme::panelLight());
+        g.setFont (juce::FontOptions (8.0f, juce::Font::bold));
+        g.drawText (juce::String (static_cast<int> (index + 1)),
+                    juce::Rectangle<int> (static_cast<int> (x) + 1, 0, 10, 11),
+                    juce::Justification::centred, true);
+    }
+
+    if (hovered && getWidth() > 0)
+    {
+        const float centreX = std::clamp (hoveredX, 10.0f, static_cast<float> (getWidth()) - 10.0f);
+        const float centreY = static_cast<float> (getHeight()) * 0.67f;
+        g.setColour (theme::accent());
+        juce::Path speaker;
+        speaker.addTriangle (centreX - 8.0f, centreY - 3.0f,
+                             centreX - 4.0f, centreY - 3.0f,
+                             centreX - 1.0f, centreY - 6.0f);
+        speaker.addTriangle (centreX - 8.0f, centreY + 3.0f,
+                             centreX - 4.0f, centreY + 3.0f,
+                             centreX - 1.0f, centreY + 6.0f);
+        speaker.addRectangle (centreX - 8.0f, centreY - 3.0f, 4.0f, 6.0f);
+        g.fillPath (speaker);
+        juce::Path waves;
+        waves.addCentredArc (centreX - 1.0f, centreY, 5.0f, 5.0f,
+                             0.0f, -0.8f, 0.8f, true);
+        waves.addCentredArc (centreX - 1.0f, centreY, 8.0f, 8.0f,
+                             0.0f, -0.8f, 0.8f, true);
+        g.strokePath (waves, juce::PathStrokeType (1.4f));
+    }
+}
+
+void RulerBar::setLocators (std::vector<std::pair<int, double>> newLocators, int selectedId)
+{
+    locators = std::move (newLocators);
+    selectedLocatorId = selectedId;
+    repaint();
 }
 
 void RulerBar::seek (const juce::MouseEvent& e)
 {
     if (onSeek) onSeek (std::clamp (e.position.x / model.pixelsPerBeat, 0.0, model.clip().length()));
+}
+
+int RulerBar::locatorAt (float x) const
+{
+    for (auto it = locators.rbegin(); it != locators.rend(); ++it)
+    {
+        const double localBeat = it->second;
+        if (localBeat >= 0.0 && localBeat <= model.clip().length()
+            && std::abs (x - static_cast<float> (localBeat * model.pixelsPerBeat)) < 14.0f)
+            return it->first;
+    }
+    return -1;
 }
 
 bool RulerBar::isResizeHandle (juce::Point<float> position) const
@@ -812,28 +909,73 @@ bool RulerBar::isResizeHandle (juce::Point<float> position) const
 
 void RulerBar::mouseDown (const juce::MouseEvent& e)
 {
+    hovered = true;
+    hoveredX = e.position.x;
+    repaint();
     last = e.getEventRelativeTo (getParentComponent()).position;
     dragging = false;
     resizing = isResizeHandle (e.position);
+    locatorDragPending = false;
+    locatorDragging = false;
+    draggedLocatorId = -1;
+
+    if (! e.mods.isPopupMenu())
+    {
+        const int locatorId = locatorAt (e.position.x);
+        const auto marker = std::find_if (locators.begin(), locators.end(),
+            [locatorId] (const auto& item) { return item.first == locatorId; });
+        if (marker != locators.end())
+        {
+            locatorDragPending = true;
+            draggedLocatorId = locatorId;
+            locatorGrabOffset = e.position.x / model.pixelsPerBeat - marker->second;
+            resizing = false;
+            return;
+        }
+    }
 }
 
 void RulerBar::mouseMove (const juce::MouseEvent& e)
 {
+    hovered = true;
+    hoveredX = e.position.x;
+    repaint();
     setMouseCursor (isResizeHandle (e.position) ? juce::MouseCursor::LeftRightResizeCursor
                                                 : juce::MouseCursor::NormalCursor);
 }
 
 void RulerBar::mouseExit (const juce::MouseEvent&)
 {
+    hovered = false;
+    repaint();
     setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
 void RulerBar::mouseDrag (const juce::MouseEvent& e)
 {
+    hoveredX = e.position.x;
+    repaint();
+    if (locatorDragPending)
+    {
+        if (! locatorDragging && e.getDistanceFromDragStart() < 4)
+            return;
+        if (! locatorDragging)
+        {
+            locatorDragging = true;
+            if (onLocatorMoveStarted)
+                onLocatorMoveStarted (draggedLocatorId);
+        }
+        const double rawBeat = e.position.x / model.pixelsPerBeat - locatorGrabOffset;
+        const double beat = std::clamp (model.snap && ! e.mods.isAltDown() ? model.snapBeats (rawBeat) : rawBeat,
+                                        0.0, model.clip().length());
+        if (onLocatorMoved)
+            onLocatorMoved (draggedLocatorId, beat);
+        return;
+    }
     if (! dragging && e.getDistanceFromDragStart() < 4) return;
     if (! dragging) last = e.getEventRelativeTo (getParentComponent()).position;
     dragging = true;
-    const auto now = e.getEventRelativeTo (getParentComponent()).position;     // posição estável durante o rolar
+    const auto now = e.getEventRelativeTo (getParentComponent()).position;     // posicao estavel durante o rolar
     const float dx = now.x - last.x, dy = now.y - last.y;
     last = now;
     if (resizing)
@@ -852,67 +994,226 @@ void RulerBar::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
 
 void RulerBar::mouseUp (const juce::MouseEvent& e)
 {
-    if (! dragging && ! resizing) seek (e);
+    if (e.mods.isPopupMenu())
+    {
+        const int locatorId = locatorAt (e.position.x);
+        if (locatorId >= 0)
+        {
+            juce::PopupMenu menu;
+            menu.addItem (1, "Apagar locator");
+            juce::Component::SafePointer<RulerBar> safeThis (this);
+            const auto screen = localPointToGlobal (e.position.toInt());
+            menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
+                { screen.x, screen.y, 1, 1 }),
+                [safeThis, locatorId] (int result)
+                {
+                    if (result == 1 && safeThis != nullptr && safeThis->onLocatorDeleteRequested)
+                        safeThis->onLocatorDeleteRequested (locatorId);
+                });
+        }
+        dragging = false;
+        resizing = false;
+        locatorDragPending = locatorDragging = false;
+        draggedLocatorId = -1;
+        return;
+    }
+
+    if (locatorDragPending)
+    {
+        if (locatorDragging)
+        {
+            if (onLocatorMoveFinished)
+                onLocatorMoveFinished();
+        }
+        else if (onLocatorSelected)
+            onLocatorSelected (draggedLocatorId);
+        locatorDragPending = locatorDragging = false;
+        draggedLocatorId = -1;
+        return;
+    }
+
+    if (! dragging && ! resizing)
+    {
+        const int locatorId = locatorAt (e.position.x);
+        if (locatorId >= 0 && onLocatorSelected)
+            onLocatorSelected (locatorId);
+        else
+            seek (e);
+    }
     dragging = false;
     resizing = false;
 }
 
-// ======================================================== HorizontalZoomHandle
+// =============================================================== PianoRollOverview
 
-void HorizontalZoomHandle::paint (juce::Graphics& g)
+juce::Rectangle<float> PianoRollOverview::visibleRangeBounds() const
 {
-    g.fillAll (zoomHovered ? theme::panelLight().brighter (0.12f) : theme::panelLight());
+    const double length = std::max (0.001, model.clip().length());
+    const double beatsPerPixel = length / std::max (1, getWidth());
+    const double startBeat = viewport.getViewPositionX() / model.pixelsPerBeat;
+    const double visibleBeats = viewport.getMaximumVisibleWidth() / model.pixelsPerBeat;
+    const float x = static_cast<float> (startBeat / beatsPerPixel);
+    const float width = static_cast<float> (visibleBeats / beatsPerPixel);
+    return juce::Rectangle<float> (x, 0.0f, width, static_cast<float> (getHeight()))
+        .getIntersection (getLocalBounds().toFloat());
+}
+
+void PianoRollOverview::paint (juce::Graphics& g)
+{
+    g.fillAll (theme::panel().darker (0.55f));
+    const auto bounds = getLocalBounds().toFloat();
+    if (model.hasClip() && bounds.getWidth() > 0.0f)
+    {
+        const double length = std::max (0.001, model.clip().length());
+        const float beatsToPixels = static_cast<float> (bounds.getWidth() / length);
+        const float pitchHeight = bounds.getHeight() / 128.0f;
+
+        for (const auto& note : model.clip().notes())
+        {
+            const float x = static_cast<float> (note.startBeats) * beatsToPixels;
+            const float width = std::max (1.0f, static_cast<float> (note.lengthBeats) * beatsToPixels);
+            const float y = bounds.getY() + (127.0f - static_cast<float> (note.pitch)) * pitchHeight;
+            const float height = std::max (1.0f, pitchHeight);
+            auto colour = model.isSelected (note.id) ? theme::noteSelected() : theme::noteFill();
+            if (note.muted)
+                colour = juce::Colour (0xff5b6169);
+            g.setColour (colour);
+            g.fillRect (x, y, width, height);
+        }
+
+        const auto visible = visibleRangeBounds();
+        g.setColour (theme::accent().withAlpha (hovered ? 0.26f : 0.16f));
+        g.fillRect (visible);
+        g.setColour (hovered ? theme::accent() : theme::border());
+        g.drawRect (visible, 1.0f);
+    }
+
     g.setColour (theme::border());
     g.drawRect (getLocalBounds(), 1);
 
-    const float centerX = static_cast<float> (getWidth()) * 0.5f;
-    const float centerY = static_cast<float> (getHeight()) * 0.5f - 1.0f;
-    const auto iconColour = zoomHovered ? theme::accent() : theme::textDim();
-    g.setColour (iconColour);
-    g.drawEllipse (centerX - 6.0f, centerY - 7.0f, 11.0f, 11.0f, 1.5f);
-    g.drawLine (centerX + 3.0f, centerY + 2.0f, centerX + 8.0f, centerY + 7.0f, 1.8f);
-    g.drawLine (centerX - 3.0f, centerY - 1.5f, centerX + 2.0f, centerY - 1.5f, 1.2f);
-    g.drawLine (centerX - 0.5f, centerY - 4.0f, centerX - 0.5f, centerY + 1.0f, 1.2f);
+    if (hovered)
+    {
+        const auto button = juce::Rectangle<float> (static_cast<float> (getWidth() - 28), 1.0f,
+                                                     26.0f, static_cast<float> (getHeight() - 2));
+        g.setColour (speakerHovered ? theme::accent().withAlpha (0.8f)
+                                   : theme::panel().brighter (0.12f));
+        g.fillRoundedRectangle (button, 3.0f);
+        g.setColour (theme::text());
+        const float centreY = button.getCentreY();
+        juce::Path speaker;
+        speaker.addTriangle (button.getX() + 6.0f, centreY - 3.0f,
+                             button.getX() + 10.0f, centreY - 3.0f,
+                             button.getX() + 14.0f, centreY - 7.0f);
+        speaker.addTriangle (button.getX() + 6.0f, centreY + 3.0f,
+                             button.getX() + 10.0f, centreY + 3.0f,
+                             button.getX() + 14.0f, centreY + 7.0f);
+        g.fillPath (speaker);
+        g.fillRect (button.getX() + 6.0f, centreY - 3.0f, 4.0f, 6.0f);
+        juce::Path waves;
+        waves.addCentredArc (button.getX() + 12.0f, centreY, 5.0f, 5.0f,
+                             0.0f, -0.8f, 0.8f, true);
+        waves.addCentredArc (button.getX() + 12.0f, centreY, 8.0f, 8.0f,
+                             0.0f, -0.8f, 0.8f, true);
+        g.strokePath (waves, juce::PathStrokeType (1.4f));
+        if (isTransportPlaying && isTransportPlaying())
+        {
+            g.fillRect (button.getX() + 18.0f, centreY - 4.0f, 2.0f, 8.0f);
+            g.fillRect (button.getX() + 22.0f, centreY - 4.0f, 2.0f, 8.0f);
+        }
+    }
 }
 
-void HorizontalZoomHandle::mouseDown (const juce::MouseEvent& e)
+void PianoRollOverview::mouseDown (const juce::MouseEvent& e)
 {
-    if (! e.mods.isLeftButtonDown())
+    if (e.mods.isLeftButtonDown() && e.x >= getWidth() - 28)
+    {
+        if (onTransportToggle)
+            onTransportToggle();
+        return;
+    }
+    if (! e.mods.isLeftButtonDown() || ! model.hasClip() || getWidth() <= 0)
         return;
 
-    zoomDragging = true;
-    zoomStartScreenPosition = e.getScreenPosition();
+    const double length = std::max (0.001, model.clip().length());
+    const double beat = std::clamp (static_cast<double> (e.x) / getWidth() * length, 0.0, length);
+    const int visibleWidth = std::max (1, viewport.getMaximumVisibleWidth());
+    zoomStart = model.pixelsPerBeat;
+    startViewX = viewport.getViewPositionX();
+    startPosition = e.position;
+
+    if (visibleRangeBounds().contains (e.position))
+    {
+        anchorBeat = beat;
+        anchorScreenX = std::clamp (static_cast<int> (std::lround (
+            anchorBeat * model.pixelsPerBeat - startViewX)), 0, visibleWidth);
+    }
+    else
+    {
+        anchorBeat = beat;
+        anchorScreenX = visibleWidth / 2;
+        viewport.setViewPosition (std::max (0, static_cast<int> (std::lround (
+            anchorBeat * model.pixelsPerBeat - anchorScreenX))), viewport.getViewPositionY());
+        startViewX = viewport.getViewPositionX();
+    }
+
+    dragging = true;
     setMouseCursor (ui::zoomCursor());
-    if (onZoomStart) onZoomStart();
 }
 
-void HorizontalZoomHandle::mouseMove (const juce::MouseEvent&)
+void PianoRollOverview::mouseMove (const juce::MouseEvent& e)
 {
-    if (! zoomHovered)
+    if (! hovered)
     {
-        zoomHovered = true;
+        hovered = true;
+    }
+    const bool overSpeaker = e.x >= getWidth() - 28;
+    if (speakerHovered != overSpeaker)
+    {
+        speakerHovered = overSpeaker;
         repaint();
     }
-    setMouseCursor (ui::zoomCursor());
+    setMouseCursor (overSpeaker ? juce::MouseCursor::PointingHandCursor : ui::zoomCursor());
 }
 
-void HorizontalZoomHandle::mouseExit (const juce::MouseEvent&)
+void PianoRollOverview::mouseExit (const juce::MouseEvent&)
 {
-    zoomHovered = false;
+    hovered = false;
+    speakerHovered = false;
     repaint();
-    setMouseCursor (zoomDragging ? ui::zoomCursor() : juce::MouseCursor::NormalCursor);
+    setMouseCursor (dragging ? ui::zoomCursor() : juce::MouseCursor::NormalCursor);
 }
 
-void HorizontalZoomHandle::mouseDrag (const juce::MouseEvent& e)
+void PianoRollOverview::mouseDrag (const juce::MouseEvent& e)
 {
-    if (zoomDragging && onZoomDrag)
-        onZoomDrag (static_cast<float> (e.getScreenPosition().x - zoomStartScreenPosition.x));
+    if (! dragging)
+        return;
+
+    const double deltaY = e.position.y - startPosition.y;
+    if (onZoomAt)
+        onZoomAt (zoomStart * std::exp (deltaY * 0.012), anchorBeat, anchorScreenX);
+
+    if (getWidth() > 0)
+    {
+        const double startBeat = startViewX / zoomStart;
+        const double panBeats = (e.position.x - startPosition.x)
+            * std::max (0.001, model.clip().length()) / getWidth();
+        const int viewX = std::max (0, static_cast<int> (std::lround (
+            (startBeat - panBeats) * model.pixelsPerBeat)));
+        viewport.setViewPosition (viewX, viewport.getViewPositionY());
+    }
 }
 
-void HorizontalZoomHandle::mouseUp (const juce::MouseEvent&)
+void PianoRollOverview::mouseUp (const juce::MouseEvent&)
 {
-    zoomDragging = false;
-    setMouseCursor (zoomHovered ? ui::zoomCursor() : juce::MouseCursor::NormalCursor);
+    dragging = false;
+    setMouseCursor (speakerHovered ? juce::MouseCursor::PointingHandCursor
+                                   : hovered ? ui::zoomCursor() : juce::MouseCursor::NormalCursor);
+}
+
+void PianoRollOverview::mouseDoubleClick (const juce::MouseEvent&)
+{
+    if (onFit)
+        onFit();
 }
 
 // ============================================================ VelocityLane
@@ -992,7 +1293,7 @@ PianoRollEditor::PianoRollEditor (RollModel& m) : model (m)
     addAndMakeVisible (viewport);
     addAndMakeVisible (keyHolder);
     addAndMakeVisible (rulerHolder);
-    addAndMakeVisible (horizontalZoomHandle);
+    addAndMakeVisible (overview);
     addAndMakeVisible (velocityHolder);
     keyHolder.addAndMakeVisible (keys);
     rulerHolder.addAndMakeVisible (ruler);
@@ -1003,11 +1304,37 @@ PianoRollEditor::PianoRollEditor (RollModel& m) : model (m)
     viewport.onScroll = [this]
     {
         syncPositions();
+        overview.repaint();
         const int centerRow = (viewport.getViewPositionY() + viewport.getMaximumVisibleHeight() / 2) / model.rowHeight;
         const int p = model.rowToPitch (centerRow);
         if (p >= 0) lastCenterPitch = p;
     };
     ruler.onSeek = [this] (double b) { if (onSeek) onSeek (b); };
+    ruler.onLocatorSelected = [this] (int id)
+    {
+        if (onLocatorSelected)
+            onLocatorSelected (id);
+    };
+    ruler.onLocatorDeleteRequested = [this] (int id)
+    {
+        if (onLocatorDeleteRequested)
+            onLocatorDeleteRequested (id);
+    };
+    ruler.onLocatorMoveStarted = [this] (int id)
+    {
+        if (onLocatorMoveStarted)
+            onLocatorMoveStarted (id);
+    };
+    ruler.onLocatorMoved = [this] (int id, double beat)
+    {
+        if (onLocatorMoved)
+            onLocatorMoved (id, beat);
+    };
+    ruler.onLocatorMoveFinished = [this]
+    {
+        if (onLocatorMoveFinished)
+            onLocatorMoveFinished();
+    };
     ruler.onDrag = [this] (float dx, float dy)
     {
         zoomHorizontal (std::exp (-static_cast<double> (dy) * 0.02));
@@ -1016,17 +1343,18 @@ PianoRollEditor::PianoRollEditor (RollModel& m) : model (m)
     ruler.onZoom = [this] (double factor) { zoomHorizontal (factor); };
     grid.onZoomHorizontal = [this] (double factor) { zoomHorizontal (factor); };
     grid.onFocusChange = [this] { repaint(); };
-    horizontalZoomHandle.onZoomStart = [this]
+    overview.onTransportToggle = [this] { if (onTransportToggle) onTransportToggle(); };
+    overview.isTransportPlaying = [this]
     {
-        horizontalZoomStart = model.pixelsPerBeat;
-        horizontalZoomAnchorScreenX = viewport.getMaximumVisibleWidth() / 2;
-        horizontalZoomAnchorBeat = (viewport.getViewPositionX() + horizontalZoomAnchorScreenX)
-                                   / model.pixelsPerBeat;
+        return isTransportPlaying && isTransportPlaying();
     };
-    horizontalZoomHandle.onZoomDrag = [this] (float dx)
+    overview.onZoomAt = [this] (double requested, double anchorBeat, int anchorScreenX)
     {
-        const double requested = horizontalZoomStart * std::exp (static_cast<double> (dx) * 0.012);
-        setHorizontalZoomAt (requested, horizontalZoomAnchorBeat, horizontalZoomAnchorScreenX);
+        setHorizontalZoomAt (requested, anchorBeat, anchorScreenX);
+    };
+    overview.onFit = [this]
+    {
+        fitClipToView();
     };
     keys.onZoomStart = [this] (int screenY)
     {
@@ -1080,7 +1408,7 @@ PianoRollEditor::~PianoRollEditor()
 void PianoRollEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::panel());
-    if (grid.hasKeyboardFocus (false))               // anel de foco (navegação por teclado)
+    if (grid.hasKeyboardFocus (false))               // anel de foco (navegacao por teclado)
     {
         g.setColour (theme::accent());
         g.drawRect (getLocalBounds(), 2);
@@ -1089,12 +1417,29 @@ void PianoRollEditor::paint (juce::Graphics& g)
 
 void PianoRollEditor::zoomHorizontal (double factor)
 {
+    fitToClip = false;
     model.pixelsPerBeat = constrainedHorizontalZoom (model.pixelsPerBeat * factor);
     model.sendChangeMessage();
 }
 
+void PianoRollEditor::fitClipToView()
+{
+    fitToClip = true;
+    const double length = std::max (0.001, model.clip().length());
+    const int visibleWidth = std::max (1, viewport.getMaximumVisibleWidth());
+    model.pixelsPerBeat = constrainedHorizontalZoom (visibleWidth / length);
+    grid.updateSize();
+    viewport.setViewPosition (0, viewport.getViewPositionY());
+    syncPositions();
+    grid.repaint();
+    ruler.repaint();
+    velocity.repaint();
+    overview.repaint();
+}
+
 void PianoRollEditor::setHorizontalZoomAt (double requested, double anchorBeat, int anchorScreenX)
 {
+    fitToClip = false;
     const double nextZoom = constrainedHorizontalZoom (requested);
     if (std::abs (nextZoom - model.pixelsPerBeat) < 1.0e-9)
         return;
@@ -1114,8 +1459,9 @@ double PianoRollEditor::constrainedHorizontalZoom (double requested) const
 {
     const double clipLength = std::max (0.001, model.clip().length());
     const double viewportWidth = std::max (1, viewport.getMaximumVisibleWidth());
-    const double maximum = std::min (320.0, viewportWidth / clipLength);
-    const double minimum = std::min (12.0, maximum);
+    const double fitZoom = viewportWidth / clipLength;
+    const double maximum = std::max (320.0, fitZoom);
+    const double minimum = std::min (12.0, fitZoom);
     return std::clamp (requested, minimum, maximum);
 }
 
@@ -1128,9 +1474,10 @@ void PianoRollEditor::zoomVertical (int deltaPixels)
 void PianoRollEditor::resized()
 {
     auto area = getLocalBounds();
-    auto top = area.removeFromTop (rulerHeight);
-    horizontalZoomHandle.setBounds (top.removeFromLeft (keyWidth));
-    rulerHolder.setBounds (top);
+    auto overviewArea = area.removeFromTop (overviewHeight);
+    overview.setBounds (overviewArea.withLeft (keyWidth));
+    auto rulerArea = area.removeFromTop (rulerHeight);
+    rulerHolder.setBounds (rulerArea.withLeft (keyWidth));
 
     auto bottom = area.removeFromBottom (velocityHeight);
     bottom.removeFromLeft (keyWidth);
@@ -1138,10 +1485,16 @@ void PianoRollEditor::resized()
 
     auto left = area.removeFromLeft (keyWidth);
     viewport.setBounds (area);
-    keyHolder.setBounds (left.withHeight (viewport.getMaximumVisibleHeight()));
+    keyHolder.setBounds (left.withY (overviewHeight + rulerHeight)
+                             .withHeight (viewport.getMaximumVisibleHeight()));
 
-    model.pixelsPerBeat = constrainedHorizontalZoom (model.pixelsPerBeat);
+    model.pixelsPerBeat = fitToClip
+        ? constrainedHorizontalZoom (static_cast<double> (std::max (1, viewport.getMaximumVisibleWidth()))
+                                     / std::max (0.001, model.clip().length()))
+        : constrainedHorizontalZoom (model.pixelsPerBeat);
     grid.updateSize();
+    if (fitToClip)
+        viewport.setViewPosition (0, viewport.getViewPositionY());
     syncPositions();
 
     if (! scrolledOnce && getHeight() > 0)
@@ -1158,11 +1511,17 @@ void PianoRollEditor::syncPositions()
     keys.setBounds (0, -vp.y, keyWidth, std::max (1, model.totalHeight()));
     ruler.setBounds (-vp.x, 0, std::max (1, static_cast<int> (model.gridWidthPixels()) + 1), rulerHeight);
     velocity.setBounds (-vp.x, 0, std::max (1, static_cast<int> (model.gridWidthPixels()) + 1), velocityHeight);
+    overview.repaint();
 }
 
 void PianoRollEditor::changeListenerCallback (juce::ChangeBroadcaster*)
 {
-    model.pixelsPerBeat = constrainedHorizontalZoom (model.pixelsPerBeat);
+    model.pixelsPerBeat = fitToClip
+        ? constrainedHorizontalZoom (static_cast<double> (std::max (1, viewport.getMaximumVisibleWidth()))
+                                     / std::max (0.001, model.clip().length()))
+        : constrainedHorizontalZoom (model.pixelsPerBeat);
+    if (fitToClip)
+        viewport.setViewPosition (0, viewport.getViewPositionY());
     const int keepPitch = lastCenterPitch;
     const int oldHeight = grid.getHeight();
     grid.updateSize();
@@ -1184,11 +1543,18 @@ void PianoRollEditor::changeListenerCallback (juce::ChangeBroadcaster*)
     keys.repaint();
     ruler.repaint();
     velocity.repaint();
+    overview.repaint();
 }
 
 void PianoRollEditor::setPlayhead (double beats)
 {
     grid.setPlayhead (beats);
+    overview.repaint();
+}
+
+void PianoRollEditor::setLocators (std::vector<std::pair<int, double>> locators, int selectedId)
+{
+    ruler.setLocators (std::move (locators), selectedId);
 }
 
 void PianoRollEditor::scrollToPitch (int pitch)

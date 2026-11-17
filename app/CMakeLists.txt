@@ -16,6 +16,8 @@ target_sources(ProjectFreedom PRIVATE
     ArrangementView.cpp
     DeviceView.cpp
     AudioEngine.cpp
+    DrumRackProcessor.cpp
+    DrumRackEditor.cpp
     OptionsWindow.cpp
     AudioClipEditor.cpp
     AudioFileBrowser.cpp
@@ -28,7 +30,9 @@ target_sources(ProjectFreedom PRIVATE
     RollModel.cpp
     PianoRollEditor.cpp
     MainComponent.cpp
-    ProjectFile.cpp)
+    ProjectFile.cpp
+    GrooveLibrary.cpp
+    GrooveBrowser.cpp)
 
 target_compile_definitions(ProjectFreedom PRIVATE
     JUCE_WEB_BROWSER=0
@@ -114,7 +118,9 @@ if(ROLL_BUILD_TESTS)
 
     add_executable(audio_engine_tests
         ../tests/AudioEngineTests.cpp
-        AudioEngine.cpp)
+        AudioEngine.cpp
+        DrumRackProcessor.cpp
+        DrumRackEditor.cpp)
     target_include_directories(audio_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(audio_engine_tests PRIVATE
         JUCE_MODAL_LOOPS_PERMITTED=1
@@ -154,4 +160,21 @@ if(ROLL_BUILD_TESTS)
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
     add_test(NAME ProjectFileTests COMMAND project_file_tests)
+
+    add_executable(groove_library_tests
+        ../tests/GrooveLibraryTests.cpp
+        GrooveLibrary.cpp)
+    target_include_directories(groove_library_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(groove_library_tests PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(groove_library_tests
+        PRIVATE
+            roll_core
+            Catch2::Catch2WithMain
+            juce::juce_gui_basics
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    add_test(NAME GrooveLibraryTests COMMAND groove_library_tests)
 endif()

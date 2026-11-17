@@ -1,6 +1,8 @@
 #include "MainComponent.h"
 #include "OptionsWindow.h"
 #include "WindowPlacement.h"
+#include "DrumRackEditor.h"
+#include "DrumRackProcessor.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,12 +28,90 @@ bool loadCreateFadesOnClipEdges()
         && xml->getBoolAttribute ("createFadesOnClipEdges", false);
 }
 
+double loadArrangementRatio()
+{
+    const auto xml = juce::XmlDocument::parse (userPreferencesFile());
+    const double ratio = xml != nullptr && xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES")
+        ? xml->getDoubleAttribute ("arrangementRatio", 0.42) : 0.42;
+    return std::isfinite (ratio) ? std::clamp (ratio, 0.15, 0.75) : 0.42;
+}
+
+int loadArrangementHeight()
+{
+    const auto xml = juce::XmlDocument::parse (userPreferencesFile());
+    return xml != nullptr && xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES")
+        ? std::max (-1, xml->getIntAttribute ("arrangementHeight", -1)) : -1;
+}
+
+std::unique_ptr<juce::XmlElement> loadUserPreferences()
+{
+    auto xml = juce::XmlDocument::parse (userPreferencesFile());
+    if (xml == nullptr || ! xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES"))
+        xml = std::make_unique<juce::XmlElement> ("PROJECT_FREEDOM_PREFERENCES");
+    return xml;
+}
+
 void saveCreateFadesOnClipEdges (bool enabled)
 {
-    juce::XmlElement xml ("PROJECT_FREEDOM_PREFERENCES");
-    xml.setAttribute ("createFadesOnClipEdges", enabled);
-    if (! xml.writeTo (userPreferencesFile()))
+    auto xml = loadUserPreferences();
+    xml->setAttribute ("createFadesOnClipEdges", enabled);
+    if (! xml->writeTo (userPreferencesFile()))
         juce::Logger::writeToLog ("MainComponent: nao foi possivel salvar as preferencias.");
+}
+
+void saveArrangementLayout (double ratio, int height)
+{
+    auto xml = loadUserPreferences();
+    xml->setAttribute ("arrangementRatio", ratio);
+    xml->setAttribute ("arrangementHeight", height);
+    if (! xml->writeTo (userPreferencesFile()))
+        juce::Logger::writeToLog ("MainComponent: nao foi possivel salvar as preferencias.");
+}
+
+std::shared_ptr<AudioFileData> createGroovePreviewAudio (const roll::GrooveTemplate& groove, double bpm)
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr int clickLength = 2205;
+    constexpr double maximumDurationSeconds = 30.0;
+    const double durationSeconds = 4.0 * 60.0 / bpm;
+    if (! std::isfinite (durationSeconds) || durationSeconds <= 0.0
+        || durationSeconds > maximumDurationSeconds)
+        return {};
+
+    const int sampleCount = static_cast<int> (std::ceil (durationSeconds * sampleRate));
+    auto preview = std::make_shared<AudioFileData>();
+    preview->sampleRate = sampleRate;
+    preview->durationSeconds = durationSeconds;
+    preview->samples = std::make_shared<juce::AudioBuffer<float>> (2, sampleCount);
+    preview->samples->clear();
+
+    const int slotsPerBeat = std::max (1, static_cast<int> (std::lround (1.0 / groove.gridBeats)));
+    for (std::size_t slot = 0; slot < groove.timingOffsets.size(); ++slot)
+    {
+        const double beat = std::max (0.0, static_cast<double> (slot) * groove.gridBeats
+                                           + groove.timingOffsets[slot] * groove.timingAmount);
+        const int start = static_cast<int> (std::lround (beat * 60.0 / bpm * sampleRate));
+        if (start >= sampleCount)
+            continue;
+
+        const bool accented = static_cast<int> (slot) % slotsPerBeat == 0;
+        const double frequency = accented ? 1320.0 : 880.0;
+        double velocity = 1.0;
+        if (groove.velocityMultipliers.size() == groove.timingOffsets.size())
+            velocity += (groove.velocityMultipliers[slot] - 1.0) * groove.velocityAmount;
+        const float amplitude = static_cast<float> ((accented ? 0.75 : 0.48) * velocity);
+
+        for (int sample = 0; sample < clickLength && start + sample < sampleCount; ++sample)
+        {
+            const double envelope = std::exp (-static_cast<double> (sample) / (sampleRate * 0.006));
+            const double phase = juce::MathConstants<double>::twoPi * frequency * sample / sampleRate;
+            const float value = amplitude * static_cast<float> (envelope * std::sin (phase));
+            for (int channel = 0; channel < preview->samples->getNumChannels(); ++channel)
+                preview->samples->addSample (channel, start + sample, value);
+        }
+    }
+
+    return preview;
 }
 
 double sourceBpmFromFileName (const juce::File& file, double fallback)
@@ -62,13 +142,6 @@ bool isProjectFile (const juce::File& file)
     const auto extension = file.getFileExtension();
     return extension.equalsIgnoreCase (".pfs") || extension.equalsIgnoreCase (".freedom");
 }
-
-// A fileira central começa em C3; a fileira superior preenche as teclas pretas.
-constexpr std::array<std::pair<int, int>, 15> computerMidiKeyboardMap {{
-    { 'A', 0 }, { 'W', 1 }, { 'S', 2 }, { 'E', 3 }, { 'D', 4 },
-    { 'F', 5 }, { 'T', 6 }, { 'G', 7 }, { 'Y', 8 }, { 'H', 9 },
-    { 'U', 10 }, { 'J', 11 }, { 'K', 12 }, { 'O', 13 }, { 'L', 14 }
-}};
 
 bool isTextEditorFocused()
 {
@@ -323,7 +396,7 @@ private:
     bool alignToParentTopRight = false;
 };
 
-// Janela de plugin: mantém o editor visível e oferece rolagem como fallback.
+// Janela de plugin: mantem o editor visivel e oferece rolagem como fallback.
 class MainComponent::PluginWindow : public juce::DocumentWindow, private juce::KeyListener
 {
 public:
@@ -441,6 +514,8 @@ private:
 MainComponent::MainComponent()
 {
     createFadesOnClipEdges = loadCreateFadesOnClipEdges();
+    arrangementRatio = loadArrangementRatio();
+    arrangementHeight = loadArrangementHeight();
     addAndMakeVisible (taskStatusBar);
     addAndMakeVisible (transport);
     transport.onProjectMenu = [this] { showProjectMenu(); };
@@ -469,8 +544,10 @@ MainComponent::MainComponent()
     computerMidiIndicator->setVisible (false);
 
     clipControls = { &scaleCaption, &lengthCaption, &gridCaption, &zoomCaption, &rootBox, &modeBox, &lengthBox, &scaleButton,
-                     &highlightButton, &foldButton, &foldScaleButton, &drawButton, &snapButton, &previewButton,
-                     &zoomHMinus, &zoomHPlus, &zoomVMinus, &zoomVPlus, &gridLabel, &editor };
+                     &highlightButton, &foldButton, &foldScaleButton, &drawButton, &snapButton, &previewButton, &groovesButton,
+                     &zoomHMinus, &zoomHPlus, &zoomVMinus, &zoomVPlus, &gridLabel, &editor,
+                     &pianoLocatorPreviousButton, &pianoLocatorAddButton, &pianoLocatorNextButton,
+                     &pianoLocatorDeleteButton };
     for (auto* c : clipControls) addAndMakeVisible (c);
 
     for (auto* l : { &scaleCaption, &lengthCaption, &gridCaption, &zoomCaption })
@@ -523,10 +600,25 @@ MainComponent::MainComponent()
         project.setAudioClipWarpEnabled (project.selectedTrackId, project.selectedAudioClipId, enabled);
     };
 
-    // botões não roubam o foco do teclado (Espaço continua sendo play/pause)
+    // botoes nao roubam o foco do teclado (Espaco continua sendo play/pause)
     for (auto* b : { &scaleButton, &highlightButton, &foldButton, &foldScaleButton, &drawButton, &snapButton, &previewButton,
-                     &zoomHMinus, &zoomHPlus, &zoomVMinus, &zoomVPlus, &clipTab, &deviceTab })
+                     &groovesButton,
+                     &zoomHMinus, &zoomHPlus, &zoomVMinus, &zoomVPlus, &clipTab, &deviceTab,
+                     &pianoLocatorPreviousButton, &pianoLocatorAddButton, &pianoLocatorNextButton,
+                     &pianoLocatorDeleteButton })
         b->setMouseClickGrabsKeyboardFocus (false);
+    pianoLocatorPreviousButton.setTooltip ("Ir para o locator anterior");
+    pianoLocatorAddButton.setTooltip ("Adicionar locator na posicao atual");
+    pianoLocatorNextButton.setTooltip ("Ir para o proximo locator");
+    pianoLocatorDeleteButton.setTooltip ("Remover o locator selecionado");
+    pianoLocatorPreviousButton.onClick = [this] { navigatePianoRollLocator (false); };
+    pianoLocatorAddButton.onClick = [this] { addPianoRollLocatorAtPlayhead(); };
+    pianoLocatorNextButton.onClick = [this] { navigatePianoRollLocator (true); };
+    pianoLocatorDeleteButton.onClick = [this] { deletePianoRollLocator(); };
+    pianoLocatorPreviousButton.setEnabled (false);
+    pianoLocatorAddButton.setEnabled (false);
+    pianoLocatorNextButton.setEnabled (false);
+    pianoLocatorDeleteButton.setEnabled (false);
     rootBox.setMouseClickGrabsKeyboardFocus (false);
     modeBox.setMouseClickGrabsKeyboardFocus (false);
     lengthBox.setMouseClickGrabsKeyboardFocus (false);
@@ -541,6 +633,7 @@ MainComponent::MainComponent()
     drawButton.onClick = [this] { model.drawMode = drawButton.getToggleState(); };
     snapButton.onClick = [this] { model.snap = snapButton.getToggleState(); model.sendChangeMessage(); };
     previewButton.onClick = [this] { model.previewOn = previewButton.getToggleState(); };
+    groovesButton.onClick = [this] { openGrooveBrowser(); };
     zoomHMinus.onClick = [this] { editor.zoomHorizontal (1.0 / 1.25); };
     zoomHPlus.onClick  = [this] { editor.zoomHorizontal (1.25); };
     zoomVMinus.onClick = [this] { editor.zoomVertical (-2); };
@@ -604,7 +697,52 @@ MainComponent::MainComponent()
         engine.graph().seek (g);
         arrangement.setPlayhead (g);
         editor.setPlayhead (local);
+        if (! engine.graph().isPlaying())
+        {
+            stopGroovePreview();
+            transportPaused = false;
+            pendingArrangementSeek = true;
+            pendingArrangementSeekBeat = g;
+            transport.togglePlay();
+        }
+        else
+            pendingArrangementSeek = false;
     };
+    editor.onLocatorSelected = [this] (int locatorId)
+    {
+        auto* placement = project.selectedClip();
+        if (placement == nullptr)
+            return;
+        const auto& markers = placement->clip.pianoRollLocators();
+        const auto marker = std::find_if (markers.begin(), markers.end(),
+            [locatorId] (const auto& item) { return item.id == locatorId; });
+        if (marker == markers.end())
+            return;
+        const double localBeat = marker->beat;
+        placement->clip.selectPianoRollLocator (locatorId);
+        project.sendChangeMessage();
+        if (editor.onSeek)
+            editor.onSeek (localBeat);
+    };
+    editor.onLocatorDeleteRequested = [this] (int locatorId) { deletePianoRollLocator (locatorId); };
+    editor.onLocatorMoveStarted = [this] (int locatorId)
+    {
+        if (auto* placement = project.selectedClip())
+        {
+            project.beginEdit();
+            placement->clip.selectPianoRollLocator (locatorId);
+            project.sendChangeMessage();
+        }
+    };
+    editor.onLocatorMoved = [this] (int locatorId, double beat)
+    {
+        if (auto* placement = project.selectedClip();
+            placement != nullptr && placement->clip.movePianoRollLocator (locatorId, beat))
+            project.sendChangeMessage();
+    };
+    editor.onLocatorMoveFinished = [this] { project.endEdit(); };
+    editor.onTransportToggle = [this] { transport.togglePlay(); };
+    editor.isTransportPlaying = [this] { return engine.graph().isPlaying(); };
 
     arrangement.onSeek = [this] (double g)
     {
@@ -617,7 +755,7 @@ MainComponent::MainComponent()
     };
     arrangement.onArrangementSeekRequested = [this] (double beats)
     {
-        pendingArrangementSeek = true;
+        pendingArrangementSeek = ! engine.graph().isPlaying();
         pendingArrangementSeekBeat = beats;
     };
     arrangement.onLocatorLaunchRequested = [this] (double beats)
@@ -625,6 +763,7 @@ MainComponent::MainComponent()
         if (engine.graph().isPlaying())
             return;
         pendingArrangementSeek = false;
+        transportPaused = false;
         if (arrangement.onSeek)
             arrangement.onSeek (beats);
         suppressSongStartOnce = true;
@@ -668,12 +807,22 @@ MainComponent::MainComponent()
     arrangement.onTrackDuplicateRequested = [this] (int id) { duplicateSelectedTrack (id); };
     arrangement.canAcceptPluginDrop = [this] (const juce::String& identifier, int trackId)
     {
+        if (identifier == DrumRackProcessor::pluginIdentifier)
+        {
+            const auto* track = project.track (trackId);
+            return track != nullptr && track->type == roll::TrackType::Midi;
+        }
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr
             && (trackId != AudioEngine::masterTrackId || engine.canAcceptPlugin (trackId, *description));
     };
     arrangement.onPluginDropped = [this] (const juce::String& identifier, int trackId, double)
     {
+        if (identifier == DrumRackProcessor::pluginIdentifier)
+        {
+            addNativeDrumRackToTrack (trackId);
+            return;
+        }
         if (auto description = scanner.list().getTypeForIdentifierString (identifier))
         {
             auto* target = project.track (trackId);
@@ -738,6 +887,7 @@ MainComponent::MainComponent()
     arrangement.onGridChanged = [this] { refreshAudioClipEditor(); };
     audioBrowser.onPreviewRequested = [this] (const juce::File& file)
     {
+        stopGroovePreview();
         const int request = ++previewLoadToken;
         ++pendingPreviewLoads;
         updateActionIndicator();
@@ -764,6 +914,7 @@ MainComponent::MainComponent()
     audioBrowser.onPreviewStopRequested = [this]
     {
         ++previewLoadToken;
+        stopGroovePreview();
         engine.stopAudioPreview();
     };
     audioBrowser.onPreviewGainChanged = [this] (float gain) { engine.setAudioPreviewGain (gain); };
@@ -782,6 +933,29 @@ MainComponent::MainComponent()
     };
     transport.onBeforePlay = [this]
     {
+        stopGroovePreview();
+        if (pendingArrangementSeek)
+        {
+            const double seekBeat = pendingArrangementSeekBeat;
+            pendingArrangementSeek = false;
+            suppressSongStartOnce = false;
+            transportPaused = false;
+            transportPosition = seekBeat;
+            engine.graph().seek (seekBeat);
+            arrangement.setPlayhead (seekBeat);
+            editor.setPlayhead (seekBeat - model.clipStartBeats);
+            return;
+        }
+        if (transportPaused && ! pendingArrangementSeek)
+        {
+            transportPaused = false;
+            transportPosition = pausedPosition;
+            engine.graph().seek (pausedPosition);
+            arrangement.setPlayhead (pausedPosition);
+            editor.setPlayhead (pausedPosition - model.clipStartBeats);
+            return;
+        }
+        transportPaused = false;
         double selectionStart = 0.0;
         if (arrangement.getTimeSelectionStart (selectionStart))
         {
@@ -793,13 +967,12 @@ MainComponent::MainComponent()
             return;
         }
 
-        if (pendingArrangementSeek)
+        if (transportPaused)
         {
-            const bool stillAtSeek = std::abs (transportPosition - pendingArrangementSeekBeat) < 1.0e-6;
-            pendingArrangementSeek = false;
-            if (stillAtSeek)
-                return;
+            transport.togglePlay();
+            return;
         }
+
         if (suppressSongStartOnce)
         {
             suppressSongStartOnce = false;
@@ -817,10 +990,18 @@ MainComponent::MainComponent()
     };
     const auto rememberPausedPosition = [this]
     {
-        pausedPosition = engine.graph().positionBeats();
+        pausedPosition = transportPosition;
     };
-    transport.onBeforePause = rememberPausedPosition;
-    transport.onBeforeStop = rememberPausedPosition;
+    transport.onBeforePause = [this, rememberPausedPosition]
+    {
+        rememberPausedPosition();
+        transportPaused = true;
+    };
+    transport.onBeforeStop = [this, rememberPausedPosition]
+    {
+        rememberPausedPosition();
+        transportPaused = false;
+    };
     transport.onLoopToggled = [this] (bool on) { arrangement.setLoopEnabled (on); };
     arrangement.onLoopToggleRequested = [this] (bool on) { transport.setLoopEnabled (on); };
     transport.onBrowserToggled = [this] (bool visible) { setBrowserVisible (visible); };
@@ -881,23 +1062,42 @@ MainComponent::MainComponent()
     };
     deviceView.canAcceptPluginDrop = [this] (int trackId, const juce::String& identifier)
     {
+        if (identifier == DrumRackProcessor::pluginIdentifier)
+        {
+            const auto* track = project.track (trackId);
+            return track != nullptr && track->type == roll::TrackType::Midi;
+        }
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr && engine.canAcceptPlugin (trackId, *description);
     };
     deviceView.onPluginDropped = [this] (int trackId, const juce::String& identifier, int insertionIndex)
     {
+        if (identifier == DrumRackProcessor::pluginIdentifier)
+        {
+            addNativeDrumRackToTrack (trackId);
+            return;
+        }
         if (auto description = scanner.list().getTypeForIdentifierString (identifier))
             loadDevice (*description, trackId, insertionIndex);
     };
     deviceView.onRemove = [this] (int trackId, int deviceId)
     {
         windows.erase (deviceId);
+        closeWindowsOfRack (trackId, deviceId);
         engine.removeDevice (trackId, deviceId);
         refreshDeviceView();
         project.sendChangeMessage();
     };
 
     browser.onLoadRequested = [this] (const juce::PluginDescription& d) { loadDevice (d); };
+    browser.onAddDrumRackRequested = [this]
+    {
+        const auto deviceId = engine.addDrumRack (project.selectedTrackId);
+        if (deviceId <= 0)
+            return juce::String ("Drum Rack can only be added to a MIDI track.");
+        showDetail (true);
+        return juce::String ("Drum Rack added to the selected track.");
+    };
     scanner.onStarted = [this]
     {
         scanningPlugins = true;
@@ -947,9 +1147,11 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    stopGroovePreview();
+    grooveBrowserWindow.reset();
     releaseComputerMidiNotes();
 
-    // O registry é membro desta classe; encerre primeiro qualquer worker que o utilize.
+    // O registry e membro desta classe; encerre primeiro qualquer worker que o utilize.
     if (taskSimulationThread.joinable())
     {
         taskSimulationThread.request_stop();
@@ -1068,7 +1270,10 @@ void MainComponent::resized()
         return;
     }
 
-    const int arrH = std::clamp (static_cast<int> (right.getHeight() * arrangementRatio), 130, std::max (131, right.getHeight() - 230));
+    const int maxArrangementHeight = std::max (131, right.getHeight() - 230);
+    const int arrH = arrangementHeight >= 0
+        ? std::clamp (arrangementHeight, 130, maxArrangementHeight)
+        : std::clamp (static_cast<int> (right.getHeight() * arrangementRatio), 130, maxArrangementHeight);
     arrangement.setBounds (right.removeFromTop (arrH));
     splitterRect = right.removeFromTop (10);
 
@@ -1076,6 +1281,14 @@ void MainComponent::resized()
     clipTab.setBounds (tabs.removeFromLeft (80));
     tabs.removeFromLeft (4);
     deviceTab.setBounds (tabs.removeFromLeft (110));
+    auto locatorButtons = tabs.removeFromRight (128);
+    pianoLocatorPreviousButton.setBounds (locatorButtons.removeFromLeft (26).reduced (0, 2));
+    locatorButtons.removeFromLeft (4);
+    pianoLocatorAddButton.setBounds (locatorButtons.removeFromLeft (26).reduced (0, 2));
+    locatorButtons.removeFromLeft (4);
+    pianoLocatorNextButton.setBounds (locatorButtons.removeFromLeft (26).reduced (0, 2));
+    locatorButtons.removeFromLeft (4);
+    pianoLocatorDeleteButton.setBounds (locatorButtons.removeFromLeft (36).reduced (0, 2));
     right.removeFromTop (4);
 
     deviceView.setBounds (right);
@@ -1111,7 +1324,10 @@ void MainComponent::resized()
     row.removeFromLeft (4);
     snapButton.setBounds (row);
     side.removeFromTop (4);
-    previewButton.setBounds (side.removeFromTop (26).removeFromLeft (84));
+    row = side.removeFromTop (26);
+    previewButton.setBounds (row.removeFromLeft (76));
+    row.removeFromLeft (4);
+    groovesButton.setBounds (row);
     side.removeFromTop (8);
     zoomCaption.setBounds (side.removeFromTop (16));
     row = side.removeFromTop (26);
@@ -1142,7 +1358,8 @@ void MainComponent::mouseDrag (const juce::MouseEvent& e)
     }
     else if (draggingSplitter)
     {
-        arrangementRatio = std::clamp (static_cast<double> (e.y - rightTop) / rightHeight, 0.15, 0.75);
+        arrangementHeight = std::clamp (e.y - rightTop, 130, std::max (131, rightHeight - 230));
+        arrangementRatio = std::clamp (static_cast<double> (arrangementHeight) / rightHeight, 0.15, 0.75);
         resized();
         repaint();
     }
@@ -1150,6 +1367,8 @@ void MainComponent::mouseDrag (const juce::MouseEvent& e)
 
 void MainComponent::mouseUp (const juce::MouseEvent&)
 {
+    if (draggingSplitter)
+        saveArrangementLayout (arrangementRatio, arrangementHeight);
     draggingBrowserSplitter = draggingSplitter = false;
 }
 
@@ -1172,6 +1391,7 @@ void MainComponent::showDetail (bool devices)
     deviceView.setVisible (devices);
     audioClipEditor.setVisible (! devices && audioClipEditorOpen);
     if (devices) refreshDeviceView();
+    resized();
 }
 
 void MainComponent::setBrowserVisible (bool visible)
@@ -1766,7 +1986,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     if (computerMidiKeyboardEnabled && juce::Process::isForegroundProcess() && ! isTextEditorFocused()
         && ! ctrl && ! k.getModifiers().isAltDown() && ! k.getModifiers().isShiftDown())
     {
-        const bool isMappedKey = std::any_of (computerMidiKeyboardMap.begin(), computerMidiKeyboardMap.end(),
+        const auto& keyboardMap = DrumRackProcessor::computerMidiKeyboardMap;
+        const bool isMappedKey = std::any_of (keyboardMap.begin(), keyboardMap.end(),
             [keyCode] (const auto& mapping) { return mapping.first == static_cast<int> (keyCode); });
         if (isMappedKey || keyCode == 'Z' || keyCode == 'X' || keyCode == 'C' || keyCode == 'V')
         {
@@ -1793,6 +2014,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     if (ctrl && keyCode == 'O')
     {
         chooseProjectFile (true);
+        return true;
+    }
+    if (ctrl && keyCode == 'D' && ! isTextEditorFocused()
+        && ! editor.hasKeyboardFocus (true) && arrangement.hasSelectionToDuplicate())
+    {
+        arrangement.duplicateSelection();
         return true;
     }
     if (ctrl && keyCode == 'D' && ! isTextEditorFocused()
@@ -1850,7 +2077,7 @@ bool MainComponent::keyStateChanged (bool)
 
 void MainComponent::cycleFocus()
 {
-    // navegação por teclado: lista de plugins -> arranjo -> piano roll
+    // navegacao por teclado: lista de plugins -> arranjo -> piano roll
     if (browser.hasKeyboardFocus (true))          arrangement.grabFocus();
     else if (arrangement.hasKeyboardFocus (true)) { if (showingDevices) showDetail (false); editor.grabFocus(); }
     else                                          browser.grabFocus();
@@ -2438,6 +2665,7 @@ void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData 
     transport.setLoopEnabled (data.loopEnabled);
     transportPosition = data.transportPosition;
     pausedPosition = data.transportPosition;
+    transportPaused = false;
     engine.graph().seek (transportPosition);
     arrangement.setPlayhead (transportPosition);
 
@@ -2492,6 +2720,27 @@ void MainComponent::restoreNextProjectPlugin()
     while (nextProjectPlugin < pendingProjectPlugins.size())
     {
         auto plugin = pendingProjectPlugins[nextProjectPlugin++];
+        if (plugin.identifier == AudioEngine::drumRackPluginIdentifier)
+        {
+            const int deviceId = engine.addDrumRack (plugin.trackId);
+            if (deviceId <= 0)
+            {
+                ++missingProjectPlugins;
+                setProjectStatus ("Nao foi possivel carregar o Drum Rack.");
+            }
+            else
+            {
+                if (! engine.restorePluginState (plugin.trackId, deviceId, plugin.state))
+                    ++missingProjectPlugins;
+                engine.setDeviceBypassed (plugin.trackId, deviceId, plugin.bypassed);
+                loadedProjectPlugins.emplace_back (plugin, deviceId);
+                refreshDeviceView();
+            }
+            ++projectLoadWorkDone;
+            advanceProjectLoadTask();
+            continue;
+        }
+
         const auto description = scanner.list().getTypeForIdentifierString (plugin.identifier);
         if (description == nullptr)
         {
@@ -2624,13 +2873,19 @@ void MainComponent::onSelectionChanged()
 {
     auto* p = project.selectedClip();
     const auto* selectedTrack = project.selectedTrack();
+    stopGroovePreview();
     const auto* audio = selectedTrack != nullptr
         ? selectedTrack->findAudioClip (project.selectedAudioClipId) : nullptr;
     roll::Clip* target = p != nullptr ? &p->clip : nullptr;
     const bool changed = (target != (model.hasClip() ? &model.clip() : nullptr));
 
     model.clipStartBeats = p != nullptr ? p->start : 0.0;
-    if (changed) model.setClip (target);
+    if (changed)
+    {
+        model.setClip (target);
+        if (target != nullptr)
+            editor.fitClipToView();
+    }
 
     if (p != nullptr)
         lengthBox.setSelectedId (static_cast<int> (std::lround (p->clip.length() / 4.0)), juce::dontSendNotification);
@@ -2645,6 +2900,15 @@ void MainComponent::onSelectionChanged()
         arrangement.setPlayhead (transportPosition);
     }
     refreshAudioClipEditor();
+    if (grooveBrowserWindow != nullptr)
+    {
+        const bool canUseGroove = p != nullptr && selectedTrack != nullptr
+                               && selectedTrack->type == roll::TrackType::Midi;
+        grooveBrowserWindow->setTargetAvailable (canUseGroove);
+        grooveBrowserWindow->setAppliedGrooveName (
+            canUseGroove && p->clip.groove()
+                ? juce::String (p->clip.groove()->name) : juce::String());
+    }
     showDetail (showingDevices);
     refreshDeviceView();
 }
@@ -2656,6 +2920,118 @@ void MainComponent::openAudioClipEditor (int trackId, int clipId)
     refreshAudioClipEditor();
     showDetail (false);
     resized();
+}
+
+void MainComponent::openGrooveBrowser()
+{
+    if (grooveBrowserWindow == nullptr)
+    {
+        grooveBrowserWindow = std::make_unique<GrooveBrowserWindow>();
+        const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+        grooveBrowserWindow->onTransportKeyPress = [this, token] (const juce::KeyPress& key)
+        {
+            const auto alive = token.lock();
+            return alive != nullptr && alive->load() && handleTransportKeyPress (key);
+        };
+        grooveBrowserWindow->onPreview = [this] (const roll::GrooveTemplate& groove)
+        {
+            previewGroove (groove);
+        };
+        grooveBrowserWindow->onStopPreview = [this] { stopGroovePreview(); };
+        grooveBrowserWindow->onApply = [this] (const roll::GrooveTemplate& groove)
+        {
+            return applyGrooveToSelectedClip (groove);
+        };
+        grooveBrowserWindow->onClear = [this] { return removeGrooveFromSelectedClip(); };
+    }
+
+    const auto* track = project.selectedTrack();
+    const auto* clip = project.selectedClip();
+    const bool canUseGroove = clip != nullptr && track != nullptr && track->type == roll::TrackType::Midi;
+    grooveBrowserWindow->setTargetAvailable (canUseGroove);
+    grooveBrowserWindow->setAppliedGrooveName (
+        canUseGroove && clip->clip.groove()
+            ? juce::String (clip->clip.groove()->name) : juce::String());
+    grooveBrowserWindow->centreAroundComponent (this, 620, 480);
+    grooveBrowserWindow->setVisible (true);
+    grooveBrowserWindow->toFront (true);
+    grooveBrowserWindow->setAutoPreviewEnabled (false);
+}
+
+void MainComponent::previewGroove (const roll::GrooveTemplate& groove)
+{
+    stopGroovePreview();
+    if (engine.graph().isPlaying())
+    {
+        if (grooveBrowserWindow != nullptr)
+            grooveBrowserWindow->setStatus ("Stop playback before previewing a groove.");
+        return;
+    }
+    if (! groove.isValid())
+    {
+        if (grooveBrowserWindow != nullptr)
+            grooveBrowserWindow->setStatus ("The selected groove is invalid.");
+        return;
+    }
+
+    const double bpm = engine.graph().getBpm();
+    auto preview = std::isfinite (bpm) && bpm > 0.0
+        ? createGroovePreviewAudio (groove, bpm) : nullptr;
+    if (preview == nullptr)
+    {
+        if (grooveBrowserWindow != nullptr)
+            grooveBrowserWindow->setStatus ("The project tempo is outside the preview range.");
+        return;
+    }
+
+    engine.previewAudio (std::move (preview));
+    groovePreviewAudioActive = true;
+    if (grooveBrowserWindow != nullptr)
+        grooveBrowserWindow->setStatus ("Previewing " + juce::String (groove.name) + ".");
+}
+
+void MainComponent::stopGroovePreview()
+{
+    if (! groovePreviewAudioActive)
+        return;
+    engine.stopAudioPreview();
+    groovePreviewAudioActive = false;
+}
+
+juce::String MainComponent::applyGrooveToSelectedClip (const roll::GrooveTemplate& groove)
+{
+    auto* track = project.selectedTrack();
+    auto* placement = project.selectedClip();
+    if (! groove.isValid())
+        return "O arquivo de groove contem dados invalidos.";
+    if (track == nullptr || track->type != roll::TrackType::Midi || placement == nullptr)
+        return "Selecione um clip MIDI para aplicar o groove.";
+
+    stopGroovePreview();
+    project.beginEdit();
+    placement->clip.setGroove (groove);
+    project.endEdit();
+    project.notifyTrackNotes (track->id);
+    project.sendChangeMessage();
+    return "Groove aplicado sem alterar as notas originais; use Desfazer para remove-lo.";
+}
+
+juce::String MainComponent::removeGrooveFromSelectedClip()
+{
+    auto* track = project.selectedTrack();
+    auto* placement = project.selectedClip();
+    if (track == nullptr || track->type != roll::TrackType::Midi || placement == nullptr)
+        return "Selecione um clip MIDI para remover o groove.";
+    if (! placement->clip.groove())
+        return "O clip selecionado nao tem groove.";
+
+    stopGroovePreview();
+    project.beginEdit();
+    placement->clip.setGroove (std::nullopt);
+    project.endEdit();
+    project.notifyTrackNotes (track->id);
+    project.sendChangeMessage();
+    return "Groove removido do clip.";
 }
 
 void MainComponent::refreshAudioClipEditor()
@@ -2692,13 +3068,125 @@ void MainComponent::applyLength()
     if (! t->isFree (p->start, newLen, p->id))
     {
         lengthBox.setSelectedId (static_cast<int> (std::lround (p->clip.length() / 4.0)), juce::dontSendNotification);
-        return;                                           // bateria em outro clip: não deixa
+        return;                                           // bateria em outro clip: nao deixa
     }
     p->clip.setLength (newLen);
     project.growTo (p->end() + 64.0);
     project.notifyTrackNotes (t->id);
     project.sendChangeMessage();
     model.sendChangeMessage();
+}
+
+void MainComponent::navigatePianoRollLocator (bool forward)
+{
+    auto* placement = project.selectedClip();
+    if (placement == nullptr)
+        return;
+
+    auto& clip = placement->clip;
+    const auto& markers = clip.pianoRollLocators();
+    if (markers.empty())
+        return;
+
+    const auto seekTo = [this, &clip] (double beat, int selectedId)
+    {
+        clip.selectPianoRollLocator (selectedId);
+        project.sendChangeMessage();
+        if (editor.onSeek)
+            editor.onSeek (beat);
+    };
+    auto it = std::find_if (markers.begin(), markers.end(),
+        [&clip] (const auto& marker) { return marker.id == clip.selectedPianoRollLocatorId(); });
+    if (it != markers.end())
+    {
+        if (forward)
+        {
+            if (++it == markers.end())
+            {
+                seekTo (clip.length(), -1);
+                return;
+            }
+        }
+        else
+        {
+            if (it == markers.begin())
+            {
+                seekTo (0.0, -1);
+                return;
+            }
+            --it;
+        }
+    }
+    else
+    {
+        const double currentBeat = std::clamp (transportPosition - model.clipStartBeats, 0.0, clip.length());
+        if (forward)
+        {
+            it = std::upper_bound (markers.begin(), markers.end(), currentBeat,
+                [] (double beat, const auto& marker) { return beat < marker.beat; });
+            if (it == markers.end())
+            {
+                seekTo (clip.length(), -1);
+                return;
+            }
+        }
+        else
+        {
+            it = std::lower_bound (markers.begin(), markers.end(), currentBeat,
+                [] (const auto& marker, double beat) { return marker.beat < beat; });
+            if (it == markers.begin())
+            {
+                seekTo (0.0, -1);
+                return;
+            }
+            --it;
+        }
+    }
+
+    seekTo (it->beat, it->id);
+}
+
+void MainComponent::addPianoRollLocatorAtPlayhead()
+{
+    auto* placement = project.selectedClip();
+    if (placement == nullptr)
+        return;
+
+    auto& clip = placement->clip;
+    const double localBeat = std::clamp (transportPosition - model.clipStartBeats, 0.0, clip.length());
+    const double snappedBeat = std::clamp (model.snapBeats (localBeat), 0.0, clip.length());
+    const bool alreadyExists = std::any_of (clip.pianoRollLocators().begin(), clip.pianoRollLocators().end(),
+        [snappedBeat] (const auto& marker) { return std::abs (marker.beat - snappedBeat) < 1.0e-9; });
+    if (! alreadyExists)
+        project.beginEdit();
+    clip.addPianoRollLocator (snappedBeat);
+    if (! alreadyExists)
+        project.endEdit();
+    project.sendChangeMessage();
+}
+
+void MainComponent::deletePianoRollLocator (int id)
+{
+    auto* placement = project.selectedClip();
+    if (placement == nullptr)
+        return;
+
+    auto& clip = placement->clip;
+    if (id < 0)
+    {
+        id = clip.selectedPianoRollLocatorId();
+        if (id < 0 && ! clip.pianoRollLocators().empty())
+            id = std::max_element (clip.pianoRollLocators().begin(), clip.pianoRollLocators().end(),
+                [] (const auto& a, const auto& b) { return a.id < b.id; })->id;
+    }
+    if (id < 0 || std::none_of (clip.pianoRollLocators().begin(), clip.pianoRollLocators().end(),
+                                [id] (const auto& marker) { return marker.id == id; }))
+        return;
+
+    project.beginEdit();
+    clip.removePianoRollLocator (id);
+    project.endEdit();
+    project.sendChangeMessage();
 }
 
 void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* src)
@@ -2713,6 +3201,21 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* src)
     else if (src == &project)
     {
         refreshAudioClipEditor();
+        std::vector<std::pair<int, double>> locators;
+        const auto* placement = project.selectedClip();
+        const auto* clip = placement != nullptr ? &placement->clip : nullptr;
+        if (clip != nullptr)
+            locators.reserve (clip->pianoRollLocators().size());
+        if (clip != nullptr)
+            for (const auto& marker : clip->pianoRollLocators())
+                locators.emplace_back (marker.id, marker.beat);
+        editor.setLocators (std::move (locators),
+                            clip != nullptr ? clip->selectedPianoRollLocatorId() : -1);
+        const bool anyLocators = clip != nullptr && ! clip->pianoRollLocators().empty();
+        pianoLocatorPreviousButton.setEnabled (anyLocators);
+        pianoLocatorNextButton.setEnabled (anyLocators);
+        pianoLocatorDeleteButton.setEnabled (anyLocators);
+        pianoLocatorAddButton.setEnabled (clip != nullptr);
         model.clipStartBeats = project.selectedClip() != nullptr ? project.selectedClip()->start : 0.0;
         if (auto* p = project.selectedClip())
             lengthBox.setSelectedId (static_cast<int> (std::lround (p->clip.length() / 4.0)), juce::dontSendNotification);
@@ -2789,7 +3292,7 @@ void MainComponent::releaseComputerMidiNotes()
 
 void MainComponent::updateComputerMidiKeyboard()
 {
-    // O timer cobre também teclas focadas em outros painéis; keyStateChanged reduz a latência.
+    // O timer cobre tambem teclas focadas em outros paineis; keyStateChanged reduz a latencia.
     const auto modifiers = juce::ModifierKeys::getCurrentModifiers();
     const bool hasShortcutModifier = modifiers.isCtrlDown() || modifiers.isCommandDown()
                                   || modifiers.isAltDown() || modifiers.isShiftDown();
@@ -2804,7 +3307,7 @@ void MainComponent::updateComputerMidiKeyboard()
 
     const bool acceptKeys = computerMidiKeyboardEnabled && appForeground && ! audioRenderInProgress
                          && ! textFocused && ! hasShortcutModifier;
-    // Z/X mudam a oitava e C/V ajustam a velocity em passos de 20, como no Live.
+    // Z/X mudam a oitava e C/V ajustam a velocity em passos de 20.
     const std::array<int, 4> controlKeys { 'Z', 'X', 'C', 'V' };
     bool statusChanged = false;
     bool noteChanged = false;
@@ -2828,14 +3331,16 @@ void MainComponent::updateComputerMidiKeyboard()
     const int midiTrackId = selectedTrack != nullptr && selectedTrack->type == roll::TrackType::Midi
                           ? selectedTrack->id : -1;
 
-    for (std::size_t i = 0; i < computerMidiKeyboardMap.size(); ++i)
+    const auto& keyboardMap = DrumRackProcessor::computerMidiKeyboardMap;
+    for (std::size_t i = 0; i < keyboardMap.size(); ++i)
     {
-        const auto [keyCode, semitone] = computerMidiKeyboardMap[i];
+        const auto [keyCode, semitone] = keyboardMap[i];
         const bool down = acceptKeys && juce::KeyPress::isKeyCurrentlyDown (keyCode);
 
         if (down && ! computerMidiKeyDown[i] && midiTrackId >= 0)
         {
-            const int pitch = 60 + semitone + computerMidiOctaveOffset * 12;
+            const int pitch = DrumRackProcessor::firstMidiNote
+                            + semitone + computerMidiOctaveOffset * 12;
             if (pitch >= 0 && pitch <= 127)
             {
                 engine.previewNote (midiTrackId, pitch, true,
@@ -3038,6 +3543,35 @@ void MainComponent::duplicateSelectedTrack (int trackId)
     copyNextPlugin (copyNextPlugin, 0);
 }
 
+void MainComponent::addNativeDrumRackToTrack (int trackId)
+{
+    const auto* track = project.track (trackId);
+    if (track == nullptr || track->type != roll::TrackType::Midi)
+    {
+        browser.setStatus ("O Drum Rack so pode ser adicionado a um canal MIDI.");
+        return;
+    }
+
+    for (const auto& device : engine.devices (trackId))
+        if (device.isInstrument)
+        {
+            windows.erase (device.id);
+            closeWindowsOfRack (trackId, device.id);
+        }
+    const int deviceId = engine.addDrumRack (trackId);
+    if (deviceId <= 0)
+    {
+        browser.setStatus ("Nao foi possivel adicionar o Drum Rack a este canal.");
+        return;
+    }
+
+    project.selectTrack (trackId);
+    showDetail (true);
+    refreshDeviceView();
+    project.sendChangeMessage();
+    openDeviceEditor (trackId, deviceId);
+}
+
 void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetTrackId, int insertionIndex)
 {
     auto* t = targetTrackId >= 0 ? project.track (targetTrackId) : project.selectedTrack();
@@ -3064,9 +3598,13 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
         return;
     }
 
-    if (desc.isInstrument)                                // o instrumento atual será substituído: fecha a UI dele
+    if (desc.isInstrument)                                // o instrumento atual sera substituido: fecha a UI dele
         for (const auto& d : existingDevices)
-            if (d.isInstrument) windows.erase (d.id);
+            if (d.isInstrument)
+            {
+                windows.erase (d.id);
+                closeWindowsOfRack (trackId, d.id);
+            }
 
     // Use the same slot index that AudioEngine will use when it inserts the plugin.
     int pluginSlot = 0;
@@ -3142,6 +3680,121 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
 
     if (auto ed = engine.createDeviceEditor (trackId, deviceId))
     {
+        if (auto* drumRackEditor = dynamic_cast<DrumRackEditor*> (ed.get()))
+        {
+            const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+            drumRackEditor->onTransportKeyPress = [this, token] (const juce::KeyPress& key)
+            {
+                const auto alive = token.lock();
+                return alive != nullptr && alive->load() && handleTransportKeyPress (key);
+            };
+            const juce::Component::SafePointer<DrumRackEditor> safeEditor (drumRackEditor);
+            drumRackEditor->onPadEffectRequested = [this, token, safeEditor, trackId, deviceId]
+                (int pad, const juce::String& identifier)
+            {
+                const auto alive = token.lock();
+                if (alive == nullptr || ! alive->load())
+                    return;
+                auto description = scanner.list().getTypeForIdentifierString (identifier);
+                if (description == nullptr || description->isInstrument)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon, "Efeito do pad",
+                        "Arraste um plugin de efeito de audio para o pad.");
+                    return;
+                }
+
+                const auto effectName = description->name;
+                engine.addPadEffect (trackId, deviceId, pad, *description,
+                    [this, token, safeEditor, effectName] (const juce::String& error)
+                    {
+                        const auto callbackAlive = token.lock();
+                        if (callbackAlive == nullptr || ! callbackAlive->load())
+                            return;
+                        if (error.isNotEmpty())
+                        {
+                            juce::AlertWindow::showMessageBoxAsync (
+                                juce::MessageBoxIconType::WarningIcon, "Efeito do pad", error);
+                            return;
+                        }
+                        if (safeEditor != nullptr)
+                            safeEditor->refreshPadEffects (true);
+                        browser.setStatus ("Efeito " + effectName + " adicionado ao pad.");
+                    });
+            };
+            drumRackEditor->onPadEffectEditorRequested = [this, token, trackId, deviceId]
+                (int pad, int effectIndex)
+            {
+                const auto alive = token.lock();
+                if (alive == nullptr || ! alive->load())
+                    return;
+                const auto key = std::make_tuple (trackId, deviceId, pad, effectIndex);
+                if (const auto existing = padEffectWindowIds.find (key);
+                    existing != padEffectWindowIds.end())
+                    if (const auto window = windows.find (existing->second); window != windows.end())
+                    {
+                        window->second->setVisible (true);
+                        window->second->toFront (true);
+                        return;
+                    }
+
+                auto editor = engine.createPadEffectEditor (trackId, deviceId, pad, effectIndex);
+                if (editor == nullptr)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::InfoIcon, "Efeito do pad",
+                        "Este efeito nao possui uma interface grafica.");
+                    return;
+                }
+
+                juce::String title = "Efeito do pad " + juce::String (pad + 1);
+                if (const auto* track = project.track (trackId))
+                    title = juce::String (track->name) + " - " + title;
+                const auto& displays = juce::Desktop::getInstance().getDisplays();
+                const auto* display = displays.getDisplayForRect (getScreenBounds());
+                if (display == nullptr)
+                    display = displays.getPrimaryDisplay();
+                const auto displayArea = display != nullptr ? display->userBounds.toNearestInt()
+                                                            : juce::Rectangle<int> (0, 0, 1280, 720);
+                std::vector<roll::Rect> occupiedWindows;
+                for (const auto& [openId, window] : windows)
+                {
+                    juce::ignoreUnused (openId);
+                    if (window != nullptr && window->isVisible())
+                    {
+                        const auto bounds = window->getScreenBounds();
+                        occupiedWindows.push_back ({ bounds.getX(), bounds.getY(),
+                                                     bounds.getWidth(), bounds.getHeight() });
+                    }
+                }
+                const int effectWindowId = nextPadEffectWindowId--;
+                windows[effectWindowId] = std::make_unique<PluginWindow> (
+                    title, std::move (editor), displayArea, nextPluginCascadeIndex++, occupiedWindows,
+                    [this, token]
+                    {
+                        const auto callbackAlive = token.lock();
+                        if (callbackAlive != nullptr && callbackAlive->load())
+                            updatePluginWindowZOrder();
+                    },
+                    [this, token] (const juce::KeyPress& key)
+                    {
+                        const auto callbackAlive = token.lock();
+                        return callbackAlive != nullptr && callbackAlive->load()
+                            && handleTransportKeyPress (key);
+                    });
+                padEffectWindowIds[key] = effectWindowId;
+                padEffectWindowOwners[effectWindowId] = { trackId, deviceId, pad };
+                windows[effectWindowId]->toFront (true);
+                updatePluginWindowZOrder();
+            };
+            drumRackEditor->onPadEffectsChanged = [this, token, trackId, deviceId] (int pad)
+            {
+                const auto alive = token.lock();
+                if (alive != nullptr && alive->load())
+                    closeWindowsOfPad (trackId, deviceId, pad);
+            };
+        }
+
         juce::String title;
         for (const auto& d : engine.devices (trackId)) if (d.id == deviceId) title = d.name;
         if (auto* t = project.track (trackId)) title += "  -  " + juce::String (t->name);
@@ -3199,4 +3852,59 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
 void MainComponent::closeWindowsOfTrack (int trackId)
 {
     for (const auto& d : engine.devices (trackId)) windows.erase (d.id);
+    for (auto it = padEffectWindowOwners.begin(); it != padEffectWindowOwners.end();)
+    {
+        if (std::get<0> (it->second) == trackId)
+        {
+            windows.erase (it->first);
+            it = padEffectWindowOwners.erase (it);
+        }
+        else
+            ++it;
+    }
+    for (auto it = padEffectWindowIds.begin(); it != padEffectWindowIds.end();)
+        if (std::get<0> (it->first) == trackId)
+            it = padEffectWindowIds.erase (it);
+        else
+            ++it;
+}
+
+void MainComponent::closeWindowsOfRack (int trackId, int rackDeviceId)
+{
+    for (auto it = padEffectWindowOwners.begin(); it != padEffectWindowOwners.end();)
+    {
+        if (std::get<0> (it->second) == trackId && std::get<1> (it->second) == rackDeviceId)
+        {
+            windows.erase (it->first);
+            it = padEffectWindowOwners.erase (it);
+        }
+        else
+            ++it;
+    }
+    for (auto it = padEffectWindowIds.begin(); it != padEffectWindowIds.end();)
+        if (std::get<0> (it->first) == trackId && std::get<1> (it->first) == rackDeviceId)
+            it = padEffectWindowIds.erase (it);
+        else
+            ++it;
+}
+
+void MainComponent::closeWindowsOfPad (int trackId, int rackDeviceId, int pad)
+{
+    for (auto it = padEffectWindowOwners.begin(); it != padEffectWindowOwners.end();)
+    {
+        if (std::get<0> (it->second) == trackId && std::get<1> (it->second) == rackDeviceId
+            && std::get<2> (it->second) == pad)
+        {
+            windows.erase (it->first);
+            it = padEffectWindowOwners.erase (it);
+        }
+        else
+            ++it;
+    }
+    for (auto it = padEffectWindowIds.begin(); it != padEffectWindowIds.end();)
+        if (std::get<0> (it->first) == trackId && std::get<1> (it->first) == rackDeviceId
+            && std::get<2> (it->first) == pad)
+            it = padEffectWindowIds.erase (it);
+        else
+            ++it;
 }

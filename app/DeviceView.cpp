@@ -34,7 +34,7 @@ public:
         removeButton.onClick = [this]
         {
             const int tid = owner.trackId, did = info.id;
-            auto cb = owner.onRemove;                                // o Box será destruído no callback
+            auto cb = owner.onRemove;                                // o Box sera destruido no callback
             juce::MessageManager::callAsync ([cb, tid, did] { if (cb) cb (tid, did); });
         };
         const auto requestMove = [this] (int direction)

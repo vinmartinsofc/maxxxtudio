@@ -5,7 +5,7 @@
 #include "Theme.h"
 #include <functional>
 
-// Botão vetorial com estados visuais e nome acessível.
+// Botao vetorial com estados visuais e nome acessivel.
 class IconButton : public juce::Button
 {
 public:
@@ -19,7 +19,7 @@ private:
     icons::Icon icon;
 };
 
-// Barra de transporte: play/pause, stop, loop, BPM e posição (compasso.beat.16avo).
+// Barra de transporte: play/pause, stop, loop, BPM e posicao (compasso.beat.16avo).
 class TransportBar : public juce::Component, private juce::Timer
 {
 public:
@@ -29,7 +29,7 @@ public:
     void togglePlay();
     void stop();
     void resumeFromPosition (double beats);
-    void rewind();                      // volta ao início sem mudar play/pause
+    void rewind();                      // volta ao inicio sem mudar play/pause
     void setLoopEnabled (bool);
     std::function<void (bool)> onLoopToggled;
     std::function<void (bool)> onBrowserToggled;

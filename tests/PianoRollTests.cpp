@@ -1,6 +1,20 @@
 #include <catch2/catch_test_macros.hpp>
 #include "PianoRollEditor.h"
 
+TEST_CASE ("Piano Roll locators move independently and remain ordered")
+{
+    roll::Clip clip (8.0);
+    const int first = clip.addPianoRollLocator (1.0);
+    const int second = clip.addPianoRollLocator (3.0);
+
+    REQUIRE (clip.movePianoRollLocator (first, 5.0));
+    REQUIRE (clip.pianoRollLocators()[0].id == second);
+    REQUIRE (clip.pianoRollLocators()[1].id == first);
+    REQUIRE (clip.pianoRollLocators()[1].beat == 5.0);
+    REQUIRE_FALSE (clip.movePianoRollLocator (first, 9.0));
+    REQUIRE_FALSE (clip.movePianoRollLocator (-1, 2.0));
+}
+
 TEST_CASE ("Zero key mutes and restores selected Piano Roll notes")
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
@@ -21,4 +35,29 @@ TEST_CASE ("Zero key mutes and restores selected Piano Roll notes")
     REQUIRE (grid.keyPressed (numpadZero));
     REQUIRE_FALSE (clip.find (noteId)->muted);
     REQUIRE (clip.notes().size() == 1);
+}
+
+TEST_CASE ("Piano keys select notes by pitch and Ctrl+D duplicates the selection")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    roll::Clip clip (4.0);
+    const int first = clip.addNote ({ 60, 0.0, 0.5, 100 });
+    const int second = clip.addNote ({ 60, 1.0, 0.5, 100 });
+    const int otherPitch = clip.addNote ({ 62, 2.0, 0.5, 100 });
+
+    RollModel model;
+    model.setClip (&clip);
+    model.selectNotesAtPitch (60, false);
+    REQUIRE (model.selection.size() == 2);
+    REQUIRE (model.isSelected (first));
+    REQUIRE (model.isSelected (second));
+    REQUIRE_FALSE (model.isSelected (otherPitch));
+
+    model.selectNotesAtPitch (62, true);
+    REQUIRE (model.selection.size() == 3);
+
+    NoteGrid grid (model);
+    const juce::KeyPress duplicate ('D', juce::ModifierKeys::ctrlModifier, 'D');
+    REQUIRE (grid.keyPressed (duplicate));
+    REQUIRE (clip.notes().size() == 6);
 }

@@ -99,7 +99,7 @@ inline bool isValidAutomationEnvelope (const AutomationEnvelope& envelope)
     return true;
 }
 
-// Um clip colocado na linha do tempo de uma trilha (posição em beats).
+// Um clip colocado na linha do tempo de uma trilha (posicao em beats).
 struct Placement
 {
     int         id = 0;
@@ -149,7 +149,7 @@ struct AudioPlacement
     double end() const { return start + lengthBeats; }
 };
 
-// Trilha + parâmetros de mixagem. Clips ficam em heap (ponteiros estáveis).
+// Trilha + parametros de mixagem. Clips ficam em heap (ponteiros estaveis).
 class Track
 {
 public:
@@ -196,7 +196,7 @@ public:
     bool removeAudioClip (int clipId);
     bool isAudioFree (double start, double length, int ignoreId = -1) const;
 
-    // Id de clip único dentro da trilha.
+    // Id de clip unico dentro da trilha.
     int nextClipId() { return nextId++; }
     void reserveClipId (int clipId) { if (clipId >= nextId) nextId = clipId + 1; }
 
@@ -205,7 +205,7 @@ private:
 };
 
 // Junta os clips da trilha numa lista de notas em tempo absoluto (o que o sequenciador toca).
-// Notas além do fim do clip são cortadas/descartadas.
+// Notas alem do fim do clip sao cortadas/descartadas.
 std::vector<Note> flatten (const Track& track);
 
 // Conversao linear <-> decibeis para faders e medidores

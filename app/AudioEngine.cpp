@@ -1,4 +1,5 @@
 #include "AudioEngine.h"
+#include "DrumRackProcessor.h"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -395,7 +396,10 @@ public:
                     continue;
                 }
                 const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (candidate);
-                const auto parameterId = hosted != nullptr ? hosted->getParameterID() : juce::String();
+                const auto* parameterWithId =
+                    dynamic_cast<const juce::AudioProcessorParameterWithID*> (candidate);
+                const auto parameterId = hosted != nullptr ? hosted->getParameterID()
+                    : parameterWithId != nullptr ? parameterWithId->paramID : juce::String();
                 if ((! envelope.target.parameterId.empty()
                      && parameterId
                         == juce::String::fromUTF8 (envelope.target.parameterId.c_str()))
@@ -1059,7 +1063,7 @@ void AudioEngine::rewireMaster()
     connectAudioChannels (seqGraph, previous, m->mixer);
 }
 
-// Cadeia: MIDI -> instrumento -> efeitos ou áudio -> efeitos -> mixer -> Master / Ext. Out
+// Cadeia: MIDI -> instrumento -> efeitos ou audio -> efeitos -> mixer -> Master / Ext. Out
 void AudioEngine::rewire (TrackNodes& t)
 {
     if (t.isMaster)
@@ -1616,6 +1620,108 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
         });
 }
 
+int AudioEngine::addDrumRack (int trackId)
+{
+    auto* track = find (trackId);
+    if (track == nullptr || track->isMaster || track->audioTrack)
+        return 0;
+
+    for (const auto& device : track->devices)
+        if (device.pluginIdentifier == drumRackPluginIdentifier)
+            return device.id;
+
+    Device device;
+    device.id = nextDeviceId++;
+    device.name = "Drum Rack";
+    device.pluginIdentifier = drumRackPluginIdentifier;
+    device.instrument = true;
+    device.node = seqGraph.addNode (std::make_unique<DrumRackProcessor>());
+    if (device.node == nullptr)
+        return 0;
+
+    if (! track->devices.empty() && track->devices.front().instrument)
+    {
+        static_cast<TrackAutomationProcessor*> (track->automationProcessor)->clearBindings();
+        device.groupId = track->devices.front().groupId;
+        seqGraph.removeNode (track->devices.front().node->nodeID);
+        track->devices.erase (track->devices.begin());
+    }
+
+    track->devices.insert (track->devices.begin(), std::move (device));
+    rewire (*track);
+    return track->devices.front().id;
+}
+
+void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
+                                const juce::PluginDescription& description,
+                                std::function<void (const juce::String&)> onDone)
+{
+    auto* track = find (trackId);
+    auto* rack = track != nullptr
+        ? [&]() -> DrumRackProcessor*
+          {
+              for (auto& device : track->devices)
+                  if (device.id == rackDeviceId)
+                      return dynamic_cast<DrumRackProcessor*> (device.node->getProcessor());
+              return nullptr;
+          }()
+        : nullptr;
+    if (rack == nullptr || pad < 0 || pad >= DrumRackProcessor::numPads || description.isInstrument)
+    {
+        onDone ("Selecione um efeito valido e um pad do Drum Rack.");
+        return;
+    }
+
+    double sampleRate = 44100.0;
+    int blockSize = 512;
+    if (auto* device = deviceManager.getCurrentAudioDevice())
+    {
+        sampleRate = device->getCurrentSampleRate();
+        blockSize = device->getCurrentBufferSizeSamples();
+    }
+
+    formatManager.createPluginInstanceAsync (description, sampleRate, blockSize,
+        [this, trackId, rackDeviceId, pad, description, onDone]
+        (std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& error)
+        {
+            auto* targetTrack = find (trackId);
+            DrumRackProcessor* targetRack = nullptr;
+            if (targetTrack != nullptr)
+                for (auto& device : targetTrack->devices)
+                    if (device.id == rackDeviceId)
+                        targetRack = dynamic_cast<DrumRackProcessor*> (device.node->getProcessor());
+
+            if (instance == nullptr || targetRack == nullptr)
+            {
+                onDone (error.isNotEmpty() ? error : "O Drum Rack nao esta mais disponivel.");
+                return;
+            }
+
+            juce::String addError;
+            if (! targetRack->addPadEffect (pad, description, std::move (instance), addError))
+            {
+                onDone (addError);
+                return;
+            }
+            onDone ({});
+        });
+}
+
+std::unique_ptr<juce::AudioProcessorEditor> AudioEngine::createPadEffectEditor (
+    int trackId, int rackDeviceId, int pad, int effectIndex)
+{
+    auto* track = find (trackId);
+    if (track == nullptr)
+        return nullptr;
+    for (auto& device : track->devices)
+        if (device.id == rackDeviceId)
+            if (auto* rack = dynamic_cast<DrumRackProcessor*> (device.node->getProcessor()))
+                if (auto processor = rack->padEffectProcessor (pad, effectIndex);
+                    processor != nullptr && processor->hasEditor())
+                    return std::unique_ptr<juce::AudioProcessorEditor> (processor->createEditorAndMakeActive());
+    return nullptr;
+}
+
 void AudioEngine::removeDevice (int trackId, int deviceId)
 {
     auto* t = find (trackId);
@@ -1794,8 +1900,11 @@ std::vector<DeviceInfo> AudioEngine::devices (int trackId) const
                     if (parameter == nullptr || ! parameter->isAutomatable())
                         continue;
                     const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (parameter);
+                    const auto* parameterWithId =
+                        dynamic_cast<const juce::AudioProcessorParameterWithID*> (parameter);
                     info.automatableParameters.push_back (
-                        { index, hosted != nullptr ? hosted->getParameterID() : juce::String(),
+                        { index, hosted != nullptr ? hosted->getParameterID()
+                            : parameterWithId != nullptr ? parameterWithId->paramID : juce::String(),
                           parameter->getName (64), parameter->getValue() });
                 }
             }
@@ -1831,8 +1940,10 @@ bool AudioEngine::restorePluginState (int trackId, int deviceId, const juce::Mem
             if (device.id == deviceId)
                 if (auto* processor = device.node->getProcessor())
                 {
-                if (state.getSize() > 0)
-                    processor->setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+                    if (state.getSize() > 0)
+                        processor->setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+                    if (auto* rack = dynamic_cast<DrumRackProcessor*> (processor))
+                        return rack->stateRestoreSucceeded();
                     return true;
                 }
     return false;

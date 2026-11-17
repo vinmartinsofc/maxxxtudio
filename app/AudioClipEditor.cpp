@@ -21,7 +21,7 @@ AudioClipEditor::AudioClipEditor()
     sourceBpm.setColour (juce::Slider::textBoxTextColourId, theme::text());
     sourceBpm.setColour (juce::Slider::textBoxBackgroundColourId, theme::panelLight());
     closeButton.setMouseClickGrabsKeyboardFocus (false);
-    warpButton.setTooltip ("Sincronizar este clip ao BPM do projeto; a velocidade altera a afinação.");
+    warpButton.setTooltip ("Sincronizar este clip ao BPM do projeto; a velocidade altera a afinacao.");
     warpButton.onClick = [this]
     {
         if (clip != nullptr && onWarpChanged)

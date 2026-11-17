@@ -1,6 +1,8 @@
 #include "ProjectFile.h"
+#include "DrumRackProcessor.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -48,7 +50,7 @@ std::size_t trackWorkUnits (const roll::Track& track)
     for (const auto& envelope : track.automation)
         count += 1 + envelope.points.size();
     for (const auto& clip : track.clips)
-        count += 1 + clip->clip.notes().size();
+        count += 1 + clip->clip.notes().size() + clip->clip.pianoRollLocators().size();
     count += track.audioClips.size();
     return count;
 }
@@ -69,7 +71,7 @@ std::size_t xmlWorkUnits (const juce::XmlElement& xml)
                 {
                     ++count;
                     for (auto* note = child->getFirstChildElement(); note != nullptr; note = note->getNextElement())
-                        if (note->hasTagName ("Note"))
+                        if (note->hasTagName ("Note") || note->hasTagName ("PianoLocator"))
                             ++count;
                 }
                 else if (child->hasTagName ("AudioClip"))
@@ -102,6 +104,49 @@ std::size_t xmlWorkUnits (const juce::XmlElement& xml)
             if (node->hasTagName ("Plugin"))
                 ++count;
     return count;
+}
+
+juce::String collectAudioAsset (const juce::String& sourcePath,
+                                const juce::File& projectFolder, const juce::File& assetFolder,
+                                std::map<std::string, juce::String>& copiedAssets,
+                                std::set<std::string>& assetNames)
+{
+    const auto key = sourcePath.toStdString();
+    if (const auto found = copiedAssets.find (key); found != copiedAssets.end())
+        return found->second;
+
+    const juce::File source (sourcePath);
+    const auto baseName = source.getFileNameWithoutExtension();
+    const auto extension = source.getFileExtension();
+    auto fileName = source.getFileName();
+    int suffix = 2;
+    while (assetNames.contains (fileName.toLowerCase().toStdString()))
+        fileName = baseName + "_" + juce::String (suffix++) + extension;
+    const auto target = assetFolder.getChildFile (fileName);
+    if (! source.existsAsFile()
+        || (source.getFullPathName().compareIgnoreCase (target.getFullPathName()) != 0
+            && ! source.copyFileTo (target)))
+        throw std::runtime_error ("Unable to collect audio file: " + source.getFullPathName().toStdString());
+
+    assetNames.insert (fileName.toLowerCase().toStdString());
+    const auto relativePath = target.getRelativePathFrom (projectFolder);
+    copiedAssets.emplace (key, relativePath);
+    return relativePath;
+}
+
+juce::String xmlStringFromBlock (const juce::MemoryBlock& block)
+{
+    return block.getSize() > 0
+        ? juce::String::fromUTF8 (static_cast<const char*> (block.getData()),
+                                  static_cast<int> (block.getSize()))
+        : juce::String();
+}
+
+void storeXmlInBlock (const juce::XmlElement& xml, juce::MemoryBlock& block)
+{
+    juce::MemoryOutputStream output;
+    xml.writeTo (output);
+    block.replaceWith (output.getData(), output.getDataSize());
 }
 
 void writeTrack (juce::XmlElement& parent, const roll::Track& track,
@@ -160,6 +205,29 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
         clipNode->setAttribute ("length", clip->clip.length());
         clipNode->setAttribute ("enabled", clip->enabled);
         clipNode->setAttribute ("name", stringFromUtf8 (clip->name));
+        clipNode->setAttribute ("selectedPianoLocatorId", clip->clip.selectedPianoRollLocatorId());
+        if (clip->clip.groove())
+        {
+            const auto& groove = *clip->clip.groove();
+            if (! groove.isValid())
+                throw std::runtime_error ("A MIDI clip contains an invalid groove.");
+
+            auto* grooveNode = clipNode->createNewChildElement ("Groove");
+            grooveNode->setAttribute ("name", stringFromUtf8 (groove.name));
+            grooveNode->setAttribute ("gridBeats", groove.gridBeats);
+            grooveNode->setAttribute ("timingAmount", groove.timingAmount);
+            grooveNode->setAttribute ("velocityAmount", groove.velocityAmount);
+            for (const auto offset : groove.timingOffsets)
+            {
+                auto* offsetNode = grooveNode->createNewChildElement ("Offset");
+                offsetNode->setAttribute ("beats", offset);
+            }
+            for (const auto multiplier : groove.velocityMultipliers)
+            {
+                auto* velocityNode = grooveNode->createNewChildElement ("Velocity");
+                velocityNode->setAttribute ("multiplier", multiplier);
+            }
+        }
         for (const auto& note : clip->clip.notes())
         {
             auto* noteNode = clipNode->createNewChildElement ("Note");
@@ -171,32 +239,21 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
             noteNode->setAttribute ("muted", note.muted);
             progress.completeUnit();
         }
+        for (const auto& marker : clip->clip.pianoRollLocators())
+        {
+            auto* markerNode = clipNode->createNewChildElement ("PianoLocator");
+            markerNode->setAttribute ("id", marker.id);
+            markerNode->setAttribute ("beat", marker.beat);
+            progress.completeUnit();
+        }
         progress.completeUnit();
     }
 
     for (const auto& clip : track.audioClips)
     {
         const auto sourcePath = clip->filePath;
-        auto asset = copiedAssets.find (sourcePath);
-        if (asset == copiedAssets.end())
-        {
-            const juce::File source (stringFromUtf8 (sourcePath));
-            const auto baseName = source.getFileNameWithoutExtension();
-            const auto extension = source.getFileExtension();
-            auto fileName = source.getFileName();
-            int suffix = 2;
-            while (assetNames.contains (fileName.toLowerCase().toStdString()))
-                fileName = baseName + "_" + juce::String (suffix++) + extension;
-            const auto target = assetFolder.getChildFile (fileName);
-            if (! source.existsAsFile()
-                || (source.getFullPathName().compareIgnoreCase (target.getFullPathName()) != 0
-                    && ! source.copyFileTo (target)))
-                throw std::runtime_error ("Unable to collect audio file: " + source.getFullPathName().toStdString());
-
-            assetNames.insert (fileName.toLowerCase().toStdString());
-            asset = copiedAssets.emplace (sourcePath,
-                target.getRelativePathFrom (projectFolder)).first;
-        }
+        const auto asset = collectAudioAsset (stringFromUtf8 (sourcePath), projectFolder, assetFolder,
+                                              copiedAssets, assetNames);
 
         auto* audioNode = node->createNewChildElement ("AudioClip");
         audioNode->setAttribute ("id", clip->id);
@@ -212,7 +269,7 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
         audioNode->setAttribute ("enabled", clip->enabled);
         audioNode->setAttribute ("warpEnabled", clip->warpEnabled);
         audioNode->setAttribute ("name", stringFromUtf8 (clip->name));
-        audioNode->setAttribute ("file", asset->second);
+        audioNode->setAttribute ("file", asset);
         progress.completeUnit();
     }
     progress.completeUnit();
@@ -306,10 +363,54 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
             track.reserveClipId (id);
             clip->enabled = child->getBoolAttribute ("enabled", true);
             clip->name = child->getStringAttribute ("name").toStdString();
+            bool foundGroove = false;
             std::vector<roll::Note> notes;
             std::set<int> noteIds;
+            std::vector<roll::PianoRollLocator> pianoLocators;
+            std::set<int> pianoLocatorIds;
             for (auto* noteNode = child->getFirstChildElement(); noteNode != nullptr; noteNode = noteNode->getNextElement())
             {
+                if (noteNode->hasTagName ("Groove"))
+                {
+                    if (foundGroove)
+                        return false;
+                    foundGroove = true;
+
+                    roll::GrooveTemplate groove;
+                    groove.name = noteNode->getStringAttribute ("name").toStdString();
+                    groove.gridBeats = noteNode->getDoubleAttribute ("gridBeats", 0.0);
+                    groove.timingAmount = noteNode->getDoubleAttribute ("timingAmount", 1.0);
+                    groove.velocityAmount = noteNode->getDoubleAttribute ("velocityAmount", 1.0);
+                    for (auto* value = noteNode->getFirstChildElement(); value != nullptr;
+                         value = value->getNextElement())
+                    {
+                        if (value->hasTagName ("Offset"))
+                            groove.timingOffsets.push_back (value->getDoubleAttribute ("beats",
+                                std::numeric_limits<double>::quiet_NaN()));
+                        else if (value->hasTagName ("Velocity"))
+                            groove.velocityMultipliers.push_back (value->getDoubleAttribute ("multiplier",
+                                std::numeric_limits<double>::quiet_NaN()));
+                    }
+                    if (! groove.isValid())
+                        return false;
+                    clip->clip.setGroove (std::move (groove));
+                    continue;
+                }
+
+                if (noteNode->hasTagName ("PianoLocator"))
+                {
+                    roll::PianoRollLocator marker;
+                    marker.id = noteNode->getIntAttribute ("id", -1);
+                    marker.beat = noteNode->getDoubleAttribute ("beat",
+                        std::numeric_limits<double>::quiet_NaN());
+                    if (marker.id < 1 || ! pianoLocatorIds.insert (marker.id).second
+                        || ! validNumber (marker.beat) || marker.beat < 0.0)
+                        return false;
+                    pianoLocators.push_back (marker);
+                    progress.completeUnit();
+                    continue;
+                }
+
                 if (! noteNode->hasTagName ("Note"))
                     continue;
                 roll::Note note;
@@ -329,6 +430,10 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
                 progress.completeUnit();
             }
             clip->clip.setNotes (std::move (notes));
+            clip->clip.setPianoRollLocators (
+                std::move (pianoLocators), child->getIntAttribute ("selectedPianoLocatorId", -1));
+            if (clip->clip.selectedPianoRollLocatorId() != child->getIntAttribute ("selectedPianoLocatorId", -1))
+                return false;
             progress.completeUnit();
         }
         else if (child->hasTagName ("AudioClip"))
@@ -445,7 +550,24 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
             pluginNode->setAttribute ("identifier", plugin.identifier);
             pluginNode->setAttribute ("bypassed", plugin.bypassed);
             pluginNode->setAttribute ("groupId", plugin.groupId);
-            pluginNode->setAttribute ("state", plugin.state.toBase64Encoding());
+            auto pluginState = plugin.state;
+            if (plugin.identifier == DrumRackProcessor::pluginIdentifier && pluginState.getSize() > 0)
+            {
+                auto stateXml = juce::XmlDocument::parse (xmlStringFromBlock (pluginState));
+                if (stateXml == nullptr || ! stateXml->hasTagName ("DrumRack"))
+                    throw std::runtime_error ("The Drum Rack state is invalid.");
+                for (auto* pad = stateXml->getFirstChildElement(); pad != nullptr; pad = pad->getNextElement())
+                {
+                    if (! pad->hasTagName ("Pad"))
+                        continue;
+                    const auto path = pad->getStringAttribute ("file");
+                    if (path.isNotEmpty())
+                        pad->setAttribute ("file", collectAudioAsset (path, projectFolder, assetFolder,
+                                                                       copiedAssets, assetNames));
+                }
+                storeXmlInBlock (*stateXml, pluginState);
+            }
+            pluginNode->setAttribute ("state", pluginState.toBase64Encoding());
             progress.completeUnit();
         }
 
@@ -654,6 +776,25 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
                 || plugin.order < 0 || plugin.identifier.isEmpty() || plugin.groupId < 0
                 || (encodedState.isNotEmpty() && ! plugin.state.fromBase64Encoding (encodedState)))
                 return juce::Result::fail ("A plugin state contains invalid data.");
+            if (plugin.identifier == DrumRackProcessor::pluginIdentifier && plugin.state.getSize() > 0)
+            {
+                auto stateXml = juce::XmlDocument::parse (xmlStringFromBlock (plugin.state));
+                if (stateXml == nullptr || ! stateXml->hasTagName ("DrumRack"))
+                    return juce::Result::fail ("The Drum Rack state is invalid.");
+                for (auto* pad = stateXml->getFirstChildElement(); pad != nullptr; pad = pad->getNextElement())
+                {
+                    if (! pad->hasTagName ("Pad"))
+                        continue;
+                    const auto relativePath = pad->getStringAttribute ("file");
+                    if (relativePath.isEmpty() || juce::File::isAbsolutePath (relativePath))
+                        return juce::Result::fail ("A Drum Rack sample path is invalid.");
+                    const auto sample = file.getParentDirectory().getChildFile (relativePath);
+                    if (! sample.isAChildOf (file.getParentDirectory()))
+                        return juce::Result::fail ("A Drum Rack sample path escapes the project folder.");
+                    pad->setAttribute ("file", sample.getFullPathName());
+                }
+                storeXmlInBlock (*stateXml, plugin.state);
+            }
             loaded.plugins.push_back (std::move (plugin));
             progress.completeUnit();
         }

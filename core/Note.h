@@ -2,7 +2,7 @@
 
 namespace roll
 {
-// Uma nota MIDI dentro de um clip. Tempo medido em beats (semínimas),
+// Uma nota MIDI dentro de um clip. Tempo medido em beats (seminimas),
 // independente de BPM e de sample rate.
 struct Note
 {

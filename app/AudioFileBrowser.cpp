@@ -138,8 +138,11 @@ public:
 
     void itemOpennessChanged (bool isOpen) override
     {
+        owner.treeItemOpennessChanged (getUniqueName(), isOpen);
         if (isOpen && getNumSubItems() == 0)
             owner.populate (*this);
+        if (isOpen)
+            owner.restoreExpandedChildren (*this);
     }
 
 private:
@@ -183,6 +186,7 @@ AudioFileBrowser::AudioFileBrowser()
     favoriteProperties.setStorageParameters (options);
     favoriteSettings = favoriteProperties.getUserSettings();
     loadFavorites();
+    loadExpandedItems();
 
     title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
@@ -191,7 +195,11 @@ AudioFileBrowser::AudioFileBrowser()
     tree.setColour (juce::TreeView::backgroundColourId, theme::panel());
     tree.setRootItemVisible (true);
     tree.setRootItem (new FileTreeItem (*this, {}, FileTreeItem::Kind::ComputerRoot));
-    tree.getRootItem()->setOpen (true);
+    if (auto* root = tree.getRootItem())
+    {
+    root->setOpen (true);
+    restoreExpandedItems (*root, expandedFilesystemItems);
+    }
     tree.setIndentSize (10);
     tree.setWantsKeyboardFocus (true);
     addAndMakeVisible (tree);
@@ -361,7 +369,13 @@ void AudioFileBrowser::refreshTree()
         tree.setRootItem (new FileTreeItem (*this, {}, showingFavorites
             ? FileTreeItem::Kind::FavoritesRoot : FileTreeItem::Kind::ComputerRoot));
         if (tree.getRootItem() != nullptr)
+        {
+            restoringTreeExpansion = true;
             tree.getRootItem()->setOpen (true);
+            restoreExpandedItems (*tree.getRootItem(),
+                                  showingFavorites ? expandedFavoriteItems : expandedFilesystemItems);
+            restoringTreeExpansion = false;
+        }
         setStatus ("Selecione um arquivo de audio para ouvir");
         return;
     }
@@ -626,6 +640,89 @@ void AudioFileBrowser::saveFavorites()
     }
     favoriteSettings->setValue ("audioFavorites", root.toXmlString());
     favoriteSettings->saveIfNeeded();
+}
+
+void AudioFileBrowser::loadExpandedItems()
+{
+    if (favoriteSettings == nullptr)
+        return;
+
+    const auto load = [this] (const juce::String& key, std::set<juce::String>& paths)
+    {
+        const auto xml = juce::parseXML (favoriteSettings->getValue (key));
+        if (xml == nullptr)
+            return;
+        const auto root = juce::ValueTree::fromXml (*xml);
+        for (int i = 0; i < root.getNumChildren(); ++i)
+        {
+            const auto path = root.getChild (i).getProperty ("name").toString();
+            if (path.isNotEmpty())
+                paths.insert (path);
+        }
+    };
+    load ("audioBrowserExpandedFilesystem", expandedFilesystemItems);
+    load ("audioBrowserExpandedFavorites", expandedFavoriteItems);
+}
+
+void AudioFileBrowser::saveExpandedItems()
+{
+    if (favoriteSettings == nullptr)
+        return;
+
+    const auto save = [this] (const juce::String& key, const std::set<juce::String>& paths)
+    {
+        juce::ValueTree root ("ExpandedItems");
+        for (const auto& path : paths)
+        {
+            juce::ValueTree item ("Item");
+            item.setProperty ("name", path, nullptr);
+            root.appendChild (item, nullptr);
+        }
+        favoriteSettings->setValue (key, root.toXmlString());
+    };
+    save ("audioBrowserExpandedFilesystem", expandedFilesystemItems);
+    save ("audioBrowserExpandedFavorites", expandedFavoriteItems);
+    favoriteSettings->saveIfNeeded();
+}
+
+void AudioFileBrowser::restoreExpandedItems (juce::TreeViewItem& item,
+                                              const std::set<juce::String>& paths)
+{
+    if (paths.count (item.getUniqueName()) != 0 && ! item.isOpen())
+        item.setOpen (true);
+    for (int i = 0; i < item.getNumSubItems(); ++i)
+        if (auto* child = item.getSubItem (i))
+            restoreExpandedItems (*child, paths);
+}
+
+void AudioFileBrowser::restoreExpandedChildren (juce::TreeViewItem& item)
+{
+    if (tree.getRootItem() == nullptr)
+        return;
+    const auto rootName = tree.getRootItem()->getUniqueName();
+    if (rootName != "computer" && rootName != "favorites")
+        return;
+    const bool wasRestoring = restoringTreeExpansion;
+    restoringTreeExpansion = true;
+    restoreExpandedItems (item, rootName == "favorites"
+        ? expandedFavoriteItems : expandedFilesystemItems);
+    restoringTreeExpansion = wasRestoring;
+}
+
+void AudioFileBrowser::treeItemOpennessChanged (const juce::String& name, bool isOpen)
+{
+    if (restoringTreeExpansion || tree.getRootItem() == nullptr)
+        return;
+    const auto rootName = tree.getRootItem()->getUniqueName();
+    if (rootName != "computer" && rootName != "favorites")
+        return;
+
+    auto& paths = rootName == "favorites" ? expandedFavoriteItems : expandedFilesystemItems;
+    if (isOpen)
+        paths.insert (name);
+    else
+        paths.erase (name);
+    saveExpandedItems();
 }
 
 void AudioFileBrowser::populate (FileTreeItem& item)

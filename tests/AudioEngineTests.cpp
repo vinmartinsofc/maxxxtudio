@@ -1,5 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include "AudioEngine.h"
+#include "DrumRackEditor.h"
+#include "DrumRackProcessor.h"
+#include <algorithm>
+#include <cstdint>
+#include <fstream>
 
 namespace
 {
@@ -15,6 +20,507 @@ struct TemporaryWavFile
 
     juce::File file;
 };
+
+struct TemporarySampleFile
+{
+    TemporarySampleFile()
+        : file (juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getNonexistentChildFile ("project_freedom_drum_rack_sample", ".wav", false))
+    {
+        std::ofstream output (file.getFullPathName().toStdString(), std::ios::binary);
+        const auto write16 = [&output] (std::uint16_t value)
+        {
+            const char bytes[] { static_cast<char> (value & 0xff), static_cast<char> (value >> 8) };
+            output.write (bytes, sizeof (bytes));
+        };
+        const auto write32 = [&output] (std::uint32_t value)
+        {
+            const char bytes[] { static_cast<char> (value & 0xff),
+                                 static_cast<char> ((value >> 8) & 0xff),
+                                 static_cast<char> ((value >> 16) & 0xff),
+                                 static_cast<char> ((value >> 24) & 0xff) };
+            output.write (bytes, sizeof (bytes));
+        };
+        constexpr std::uint32_t sampleCount = 1024;
+        constexpr std::uint32_t dataSize = sampleCount * 2;
+        output.write ("RIFF", 4);
+        write32 (36 + dataSize);
+        output.write ("WAVEfmt ", 8);
+        write32 (16);
+        write16 (1);
+        write16 (1);
+        write32 (44100);
+        write32 (88200);
+        write16 (2);
+        write16 (16);
+        output.write ("data", 4);
+        write32 (dataSize);
+        for (std::uint32_t index = 0; index < sampleCount; ++index)
+            write16 (16384);
+    }
+
+    ~TemporarySampleFile() { file.deleteFile(); }
+
+    juce::File file;
+};
+
+class TestPadGainEffect final : public juce::AudioProcessor
+{
+public:
+    explicit TestPadGainEffect (float g)
+        : juce::AudioProcessor (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true)
+                                                   .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+          gain (g)
+    {
+    }
+
+    const juce::String getName() const override { return "Test Pad Gain"; }
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        buffer.applyGain (gain);
+    }
+    using juce::AudioProcessor::processBlock;
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+private:
+    float gain = 1.0f;
+};
+
+class TestPadSidechainEffect final : public juce::AudioProcessor
+{
+public:
+    TestPadSidechainEffect()
+        : juce::AudioProcessor (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true)
+                                                   .withInput ("Sidechain", juce::AudioChannelSet::stereo(), true)
+                                                   .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+    {
+    }
+
+    const juce::String getName() const override { return "Test Pad Sidechain"; }
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        buffer.applyGain (0.5f);
+    }
+    using juce::AudioProcessor::processBlock;
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+};
+}
+
+TEST_CASE ("Drum Rack exposes stable automatable parameters for every pad")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    REQUIRE (processor.getParameters().size()
+             == DrumRackProcessor::numPads * DrumRackProcessor::automatablePadParameterCount);
+
+    juce::AudioProcessorParameter* volume = nullptr;
+    for (auto* parameter : processor.getParameters())
+        if (parameter != nullptr && parameter->getName (64) == "Pad 1 Volume")
+            volume = parameter;
+    REQUIRE (volume != nullptr);
+    REQUIRE (volume->isAutomatable());
+    const auto* identifiedVolume = dynamic_cast<const juce::AudioProcessorParameterWithID*> (volume);
+    REQUIRE (identifiedVolume != nullptr);
+    REQUIRE (identifiedVolume->paramID == "pad_1_volume");
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    volume->setValue (0.5f);
+    processor.prepareToPlay (44100.0, 128);
+
+    juce::AudioBuffer<float> output (2, 128);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote, 1.0f), 0);
+    processor.processBlock (output, midi);
+    REQUIRE (output.getSample (0, 0) > 0.9f);
+
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Midi);
+    REQUIRE (engine.addDrumRack (1) > 0);
+    const auto devices = engine.devices (1);
+    REQUIRE (devices.size() == 1);
+    REQUIRE (std::any_of (devices.front().automatableParameters.begin(),
+                          devices.front().automatableParameters.end(),
+        [] (const auto& parameter)
+        {
+            return parameter.id == "pad_1_volume" && parameter.name == "Pad 1 Volume";
+        }));
+}
+
+TEST_CASE ("Drum Rack triggers loaded samples from its MIDI pad notes")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    processor.prepareToPlay (44100.0, 128);
+
+    juce::AudioBuffer<float> output (2, 128);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote, 1.0f), 5);
+    processor.processBlock (output, midi);
+
+    REQUIRE (processor.consumeTriggeredPads() == 1u);
+    REQUIRE (std::abs (output.getSample (0, 4)) < 0.0001f);
+    REQUIRE (output.getSample (0, 5) > 0.4f);
+    REQUIRE (output.getSample (1, 5) > 0.4f);
+    REQUIRE (midi.isEmpty());
+    REQUIRE (processor.padName (0).contains ("project_freedom_drum_rack_sample"));
+}
+
+TEST_CASE ("Drum Rack editor initializes its pad controls before resizing")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    DrumRackProcessor processor;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+
+    REQUIRE (editor != nullptr);
+    REQUIRE (DrumRackProcessor::visiblePadCount == 15);
+    REQUIRE (editor->getWidth() == 900);
+    REQUIRE (editor->getHeight() == 560);
+}
+
+TEST_CASE ("Drum Rack effects process only their assigned pad")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    REQUIRE (processor.loadPadFromFile (1, sample.file, error));
+
+    juce::PluginDescription description;
+    description.name = "Test Pad Gain";
+    description.fileOrIdentifier = "Test Pad Gain";
+    REQUIRE (processor.addPadEffect (0, description,
+                                     std::make_unique<TestPadGainEffect> (0.25f), error));
+    REQUIRE (processor.padEffects (0).size() == 1);
+    REQUIRE (processor.padEffects (1).empty());
+    processor.prepareToPlay (44100.0, 128);
+
+    juce::AudioBuffer<float> output (2, 128);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote, 1.0f), 0);
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote + 1, 1.0f), 0);
+    processor.processBlock (output, midi);
+
+    REQUIRE (output.getSample (0, 0) == 0.625f);
+    REQUIRE (output.getSample (1, 0) == 0.625f);
+
+    auto state = juce::XmlDocument::parse (processor.stateXml());
+    REQUIRE (state != nullptr);
+    auto* padState = state->getChildByName ("Pad");
+    REQUIRE (padState != nullptr);
+    REQUIRE (padState->getNumChildElements() == 1);
+
+    REQUIRE (processor.setPadEffectBypassed (0, 0, true));
+    REQUIRE (processor.padEffects (0).front().bypassed);
+    midi.clear();
+    for (int block = 0; block < 7; ++block)
+        processor.processBlock (output, midi);
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote, 1.0f), 0);
+    processor.processBlock (output, midi);
+    REQUIRE (output.getSample (0, 0) == 0.5f);
+    REQUIRE (output.getSample (1, 0) == 0.5f);
+    REQUIRE (processor.removePadEffect (0, 0));
+    REQUIRE (processor.padEffects (0).empty());
+}
+
+TEST_CASE ("Drum Rack pad effects can be reordered without removing them")
+{
+    DrumRackProcessor processor;
+    juce::String error;
+    juce::PluginDescription firstDescription;
+    firstDescription.name = "First effect";
+    firstDescription.fileOrIdentifier = "First effect";
+    juce::PluginDescription secondDescription;
+    secondDescription.name = "Second effect";
+    secondDescription.fileOrIdentifier = "Second effect";
+
+    REQUIRE (processor.addPadEffect (0, firstDescription,
+                                     std::make_unique<TestPadGainEffect> (0.25f), error));
+    REQUIRE (processor.addPadEffect (0, secondDescription,
+                                     std::make_unique<TestPadGainEffect> (0.5f), error));
+    REQUIRE_FALSE (processor.movePadEffect (0, 0, -1));
+    REQUIRE (processor.movePadEffect (0, 1, -1));
+    const auto effects = processor.padEffects (0);
+    REQUIRE (effects.size() == 2);
+    REQUIRE (effects[0].name == "Second effect");
+    REQUIRE (effects[1].name == "First effect");
+    REQUIRE_FALSE (processor.movePadEffect (0, 2, -1));
+}
+
+TEST_CASE ("Drum Rack effects with a stereo sidechain process on their pad")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+
+    juce::PluginDescription description;
+    description.name = "Test Pad Sidechain";
+    description.fileOrIdentifier = "Test Pad Sidechain";
+    REQUIRE (processor.addPadEffect (0, description,
+                                     std::make_unique<TestPadSidechainEffect>(), error));
+    processor.prepareToPlay (44100.0, 128);
+
+    juce::AudioBuffer<float> output (2, 128);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote, 1.0f), 0);
+    processor.processBlock (output, midi);
+    REQUIRE (output.getSample (0, 0) == 0.25f);
+    REQUIRE (output.getSample (1, 0) == 0.25f);
+}
+
+TEST_CASE ("Drum Rack pads accept samples dragged from the audio browser")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    auto* target = dynamic_cast<juce::DragAndDropTarget*> (editor.get());
+    REQUIRE (target != nullptr);
+
+    juce::DragAndDropTarget::SourceDetails details (
+        "audio:" + sample.file.getFullPathName(), nullptr, { 30, 330 });
+    REQUIRE (target->isInterestedInDragSource (details));
+    target->itemDropped (details);
+
+    REQUIRE (processor.padName (0) == sample.file.getFileName());
+
+    auto* rackEditor = dynamic_cast<DrumRackEditor*> (editor.get());
+    REQUIRE (rackEditor != nullptr);
+    int requestedPad = -1;
+    juce::String requestedPlugin;
+    rackEditor->onPadEffectRequested = [&] (int pad, const juce::String& identifier)
+    {
+        requestedPad = pad;
+        requestedPlugin = identifier;
+    };
+    juce::DragAndDropTarget::SourceDetails effectDetails ("plugin:test.effect", nullptr, { 30, 330 });
+    REQUIRE (target->isInterestedInDragSource (effectDetails));
+    target->itemDropped (effectDetails);
+    REQUIRE (requestedPad == 0);
+    REQUIRE (requestedPlugin == "test.effect");
+}
+
+TEST_CASE ("Drum Rack pads accept samples dropped from the file system")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    auto* target = dynamic_cast<juce::FileDragAndDropTarget*> (editor.get());
+    REQUIRE (target != nullptr);
+
+    juce::StringArray files { sample.file.getFullPathName() };
+    REQUIRE (target->isInterestedInFileDrag (files));
+    target->filesDropped (files, 30, 330);
+
+    REQUIRE (processor.padName (0) == sample.file.getFileName());
+}
+
+TEST_CASE ("Drum Rack maps the computer keyboard's fifteen chromatic notes")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (DrumRackProcessor::numPads == 15);
+    REQUIRE (DrumRackProcessor::computerMidiKeyboardMap.size() == 15);
+    REQUIRE (processor.loadPadFromFile (14, sample.file, error));
+    processor.prepareToPlay (44100.0, 128);
+
+    juce::AudioBuffer<float> output (2, 128);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (
+        1, DrumRackProcessor::firstMidiNote + 14, 1.0f), 0);
+    processor.processBlock (output, midi);
+
+    REQUIRE (output.getSample (0, 0) > 0.4f);
+    REQUIRE (processor.padName (14).contains ("project_freedom_drum_rack_sample"));
+}
+
+TEST_CASE ("Drum Rack applies per-pad gain and sample trim")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    auto settings = processor.padSettings (0);
+    settings.gain = 0.5f;
+    settings.startSample = 4;
+    settings.endSample = 8;
+    processor.setPadSettings (0, settings);
+    processor.prepareToPlay (44100.0, 128);
+
+    juce::AudioBuffer<float> output (2, 128);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote, 1.0f), 0);
+    processor.processBlock (output, midi);
+
+    REQUIRE (output.getSample (0, 0) == 0.25f);
+    REQUIRE (output.getSample (0, 3) == 0.25f);
+    REQUIRE (std::abs (output.getSample (0, 4)) < 0.0001f);
+}
+
+TEST_CASE ("Drum Rack persists per-pad sample playback settings")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor source;
+    juce::String error;
+    REQUIRE (source.loadPadFromFile (0, sample.file, error));
+
+    auto settings = source.padSettings (0);
+    settings.gain = 0.5f;
+    settings.pitchSemitones = -7;
+    settings.startSample = 16;
+    settings.endSample = 512;
+    settings.reverse = true;
+    settings.loop = true;
+    settings.mode = DrumRackProcessor::PlaybackMode::Classic;
+    source.setPadSettings (0, settings);
+
+    const auto xml = juce::XmlDocument::parse (source.stateXml());
+    REQUIRE (xml != nullptr);
+    DrumRackProcessor restored;
+    REQUIRE (restored.restoreStateXml (*xml));
+    const auto restoredSettings = restored.padSettings (0);
+    REQUIRE (std::abs (restoredSettings.gain - 0.5f) < 0.0001f);
+    REQUIRE (restoredSettings.pitchSemitones == -7);
+    REQUIRE (restoredSettings.startSample == 16);
+    REQUIRE (restoredSettings.endSample == 512);
+    REQUIRE (restoredSettings.reverse);
+    REQUIRE (restoredSettings.loop);
+    REQUIRE (restoredSettings.mode == DrumRackProcessor::PlaybackMode::Classic);
+}
+
+TEST_CASE ("Drum Rack undo restores cleared pads and the full rack")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    REQUIRE (processor.loadPadFromFile (1, sample.file, error));
+
+    processor.clearPad (0);
+    REQUIRE (processor.padSampleLength (0) == 0);
+    REQUIRE (processor.undo());
+    REQUIRE (processor.padSampleLength (0) == 1024);
+    REQUIRE (processor.padSampleLength (1) == 1024);
+
+    processor.clearPads();
+    REQUIRE (processor.padSampleLength (0) == 0);
+    REQUIRE (processor.padSampleLength (1) == 0);
+    REQUIRE (processor.undo());
+    REQUIRE (processor.padSampleLength (0) == 1024);
+    REQUIRE (processor.padSampleLength (1) == 1024);
+    REQUIRE (processor.redo());
+    REQUIRE (processor.padSampleLength (0) == 0);
+    REQUIRE (processor.padSampleLength (1) == 0);
+}
+
+TEST_CASE ("Drum Rack Delete key clears only the selected pad and can be undone")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    REQUIRE (processor.loadPadFromFile (1, sample.file, error));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    REQUIRE (editor != nullptr);
+
+    REQUIRE (editor->keyPressed (juce::KeyPress (juce::KeyPress::deleteKey)));
+    REQUIRE (processor.padSampleLength (0) == 0);
+    REQUIRE (processor.padSampleLength (1) == 1024);
+    REQUIRE (editor->keyPressed (juce::KeyPress (
+        'Z', juce::ModifierKeys::ctrlModifier, 'Z')));
+    REQUIRE (processor.padSampleLength (0) == 1024);
+}
+
+TEST_CASE ("Drum Rack migrates legacy sixteen-pad state to its MIDI note bank")
+{
+    TemporarySampleFile sample;
+    juce::XmlElement legacy ("DrumRack");
+    legacy.setAttribute ("version", 2);
+    auto* pad = legacy.createNewChildElement ("Pad");
+    pad->setAttribute ("index", 0);
+    pad->setAttribute ("file", sample.file.getFullPathName());
+    pad->setAttribute ("startSample", 0);
+    pad->setAttribute ("endSample", 1023);
+    pad->setAttribute ("loop", true);
+
+    DrumRackProcessor processor;
+    REQUIRE (processor.restoreStateXml (legacy));
+    REQUIRE (processor.padSampleLength (0) == 1024);
+    REQUIRE (processor.padName (0).contains ("project_freedom_drum_rack_sample"));
+    REQUIRE (processor.padName (1).contains ("vazio"));
+    REQUIRE (processor.padSettings (0).endSample == 1024);
+    REQUIRE (processor.padSettings (0).mode == DrumRackProcessor::PlaybackMode::Classic);
+}
+
+TEST_CASE ("Drum Rack maps the previous default MIDI bank into its keyboard slots")
+{
+    TemporarySampleFile sample;
+    juce::XmlElement legacy ("DrumRack");
+    legacy.setAttribute ("version", 3);
+    auto* pad = legacy.createNewChildElement ("Pad");
+    pad->setAttribute ("index", 36);
+    pad->setAttribute ("file", sample.file.getFullPathName());
+    pad->setAttribute ("endSample", 1024);
+
+    DrumRackProcessor processor;
+    REQUIRE (processor.restoreStateXml (legacy));
+    REQUIRE (processor.padSampleLength (0) == 1024);
+    REQUIRE (processor.padName (0).contains ("project_freedom_drum_rack_sample"));
+}
+
+TEST_CASE ("Classic Drum Rack pads stop looping after MIDI note-off")
+{
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    auto settings = processor.padSettings (0);
+    settings.mode = DrumRackProcessor::PlaybackMode::Classic;
+    settings.loop = true;
+    processor.setPadSettings (0, settings);
+    processor.prepareToPlay (44100.0, 512);
+
+    juce::AudioBuffer<float> output (2, 512);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, DrumRackProcessor::firstMidiNote, 1.0f), 0);
+    processor.processBlock (output, midi);
+    REQUIRE (output.getSample (0, 500) > 0.4f);
+
+    midi.addEvent (juce::MidiMessage::noteOff (1, DrumRackProcessor::firstMidiNote), 0);
+    processor.processBlock (output, midi);
+    REQUIRE (output.getSample (0, 0) > 0.4f);
+    REQUIRE (std::abs (output.getSample (0, 300)) < 0.0001f);
 }
 
 TEST_CASE ("Offline WAV export renders the master bus")

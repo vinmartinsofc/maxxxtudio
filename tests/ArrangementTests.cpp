@@ -72,19 +72,46 @@ TEST_CASE("flatten corta notas que passam do fim do clip e descarta as de fora")
     REQUIRE(flat[0].lengthBeats == 0.5);
 }
 
+TEST_CASE("Grooves transform playback without changing the MIDI clip")
+{
+    Track track;
+    auto* clip = track.addClip (8.0, 4.0);
+    clip->clip.addNote ({ 60, 0.25, 0.25, 100 });
+    clip->clip.addNote ({ 62, 0.5, 0.25, 80 });
+
+    GrooveTemplate groove;
+    groove.name = "swing";
+    groove.gridBeats = 0.25;
+    groove.timingOffsets = { 0.0, 0.05, 0.0, 0.05 };
+    clip->clip.setGroove (groove);
+
+    const auto flat = flatten (track);
+    REQUIRE (flat.size() == 2);
+    REQUIRE (std::abs (flat[0].startBeats - 8.3) < 1.0e-8);
+    REQUIRE (flat[1].startBeats == 8.5);
+    REQUIRE (clip->clip.notes()[0].startBeats == 0.25);
+    REQUIRE (clip->clip.notes()[0].velocity == 100);
+}
+
 TEST_CASE("Clips desativados nao tocam e permanecem desativados ao copiar e dividir")
 {
     Track midi;
     auto* midiClip = midi.addClip (0.0, 4.0);
     midiClip->enabled = false;
     midiClip->clip.addNote ({ 60, 0.0, 1.0, 100 });
+    GrooveTemplate groove;
+    groove.name = "swing";
+    groove.timingOffsets = { 0.0, 0.01 };
+    midiClip->clip.setGroove (groove);
     REQUIRE(flatten (midi).empty());
     auto* midiCopy = midi.copyClip (*midiClip, 4.0);
     REQUIRE(midiCopy != nullptr);
     REQUIRE_FALSE (midiCopy->enabled);
+    REQUIRE (midiCopy->clip.groove().has_value());
     const int rightMidiId = midi.splitClip (midiClip->id, 2.0);
     REQUIRE(rightMidiId > 0);
     REQUIRE_FALSE (midi.find (rightMidiId)->enabled);
+    REQUIRE (midi.find (rightMidiId)->clip.groove().has_value());
 
     Track audio;
     audio.type = TrackType::Audio;

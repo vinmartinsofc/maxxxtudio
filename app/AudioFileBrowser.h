@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <vector>
 
 class AudioFileBrowser : public juce::Component
@@ -51,6 +52,11 @@ private:
     void removeFavorite (const juce::File&);
     void loadFavorites();
     void saveFavorites();
+    void loadExpandedItems();
+    void saveExpandedItems();
+    void restoreExpandedItems (juce::TreeViewItem&, const std::set<juce::String>&);
+    void restoreExpandedChildren (juce::TreeViewItem&);
+    void treeItemOpennessChanged (const juce::String&, bool);
     static bool isAudioFile (const juce::File&);
     void mouseDown (const juce::MouseEvent&) override;
 
@@ -71,6 +77,8 @@ private:
     juce::ApplicationProperties favoriteProperties;
     juce::PropertiesFile* favoriteSettings = nullptr;
     std::vector<Favorite> favorites;
+    std::set<juce::String> expandedFilesystemItems, expandedFavoriteItems;
+    bool restoringTreeExpansion = false;
     bool showingFavorites = false;
     juce::ThreadPool searchPool { 1 };
 };

@@ -10,7 +10,7 @@ enum class Mode
     HarmonicMinor, MelodicMinor
 };
 
-// Campo harmônico/escala: tônica (0=C ... 11=B) + modo.
+// Campo harmonico/escala: tonica (0=C ... 11=B) + modo.
 class Scale
 {
 public:
@@ -20,10 +20,10 @@ public:
     int  root() const { return rootPc; }
     Mode mode() const { return m; }
 
-    // A nota MIDI (qualquer oitava) pertence à escala?
+    // A nota MIDI (qualquer oitava) pertence a escala?
     bool contains(int midiNote) const;
 
-    // Graus da escala como pitch classes (0..11), a partir da tônica.
+    // Graus da escala como pitch classes (0..11), a partir da tonica.
     std::vector<int> pitchClasses() const;
 
     static std::vector<int> intervalsOf(Mode mode);

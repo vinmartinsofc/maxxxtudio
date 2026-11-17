@@ -69,6 +69,7 @@ Placement* Track::copyClip (const Placement& source, double start)
     copy->name = source.name;
     copy->enabled = source.enabled;
     copy->clip.setNotes (source.clip.notes());
+    copy->clip.setGroove (source.clip.groove());
     return copy;
 }
 
@@ -110,6 +111,7 @@ int Track::splitClip (int clipId, double beat)
 
     const std::string name = clip->name;
     const bool enabled = clip->enabled;
+    const auto groove = clip->clip.groove();
     clip->clip.setLength (offset);
     clip->clip.setNotes (std::move (leftNotes));
     auto* right = addClip (beat, rightLength);
@@ -117,6 +119,7 @@ int Track::splitClip (int clipId, double beat)
     clip->enabled = enabled;
     right->enabled = enabled;
     right->clip.setNotes (std::move (rightNotes));
+    right->clip.setGroove (groove);
     return right->id;
 }
 
@@ -299,9 +302,10 @@ std::vector<Note> flatten (const Track& track)
         for (const auto& n : p->clip.notes())
         {
             if (n.startBeats >= p->clip.length()) continue;
-            Note a = n;
-            a.startBeats = p->start + n.startBeats;
-            a.lengthBeats = std::min (n.lengthBeats, p->clip.length() - n.startBeats);
+            Note a = p->clip.groove() ? applyGroove (n, *p->clip.groove()) : n;
+            a.startBeats = std::clamp (a.startBeats, 0.0, std::max (0.0, p->clip.length() - 1.0e-9));
+            a.lengthBeats = std::min (n.lengthBeats, p->clip.length() - a.startBeats);
+            a.startBeats += p->start;
             a.id = id++;
             out.push_back (a);
         }
