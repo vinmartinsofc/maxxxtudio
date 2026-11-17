@@ -191,7 +191,9 @@ void BrowserPanel::NativeToolCard::paintButton (juce::Graphics& graphics,
 BrowserPanel::BrowserPanel (PluginScanner& s)
     : scanner (s), tree (std::make_unique<PluginTree> (*this)),
       drumRackCard ("Drum Rack", "Arraste para o canal MIDI desejado",
-                    "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier))
+                    "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier)),
+      utilityCard ("Volume Master", theme::ui ("Volume, estéreo, mono, fase e modulação"),
+                   "plugin:" + juce::String ("ProjectFreedom.Utility"))
 {
     title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
@@ -246,7 +248,13 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         if (onAddDrumRackRequested)
             setStatus (onAddDrumRackRequested());
     };
+    utilityCard.onClick = [this]
+    {
+        if (onAddUtilityRequested)
+            setStatus (onAddUtilityRequested());
+    };
     addAndMakeVisible (drumRackCard);
+    addAndMakeVisible (utilityCard);
     setProjectFreedomTab (false);
 
     scanner.list().addChangeListener (this);
@@ -298,6 +306,7 @@ void BrowserPanel::setProjectFreedomTab (bool showTools)
     tree->setVisible (! showTools);
     projectFreedomDescription.setVisible (showTools);
     drumRackCard.setVisible (showTools);
+    utilityCard.setVisible (showTools);
     resized();
 }
 
@@ -526,6 +535,8 @@ void BrowserPanel::resized()
         projectFreedomDescription.setBounds (area.removeFromTop (24));
         area.removeFromTop (8);
         drumRackCard.setBounds (area.removeFromTop (78));
+        area.removeFromTop (8);
+        utilityCard.setBounds (area.removeFromTop (78));
     }
     else
     {

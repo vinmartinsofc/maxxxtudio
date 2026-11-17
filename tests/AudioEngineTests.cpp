@@ -2,6 +2,7 @@
 #include "AudioEngine.h"
 #include "DrumRackEditor.h"
 #include "DrumRackProcessor.h"
+#include "NativeEffectProcessors.h"
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
@@ -130,6 +131,126 @@ public:
     void getStateInformation (juce::MemoryBlock&) override {}
     void setStateInformation (const void*, int) override {}
 };
+}
+
+TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    UtilityProcessor utility;
+    REQUIRE (utility.getName() == "Volume Master");
+    REQUIRE (utility.getParameters().size() == 14);
+    REQUIRE (std::any_of (utility.getParameters().begin(), utility.getParameters().end(),
+        [] (const auto* parameter)
+        {
+            auto* identified = dynamic_cast<const juce::AudioProcessorParameterWithID*> (parameter);
+            return identified != nullptr && identified->paramID == "gain"
+                && parameter->isAutomatable();
+        }));
+
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+    REQUIRE (engine.addUtility (1) > 0);
+    const auto utilityDevices = engine.devices (1);
+    REQUIRE (utilityDevices.size() == 1);
+    REQUIRE (utilityDevices.front().name == "Volume Master");
+    REQUIRE (utilityDevices.front().automatableParameters.size() == 14);
+    std::unique_ptr<juce::AudioProcessorEditor> utilityEditor (utility.createEditor());
+    REQUIRE (utilityEditor != nullptr);
+    REQUIRE (utilityEditor->getWidth() == 700);
+    REQUIRE (utilityEditor->getHeight() == 400);
+    REQUIRE_FALSE (utilityEditor->isResizable());
+    REQUIRE (utilityEditor->getNumChildComponents() == 28);
+    for (int index = 0; index < utilityEditor->getNumChildComponents(); ++index)
+    {
+        const auto* child = utilityEditor->getChildComponent (index);
+        const auto bounds = child->getBounds();
+        REQUIRE (bounds.getWidth() > 0);
+        REQUIRE (bounds.getHeight() > 0);
+        REQUIRE (utilityEditor->getLocalBounds().contains (bounds));
+        if (const auto* slider = dynamic_cast<const juce::Slider*> (child))
+        {
+            const auto parameter = std::find_if (
+                utility.getParameters().begin(), utility.getParameters().end(),
+                [slider] (const auto* candidate) { return candidate->getName (64) == slider->getName(); });
+            REQUIRE (parameter != utility.getParameters().end());
+            REQUIRE (slider->getDoubleClickReturnValue() == (*parameter)->getDefaultValue());
+        }
+    }
+
+    AutoPanProcessor pan;
+    REQUIRE (pan.getName() == "Pan Master");
+    REQUIRE (pan.getParameters().size() == 3);
+    pan.prepareToPlay (44100.0, 128);
+    juce::AudioBuffer<float> buffer (2, 128);
+    buffer.clear();
+    buffer.getWritePointer (0)[0] = 1.0f;
+    buffer.getWritePointer (1)[0] = 1.0f;
+    juce::MidiBuffer midi;
+    pan.processBlock (buffer, midi);
+    REQUIRE (buffer.getNumChannels() == 2);
+
+    juce::XmlElement oldPanState ("NativeEffect");
+    for (const auto& [id, value] : { std::pair<const char*, double> { "rate", 0.1 },
+                                     { "depth", 0.75 }, { "phase", 0.4 } })
+    {
+        auto* parameter = oldPanState.createNewChildElement ("Parameter");
+        parameter->setAttribute ("id", id);
+        parameter->setAttribute ("value", value);
+    }
+    juce::MemoryOutputStream stateData;
+    oldPanState.writeTo (stateData);
+    utility.setStateInformation (stateData.getData(), static_cast<int> (stateData.getDataSize()));
+    const auto findParameterValue = [] (UtilityProcessor& processor, const juce::String& id)
+    {
+        for (auto* parameter : processor.getParameters())
+            if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                identified != nullptr && identified->paramID == id)
+                return parameter->getValue();
+        return -1.0f;
+    };
+    REQUIRE (std::abs (findParameterValue (utility, "pan_rate") - 0.1f) < 0.00001f);
+    REQUIRE (std::abs (findParameterValue (utility, "pan_amount") - 0.75f) < 0.00001f);
+    REQUIRE (std::abs (findParameterValue (utility, "pan_phase") - 0.4f) < 0.00001f);
+}
+
+TEST_CASE ("Volume Master applies stereo width, shared phase inversion, and pan modulation")
+{
+    UtilityProcessor processor;
+    processor.prepareToPlay (44100.0, 8);
+    const auto setParameter = [&processor] (const juce::String& id, float value)
+    {
+        for (auto* parameter : processor.getParameters())
+            if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                identified != nullptr && identified->paramID == id)
+                parameter->setValue (value);
+    };
+
+    juce::AudioBuffer<float> buffer (2, 8);
+    juce::MidiBuffer midi;
+    buffer.setSample (0, 0, 1.0f);
+    buffer.setSample (1, 0, -1.0f);
+    processor.processBlock (buffer, midi);
+    REQUIRE (std::abs (buffer.getSample (0, 0) - 1.0f) < 0.0001f);
+    REQUIRE (std::abs (buffer.getSample (1, 0) + 1.0f) < 0.0001f);
+
+    setParameter ("invert_phase", 1.0f);
+    buffer.clear();
+    buffer.setSample (0, 0, 1.0f);
+    buffer.setSample (1, 0, -1.0f);
+    processor.processBlock (buffer, midi);
+    REQUIRE (std::abs (buffer.getSample (0, 0) + 1.0f) < 0.0001f);
+    REQUIRE (std::abs (buffer.getSample (1, 0) - 1.0f) < 0.0001f);
+
+    setParameter ("invert_phase", 0.0f);
+    setParameter ("pan_amount", 1.0f);
+    setParameter ("balance", 1.0f);
+    setParameter ("pan_phase", 0.25f);
+    buffer.clear();
+    buffer.setSample (0, 0, 1.0f);
+    buffer.setSample (1, 0, 1.0f);
+    processor.processBlock (buffer, midi);
+    REQUIRE (std::abs (buffer.getSample (0, 0)) < 0.0001f);
+    REQUIRE (buffer.getSample (1, 0) > 1.4f);
 }
 
 TEST_CASE ("Drum Rack exposes stable automatable parameters for every pad")

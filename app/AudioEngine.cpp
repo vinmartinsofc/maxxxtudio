@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "DrumRackProcessor.h"
+#include "NativeEffectProcessors.h"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -1650,6 +1651,28 @@ int AudioEngine::addDrumRack (int trackId)
     track->devices.insert (track->devices.begin(), std::move (device));
     rewire (*track);
     return track->devices.front().id;
+}
+
+int AudioEngine::addUtility (int trackId)
+{
+    auto* track = find (trackId);
+    if (track == nullptr)
+        return 0;
+    for (const auto& device : track->devices)
+        if (device.pluginIdentifier == utilityPluginIdentifier)
+            return device.id;
+
+    Device device;
+    device.id = nextDeviceId++;
+    device.name = "Volume Master";
+    device.pluginIdentifier = utilityPluginIdentifier;
+    device.instrument = false;
+    device.node = seqGraph.addNode (std::make_unique<UtilityProcessor>());
+    if (device.node == nullptr)
+        return 0;
+    track->devices.push_back (std::move (device));
+    rewire (*track);
+    return track->devices.back().id;
 }
 
 void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,

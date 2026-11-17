@@ -16,6 +16,7 @@ public:
 
     std::function<void (const juce::PluginDescription&)> onLoadRequested;
     std::function<juce::String()> onAddDrumRackRequested;
+    std::function<juce::String()> onAddUtilityRequested;
 
     void setStatus (const juce::String& text) { status.setText (text, juce::dontSendNotification); }
     void refresh();
@@ -56,6 +57,7 @@ private:
     std::unique_ptr<PluginTree> tree;
     juce::TextButton vstTab { "VST" }, projectFreedomTab { "Project Freedom" };
     NativeToolCard drumRackCard;
+    NativeToolCard utilityCard;
     juce::Label projectFreedomDescription { {}, "Ferramentas do Project Freedom" };
     juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" }, effectsButton { "Efeitos" };
     enum class Filter { All, Instruments, Effects } filter = Filter::All;

@@ -1,5 +1,6 @@
 #include "ProjectFile.h"
 #include "DrumRackProcessor.h"
+#include "NativeEffectProcessors.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -799,6 +800,77 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
             progress.completeUnit();
         }
     }
+
+    std::set<int> legacyUtilityTracks, legacyAutoPanTracks;
+    for (const auto& plugin : loaded.plugins)
+    {
+        if (plugin.identifier == AutoPanProcessor::pluginIdentifier)
+        {
+            legacyAutoPanTracks.insert (plugin.trackId);
+            continue;
+        }
+        if (plugin.identifier != UtilityProcessor::pluginIdentifier || plugin.state.getSize() == 0)
+            continue;
+
+        const auto stateXml = juce::XmlDocument::parse (xmlStringFromBlock (plugin.state));
+        bool hasUnifiedPanParameters = false;
+        if (stateXml != nullptr && stateXml->hasTagName ("NativeEffect"))
+            for (auto* parameter = stateXml->getFirstChildElement();
+                 parameter != nullptr; parameter = parameter->getNextElement())
+                hasUnifiedPanParameters = hasUnifiedPanParameters
+                    || parameter->getStringAttribute ("id") == "pan_rate";
+        if (! hasUnifiedPanParameters)
+            legacyUtilityTracks.insert (plugin.trackId);
+    }
+
+    for (auto& track : loaded.project.tracks)
+        for (auto& envelope : track.automation)
+        {
+            auto& target = envelope.target;
+            if (target.type != roll::AutomationParameterType::PluginParameter)
+                continue;
+
+            if (legacyAutoPanTracks.contains (track.id)
+                && target.pluginIdentifier == AutoPanProcessor::pluginIdentifier)
+            {
+                target.pluginIdentifier = UtilityProcessor::pluginIdentifier;
+                if (target.parameterId == "rate")
+                {
+                    target.parameterId = "pan_rate";
+                    target.parameterName = "Pan Rate";
+                    target.parameterIndex = 7;
+                }
+                else if (target.parameterId == "depth")
+                {
+                    target.parameterId = "pan_amount";
+                    target.parameterName = "Pan Amount";
+                    target.parameterIndex = 6;
+                }
+                else if (target.parameterId == "phase")
+                {
+                    target.parameterId = "pan_phase";
+                    target.parameterName = "LFO Phase";
+                    target.parameterIndex = 8;
+                }
+            }
+
+            if (legacyUtilityTracks.contains (track.id)
+                && target.pluginIdentifier == UtilityProcessor::pluginIdentifier)
+            {
+                if (target.parameterId == "width")
+                {
+                    target.currentValue *= 0.5;
+                    for (auto& point : envelope.points)
+                        point.value *= 0.5;
+                }
+                else if (target.parameterId == "invert_left" || target.parameterId == "invert_right")
+                {
+                    target.parameterId = "invert_phase";
+                    target.parameterName = "Invert Phase";
+                    target.parameterIndex = 5;
+                }
+            }
+        }
 
     data = std::move (loaded);
     return juce::Result::ok();

@@ -49,6 +49,7 @@ private:
     void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
     void addNativeDrumRackToTrack (int trackId);
+    juce::String addNativeEffectToTrack (int trackId);
     void duplicateSelectedTrack (int trackId);
     void openDeviceEditor (int trackId, int deviceId);
     void updateActionIndicator();

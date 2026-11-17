@@ -18,6 +18,7 @@ target_sources(ProjectFreedom PRIVATE
     AudioEngine.cpp
     DrumRackProcessor.cpp
     DrumRackEditor.cpp
+    NativeEffectProcessors.cpp
     OptionsWindow.cpp
     AudioClipEditor.cpp
     AudioFileBrowser.cpp
@@ -120,7 +121,8 @@ if(ROLL_BUILD_TESTS)
         ../tests/AudioEngineTests.cpp
         AudioEngine.cpp
         DrumRackProcessor.cpp
-        DrumRackEditor.cpp)
+        DrumRackEditor.cpp
+        NativeEffectProcessors.cpp)
     target_include_directories(audio_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(audio_engine_tests PRIVATE
         JUCE_MODAL_LOOPS_PERMITTED=1

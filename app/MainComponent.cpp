@@ -3,6 +3,7 @@
 #include "WindowPlacement.h"
 #include "DrumRackEditor.h"
 #include "DrumRackProcessor.h"
+#include "NativeEffectProcessors.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -416,8 +417,10 @@ public:
         addTransportKeyListenerRecursively (*editorComponent);
         addKeyListener (this);
         const bool editorResizable = editor->isResizable();
+        const bool fixedNativeEditor =
+            dynamic_cast<UtilityProcessor*> (editor->getAudioProcessor()) != nullptr;
 
-        setResizable (true, false);
+        setResizable (! fixedNativeEditor, false);
         const int horizontalMargin = std::min (16, std::max (0, (displayUserArea.getWidth() - 1) / 2));
         const int verticalMargin = std::min (60, std::max (0, (displayUserArea.getHeight() - 1) / 2));
         const auto available = displayUserArea.reduced (horizontalMargin, verticalMargin);
@@ -812,6 +815,8 @@ MainComponent::MainComponent()
             const auto* track = project.track (trackId);
             return track != nullptr && track->type == roll::TrackType::Midi;
         }
+        if (identifier == UtilityProcessor::pluginIdentifier)
+            return project.track (trackId) != nullptr;
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr
             && (trackId != AudioEngine::masterTrackId || engine.canAcceptPlugin (trackId, *description));
@@ -821,6 +826,11 @@ MainComponent::MainComponent()
         if (identifier == DrumRackProcessor::pluginIdentifier)
         {
             addNativeDrumRackToTrack (trackId);
+            return;
+        }
+        if (identifier == UtilityProcessor::pluginIdentifier)
+        {
+            browser.setStatus (addNativeEffectToTrack (trackId));
             return;
         }
         if (auto description = scanner.list().getTypeForIdentifierString (identifier))
@@ -1067,6 +1077,8 @@ MainComponent::MainComponent()
             const auto* track = project.track (trackId);
             return track != nullptr && track->type == roll::TrackType::Midi;
         }
+        if (identifier == UtilityProcessor::pluginIdentifier)
+            return project.track (trackId) != nullptr;
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr && engine.canAcceptPlugin (trackId, *description);
     };
@@ -1075,6 +1087,11 @@ MainComponent::MainComponent()
         if (identifier == DrumRackProcessor::pluginIdentifier)
         {
             addNativeDrumRackToTrack (trackId);
+            return;
+        }
+        if (identifier == UtilityProcessor::pluginIdentifier)
+        {
+            browser.setStatus (addNativeEffectToTrack (trackId));
             return;
         }
         if (auto description = scanner.list().getTypeForIdentifierString (identifier))
@@ -1097,6 +1114,10 @@ MainComponent::MainComponent()
             return juce::String ("Drum Rack can only be added to a MIDI track.");
         showDetail (true);
         return juce::String ("Drum Rack added to the selected track.");
+    };
+    browser.onAddUtilityRequested = [this]
+    {
+        return addNativeEffectToTrack (project.selectedTrackId);
     };
     scanner.onStarted = [this]
     {
@@ -2720,6 +2741,40 @@ void MainComponent::restoreNextProjectPlugin()
     while (nextProjectPlugin < pendingProjectPlugins.size())
     {
         auto plugin = pendingProjectPlugins[nextProjectPlugin++];
+        if (plugin.identifier == AudioEngine::utilityPluginIdentifier)
+        {
+            const int deviceId = engine.addUtility (plugin.trackId);
+            if (deviceId <= 0)
+                ++missingProjectPlugins;
+            else
+            {
+                if (! engine.restorePluginState (plugin.trackId, deviceId, plugin.state))
+                    ++missingProjectPlugins;
+                engine.setDeviceBypassed (plugin.trackId, deviceId, plugin.bypassed);
+                loadedProjectPlugins.emplace_back (plugin, deviceId);
+                refreshDeviceView();
+            }
+            ++projectLoadWorkDone;
+            advanceProjectLoadTask();
+            continue;
+        }
+        if (plugin.identifier == AudioEngine::autoPanPluginIdentifier)
+        {
+            const int deviceId = engine.addUtility (plugin.trackId);
+            if (deviceId <= 0)
+                ++missingProjectPlugins;
+            else
+            {
+                if (! engine.restorePluginState (plugin.trackId, deviceId, plugin.state))
+                    ++missingProjectPlugins;
+                engine.setDeviceBypassed (plugin.trackId, deviceId, plugin.bypassed);
+                loadedProjectPlugins.emplace_back (plugin, deviceId);
+                refreshDeviceView();
+            }
+            ++projectLoadWorkDone;
+            advanceProjectLoadTask();
+            continue;
+        }
         if (plugin.identifier == AudioEngine::drumRackPluginIdentifier)
         {
             const int deviceId = engine.addDrumRack (plugin.trackId);
@@ -3505,6 +3560,44 @@ void MainComponent::duplicateSelectedTrack (int trackId)
         }
 
         const auto state = operation->plugins[index];
+        if (state.identifier == AudioEngine::utilityPluginIdentifier)
+        {
+            const int deviceId = engine.addUtility (operation->targetTrackId);
+            if (deviceId <= 0)
+                ++operation->failures;
+            else
+            {
+                if (! engine.restorePluginState (operation->targetTrackId, deviceId, state.state))
+                    ++operation->failures;
+                engine.setDeviceBypassed (operation->targetTrackId, deviceId, state.bypassed);
+                if (state.groupId > 0)
+                    operation->groups[state.groupId].push_back (deviceId);
+            }
+            ++operation->completed;
+            operation->task->setProgress (static_cast<double> (operation->completed)
+                                            / operation->plugins.size());
+            copyNextPlugin (copyNextPlugin, index + 1);
+            return;
+        }
+        if (state.identifier == AudioEngine::autoPanPluginIdentifier)
+        {
+            const int deviceId = engine.addUtility (operation->targetTrackId);
+            if (deviceId <= 0)
+                ++operation->failures;
+            else
+            {
+                if (! engine.restorePluginState (operation->targetTrackId, deviceId, state.state))
+                    ++operation->failures;
+                engine.setDeviceBypassed (operation->targetTrackId, deviceId, state.bypassed);
+                if (state.groupId > 0)
+                    operation->groups[state.groupId].push_back (deviceId);
+            }
+            ++operation->completed;
+            operation->task->setProgress (static_cast<double> (operation->completed)
+                                            / operation->plugins.size());
+            copyNextPlugin (copyNextPlugin, index + 1);
+            return;
+        }
         auto description = scanner.list().getTypeForIdentifierString (state.identifier);
         if (description == nullptr)
         {
@@ -3541,6 +3634,23 @@ void MainComponent::duplicateSelectedTrack (int trackId)
             }, state.order);
     };
     copyNextPlugin (copyNextPlugin, 0);
+}
+
+juce::String MainComponent::addNativeEffectToTrack (int trackId)
+{
+    if (project.track (trackId) == nullptr)
+        return "Trilha inexistente.";
+
+    const int deviceId = engine.addUtility (trackId);
+    if (deviceId <= 0)
+        return "Nao foi possivel adicionar o Volume Master a esta trilha.";
+
+    project.selectTrack (trackId);
+    showDetail (true);
+    refreshDeviceView();
+    project.sendChangeMessage();
+    openDeviceEditor (trackId, deviceId);
+    return "Volume Master added to the selected track.";
 }
 
 void MainComponent::addNativeDrumRackToTrack (int trackId)

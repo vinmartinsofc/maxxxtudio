@@ -256,10 +256,10 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | `A` exibe os parâmetros automatizáveis e seus valores atuais; todas as curvas salvas ficam visíveis, com o parâmetro ativo destacado. Os controles de volume, pan e mute do mixer acompanham os valores automatizados; o AudioEngine aplica parâmetros VST3 durante a reprodução, restaura o valor manual ao parar e protege bindings ao remover/reordenar plugins. Persistido no `.pfs`; falta QA manual com plugins reais. |
 | 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp on/off existem; playback é atualmente Re-Pitch, sem modos de time-stretch nem transpose independente. |
 | 13 | Groove MIDI (8th/16th e ritmos não quantizados) | **Concluído** no código atual: `GrooveLibrary`/`GrooveBrowser` importam `.agr`, reproduzem automaticamente por padrão ao navegar e aplicam grooves sem alterar as notas originais; qualquer revisão futura deve validar o comportamento manual real em UI. |
-| Nova | Ferramentas de sampler e efeitos nativos | Drum Rack limitado às 15 notas do teclado do computador. Utility e Auto Pan nativos ainda pendentes. |
+| Nova | Ferramentas de sampler e efeitos nativos | Drum Rack limitado às 15 notas do teclado do computador. Volume Master reúne ganho, largura/balanço, modos de canal, mono, inversão de fase, Auto Pan, Bass Mono, mute e DC; controles expostos à automação. |
 | Futuro | Gravação de áudio em tempo real e importação/exportação MIDI | Pendente; exportação MIDI também aparece no §14. |
 
-**Próxima tarefa sugerida:** criar as ferramentas nativas Utility e Auto Pan, incluindo controles de fase e modulação de pan.
+**Próxima tarefa sugerida:** validar `Volume Master` visual e auditivamente com áudio real, incluindo automação e abertura de projetos legados.
 
 ---
 
@@ -745,6 +745,8 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.52** | Volume Master unificado com Auto Pan e recursos Utility; Pan Master removido como efeito separado, projetos e automações legados migrados |
+| **Doc 1.51** | Volume Master e Pan Master nativos no navegador/banner; parâmetros editáveis e automatizáveis, estado persistente em projetos e duplicação entre trilhas |
 | **Doc 1.50** | Drum Rack arrastável para canais MIDI, com undo/redo, limpeza individual por Delete, confirmação de limpeza total, feedback visual e transporte com Espaço ao focar o plugin; autoplay padrão no navegador de grooves |
 | **Doc 1.49** | Drum Rack restrito às 15 notas do teclado, pads com as teclas correspondentes e cards nativos com banner |
 | **Doc 1.48** | Drum Rack com 128 notas MIDI em bancos de 16, seleção/edição de pad, One-Shot e Classic com loop sustentado, e migração de estado legado |

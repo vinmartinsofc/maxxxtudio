@@ -267,6 +267,8 @@ class AudioEngine : private juce::ChangeListener
 public:
     static constexpr int masterTrackId = 0;
     static constexpr const char* drumRackPluginIdentifier = "ProjectFreedom.DrumRack";
+    static constexpr const char* utilityPluginIdentifier = "ProjectFreedom.Utility";
+    static constexpr const char* autoPanPluginIdentifier = "ProjectFreedom.AutoPan";
 
     AudioEngine();
     ~AudioEngine();
@@ -299,6 +301,7 @@ public:
                     std::function<void (const juce::String& error, int deviceId)> onDone,
                     int insertionIndex = -1);
     int addDrumRack (int trackId);
+    int addUtility (int trackId);
     void addPadEffect (int trackId, int rackDeviceId, int pad,
                        const juce::PluginDescription&, std::function<void (const juce::String&)> onDone);
     std::unique_ptr<juce::AudioProcessorEditor> createPadEffectEditor (int trackId, int rackDeviceId,
