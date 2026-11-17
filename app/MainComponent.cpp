@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "OptionsWindow.h"
 #include "WindowPlacement.h"
 #include <algorithm>
 #include <array>
@@ -10,6 +11,29 @@
 
 namespace
 {
+juce::File userPreferencesFile()
+{
+    auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                         .getChildFile ("ProjectFreedom");
+    directory.createDirectory();
+    return directory.getChildFile ("preferences.xml");
+}
+
+bool loadCreateFadesOnClipEdges()
+{
+    const auto xml = juce::XmlDocument::parse (userPreferencesFile());
+    return xml != nullptr && xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES")
+        && xml->getBoolAttribute ("createFadesOnClipEdges", false);
+}
+
+void saveCreateFadesOnClipEdges (bool enabled)
+{
+    juce::XmlElement xml ("PROJECT_FREEDOM_PREFERENCES");
+    xml.setAttribute ("createFadesOnClipEdges", enabled);
+    if (! xml.writeTo (userPreferencesFile()))
+        juce::Logger::writeToLog ("MainComponent: nao foi possivel salvar as preferencias.");
+}
+
 double sourceBpmFromFileName (const juce::File& file, double fallback)
 {
     const auto name = file.getFileNameWithoutExtension().toLowerCase();
@@ -416,13 +440,22 @@ private:
 
 MainComponent::MainComponent()
 {
+    createFadesOnClipEdges = loadCreateFadesOnClipEdges();
     addAndMakeVisible (taskStatusBar);
     addAndMakeVisible (transport);
     transport.onProjectMenu = [this] { showProjectMenu(); };
+    transport.onOptionsMenu = [this] { showOptionsWindow(); };
+    transport.onBpmChanged = [this] (double bpm)
+    {
+        displayedBpm = bpm;
+        arrangement.setBpm (bpm);
+        refreshAudioClipEditor();
+    };
     addAndMakeVisible (browser);
     addAndMakeVisible (audioBrowser);
     audioBrowser.setVisible (false);
     addAndMakeVisible (arrangement);
+    arrangement.setBpm (engine.graph().getBpm());
     addAndMakeVisible (editor);
     addAndMakeVisible (audioClipEditor);
     audioClipEditor.setVisible (false);
@@ -598,8 +631,40 @@ MainComponent::MainComponent()
         transport.togglePlay();
     };
     arrangement.meterProvider = [this] (int id) { return engine.peak (id); };
+    arrangement.liveMixerProvider = [this] (int id)
+    {
+        return ArrangementView::LiveMixerValues {
+            engine.mixerGain (id), engine.mixerPan (id), engine.mixerMuted (id)
+        };
+    };
+    arrangement.playbackStateProvider = [this] { return engine.graph().isPlaying(); };
     arrangement.onMasterPeakReset = [this] { engine.resetPeak (AudioEngine::masterTrackId); };
     arrangement.deviceSummary = [this] (int id) { return deviceSummary (id); };
+    arrangement.automationParametersProvider = [this] (int trackId)
+    {
+        std::vector<ArrangementView::AutomationParameterChoice> choices;
+        const auto devices = engine.devices (trackId);
+        for (std::size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex)
+        {
+            const auto& device = devices[deviceIndex];
+            for (const auto& parameter : device.automatableParameters)
+            {
+                ArrangementView::AutomationParameterChoice choice;
+                choice.target.type = roll::AutomationParameterType::PluginParameter;
+                choice.target.pluginIdentifier = device.pluginIdentifier.toStdString();
+                choice.target.parameterId = parameter.id.toStdString();
+                choice.target.parameterName = parameter.name.toStdString();
+                choice.target.parameterIndex = parameter.index;
+                choice.target.deviceIndex = static_cast<int> (deviceIndex);
+                choice.target.currentValue = parameter.value;
+                choice.label = device.name + " "
+                             + juce::String (static_cast<int> (deviceIndex + 1))
+                             + " : " + parameter.name;
+                choices.push_back (std::move (choice));
+            }
+        }
+        return choices;
+    };
     arrangement.onTrackDuplicateRequested = [this] (int id) { duplicateSelectedTrack (id); };
     arrangement.canAcceptPluginDrop = [this] (const juce::String& identifier, int trackId)
     {
@@ -709,6 +774,7 @@ MainComponent::MainComponent()
         if (std::abs (bpm - displayedBpm) > 1.0e-6)
         {
             displayedBpm = bpm;
+            arrangement.setBpm (bpm);
             refreshAudioClipEditor();
         }
         arrangement.setPlayhead (beats);
@@ -874,6 +940,7 @@ MainComponent::MainComponent()
     setWantsKeyboardFocus (true);
     setSize (1360, 800);
     startTimerHz (30);
+    nextRecoverySaveTime = juce::Time::getMillisecondCounterHiRes() + 120000.0;
 
     scanner.startScan();
 }
@@ -890,6 +957,7 @@ MainComponent::~MainComponent()
     }
 
     lifetimeToken->store (false);
+    optionsWindow.reset();
     scanner.stopScan();
     projectFilePool.removeAllJobs (true, -1);
     if (audioRenderInProgress)
@@ -1192,9 +1260,11 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
         audioAssets[path] = data;
         const double sourceBpm = sourceBpmFromFileName (file, engine.graph().getBpm());
         const double lengthBeats = data->durationSeconds * sourceBpm / 60.0;
+        const double edgeFadeBeats = createFadesOnClipEdges
+            ? engine.graph().getBpm() * 0.004 / 60.0 : 0.0;
         if (project.addAudioClipReplacingRange (trackId, startBeat, lengthBeats, path,
                                                 file.getFileName().toStdString(), data->waveform,
-                                                data->durationSeconds, sourceBpm) == nullptr)
+                                                data->durationSeconds, sourceBpm, edgeFadeBeats) == nullptr)
         {
             publishAudioTrack (trackId);
             audioBrowser.setStatus ("Nao foi possivel inserir o audio nesse ponto da trilha.");
@@ -1557,15 +1627,19 @@ void MainComponent::playSelectedTrack()
     const auto* selectedTrack = project.selectedTrack();
     const auto* selectedAudio = selectedTrack != nullptr && selectedTrack->type == roll::TrackType::Audio
         ? selectedTrack->findAudioClip (project.selectedAudioClipId) : nullptr;
+    const auto* selectedMidi = project.selectedClip();
     if (selectedAudio != nullptr)
     {
         start = selectedAudio->start;
         end = selectedAudio->end();
-        if (transportPosition >= start && transportPosition < end)
-            start = transportPosition;
+    }
+    else if (selectedMidi != nullptr)
+    {
+        start = selectedMidi->start;
+        end = selectedMidi->end();
     }
 
-    if (selectedAudio != nullptr || selectedTrackSpan (start, end))
+    if (selectedAudio != nullptr || selectedMidi != nullptr || selectedTrackSpan (start, end))
     {
         if (engine.graph().isLoop() && (start < project.loopStart || end > project.loopEnd))
             transport.setLoopEnabled (false);
@@ -1661,6 +1735,12 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
 #endif
 
     const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
+    if (ctrl && ! k.getModifiers().isAltDown() && ! k.getModifiers().isShiftDown()
+        && (k.getTextCharacter() == ',' || k.getKeyCode() == ','))
+    {
+        showOptionsWindow();
+        return true;
+    }
     const auto keyCode = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
     const bool zeroKey = k.getKeyCode() == '0'
                       || k.getKeyCode() == juce::KeyPress::numberPad0
@@ -1684,7 +1764,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     }
 
     if (computerMidiKeyboardEnabled && juce::Process::isForegroundProcess() && ! isTextEditorFocused()
-        && ! ctrl && ! k.getModifiers().isAltDown())
+        && ! ctrl && ! k.getModifiers().isAltDown() && ! k.getModifiers().isShiftDown())
     {
         const bool isMappedKey = std::any_of (computerMidiKeyboardMap.begin(), computerMidiKeyboardMap.end(),
             [keyCode] (const auto& mapping) { return mapping.first == static_cast<int> (keyCode); });
@@ -1693,6 +1773,13 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
             updateComputerMidiKeyboard();
             return true;
         }
+    }
+
+    if (! ctrl && ! k.getModifiers().isAltDown() && ! k.getModifiers().isShiftDown()
+        && ! isTextEditorFocused() && keyCode == 'A')
+    {
+        arrangement.toggleAutomationModeFromKey();
+        return true;
     }
 
     if (ctrl && keyCode == 'S')
@@ -1806,10 +1893,14 @@ void MainComponent::applyMixers()
                 audibleWhenSoloed |= group->solo;
         }
         engine.setMixer (t->id, static_cast<float> (t->volume), static_cast<float> (t->pan),
-                         t->mute || (anySolo && ! audibleWhenSoloed));
+                         t->mute || (anySolo && ! audibleWhenSoloed), t->mute);
+        engine.setTrackAutomation (t->id, t->automation);
     }
     if (auto* m = project.masterTrack.get())
+    {
         engine.setMasterMixer (static_cast<float> (m->volume), static_cast<float> (m->pan), m->mute);
+        engine.setTrackAutomation (AudioEngine::masterTrackId, m->automation);
+    }
 }
 
 void MainComponent::showProjectMenu()
@@ -1820,6 +1911,8 @@ void MainComponent::showProjectMenu()
     menu.addItem (3, "Salvar como...");
     menu.addSeparator();
     menu.addItem (5, "Exportar Master como WAV...", ! audioRenderInProgress);
+    menu.addSeparator();
+    menu.addItem (6, "Preferencias... (Ctrl+,)");
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transport),
         [this] (int result)
         {
@@ -1827,7 +1920,25 @@ void MainComponent::showProjectMenu()
             else if (result == 2) saveProject (currentProjectFile);
             else if (result == 3) chooseProjectFile (false);
             else if (result == 5) chooseWavExportFile();
+            else if (result == 6) showOptionsWindow();
         });
+}
+
+void MainComponent::showOptionsWindow()
+{
+    if (optionsWindow == nullptr)
+    {
+        optionsWindow = std::make_unique<OptionsWindow> (
+            engine.audioDeviceManager(), scanner, createFadesOnClipEdges,
+            [this] (bool enabled)
+            {
+                createFadesOnClipEdges = enabled;
+                saveCreateFadesOnClipEdges (enabled);
+            });
+    }
+
+    optionsWindow->setVisible (true);
+    optionsWindow->toFront (true);
 }
 
 void MainComponent::chooseWavExportFile()
@@ -2000,8 +2111,54 @@ void MainComponent::openProjectFromFile (const juce::File& file)
         loadProject (file);
 }
 
+void MainComponent::offerRecoveryBeforeOpening (std::function<void()> continueStartup)
+{
+    const auto directory = ProjectFile::recoveryDirectory();
+    ProjectFile::clearIncompleteRecoveryFiles (directory);
+    const auto files = ProjectFile::recoveryFiles (directory);
+    if (files.empty())
+    {
+        if (continueStartup)
+            continueStartup();
+        return;
+    }
+
+    const juce::Component::SafePointer<MainComponent> safeThis (this);
+    juce::AlertWindow::showAsync (
+        juce::MessageBoxOptions()
+            .withIconType (juce::MessageBoxIconType::WarningIcon)
+            .withTitle ("Sessao de recuperacao encontrada")
+            .withMessage ("O Project Freedom encontrou uma copia automatica recente. Deseja recupera-la?")
+            .withButton ("Recuperar")
+            .withButton ("Descartar")
+            .withAssociatedComponent (this),
+        [safeThis, recoveryFile = files.front(), continueStartup = std::move (continueStartup)] (int result) mutable
+        {
+            if (safeThis == nullptr)
+                return;
+
+            if (result == 1)
+            {
+                safeThis->loadProject (recoveryFile, true);
+                return;
+            }
+
+            if (result == 2)
+                ProjectFile::clearRecoveryFiles (ProjectFile::recoveryDirectory());
+
+            if (continueStartup)
+                continueStartup();
+        });
+}
+
 void MainComponent::requestClose (std::function<void()> onCloseApproved)
 {
+    if (recoverySaveInProgress)
+    {
+        setProjectStatus ("Aguarde a copia de recuperacao terminar antes de fechar.");
+        return;
+    }
+
     const juce::Component::SafePointer<MainComponent> safeThis (this);
     juce::AlertWindow::showAsync (
         juce::MessageBoxOptions()
@@ -2019,6 +2176,7 @@ void MainComponent::requestClose (std::function<void()> onCloseApproved)
 
             if (result == 2)
             {
+                ProjectFile::clearRecoveryFiles (ProjectFile::recoveryDirectory());
                 if (onCloseApproved)
                     onCloseApproved();
                 return;
@@ -2133,6 +2291,7 @@ void MainComponent::saveProject (const juce::File& requestedFile, std::function<
                 }
 
                 currentProjectFile = file;
+                ProjectFile::clearRecoveryFiles (ProjectFile::recoveryDirectory());
                 setProjectStatus ("Projeto salvo: " + file.getFileName());
                 if (onComplete)
                     onComplete (true);
@@ -2152,7 +2311,51 @@ void MainComponent::saveProject (const juce::File& requestedFile, std::function<
     }
 }
 
-void MainComponent::loadProject (const juce::File& file)
+void MainComponent::saveRecoverySnapshot()
+{
+    if (recoverySaveInProgress || ! taskRegistry.tasksForTarget ("track").empty()
+        || restoringProjectPlugins || pendingAudioLoads > 0
+        || projectFileOperationInProgress || audioRenderInProgress)
+        return;
+
+    recoverySaveInProgress = true;
+    projectFileOperationInProgress = true;
+    auto snapshot = std::make_shared<ProjectFileData>();
+    snapshot->project = project.createState();
+    snapshot->plugins = engine.getPluginStates();
+    snapshot->bpm = engine.graph().getBpm();
+    snapshot->transportPosition = engine.graph().positionBeats();
+    snapshot->loopEnabled = engine.graph().isLoop();
+    snapshot->metronomeEnabled = engine.graph().isMetronomeEnabled();
+    snapshot->metronomeGain = engine.graph().getMetronomeGain();
+
+    const auto directory = ProjectFile::recoveryDirectory();
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    projectFilePool.addJob ([this, token, directory, snapshot]
+    {
+        const auto result = ProjectFile::saveRecovery (directory, *snapshot);
+        if (! juce::MessageManager::callAsync ([this, token, result]
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+                return;
+
+            recoverySaveInProgress = false;
+            projectFileOperationInProgress = false;
+            if (result.failed())
+            {
+                juce::Logger::writeToLog ("MainComponent: falha ao salvar copia de recuperacao: "
+                                          + result.getErrorMessage());
+                setProjectStatus ("Falha ao criar copia de recuperacao: " + result.getErrorMessage());
+            }
+        }))
+        {
+            juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado do autosave.");
+        }
+    });
+}
+
+void MainComponent::loadProject (const juce::File& file, bool recovering)
 {
     if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
         || pendingAudioLoads > 0 || projectFileOperationInProgress || audioRenderInProgress)
@@ -2166,14 +2369,14 @@ void MainComponent::loadProject (const juce::File& file)
         taskRegistry, theme::ui ("Abrindo projeto: ") + file.getFileName(), "global", -1.0);
     auto data = std::make_shared<ProjectFileData>();
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
-    projectFilePool.addJob ([this, token, file, task, data]
+    projectFilePool.addJob ([this, token, file, task, data, recovering]
     {
         const auto result = ProjectFile::load (file, *data, [task] (double progress)
         {
             task->setProgress (progress < 0.0 ? -1.0 : progress * 0.25);
         });
 
-        if (! juce::MessageManager::callAsync ([this, token, file, task, data, result]
+        if (! juce::MessageManager::callAsync ([this, token, file, task, data, result, recovering]
         {
             const auto alive = token.lock();
             if (alive == nullptr || ! alive->load())
@@ -2187,7 +2390,7 @@ void MainComponent::loadProject (const juce::File& file)
                 return;
             }
 
-            applyLoadedProject (file, std::move (*data), task);
+            applyLoadedProject (file, std::move (*data), task, recovering);
         }))
         {
             juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado da abertura.");
@@ -2196,7 +2399,7 @@ void MainComponent::loadProject (const juce::File& file)
 }
 
 void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData data,
-                                       const std::shared_ptr<TaskScope>& task)
+                                       const std::shared_ptr<TaskScope>& task, bool recovering)
 {
     projectLoadTask = task;
     projectLoadWorkDone = 0;
@@ -2238,10 +2441,13 @@ void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData 
     engine.graph().seek (transportPosition);
     arrangement.setPlayhead (transportPosition);
 
-    currentProjectFile = file;
+    currentProjectFile = recovering ? juce::File() : file;
+    if (! recovering)
+        ProjectFile::clearRecoveryFiles (ProjectFile::recoveryDirectory());
     pendingProjectPlugins = std::move (data.plugins);
     loadProjectAudio (data);
-    setProjectStatus ("Projeto aberto: " + file.getFileName());
+    setProjectStatus (recovering ? "Sessao recuperada. Use Salvar como para guardar o projeto."
+                                 : "Projeto aberto: " + file.getFileName());
     if (scanningPlugins && ! pendingProjectPlugins.empty())
         waitingForProjectPluginScan = true;
     else
@@ -2518,6 +2724,13 @@ void MainComponent::timerCallback()
 {
     updateComputerMidiKeyboard();
 
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    if (now >= nextRecoverySaveTime)
+    {
+        nextRecoverySaveTime = now + 120000.0;
+        saveRecoverySnapshot();
+    }
+
     std::uint64_t lo, hi;
     engine.activeMask (project.selectedTrackId, lo, hi);
     for (std::size_t i = 0; i < computerMidiNoteActive.size(); ++i)
@@ -2578,7 +2791,8 @@ void MainComponent::updateComputerMidiKeyboard()
 {
     // O timer cobre também teclas focadas em outros painéis; keyStateChanged reduz a latência.
     const auto modifiers = juce::ModifierKeys::getCurrentModifiers();
-    const bool hasShortcutModifier = modifiers.isCtrlDown() || modifiers.isCommandDown() || modifiers.isAltDown();
+    const bool hasShortcutModifier = modifiers.isCtrlDown() || modifiers.isCommandDown()
+                                  || modifiers.isAltDown() || modifiers.isShiftDown();
     const bool textFocused = isTextEditorFocused();
     const bool appForeground = juce::Process::isForegroundProcess();
 

@@ -4,12 +4,100 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace roll
 {
 enum class TrackType { Midi, Audio, Group };
 enum class TrackOutputRouting { Master, ExtOut };
+enum class AutomationParameterType { Volume, Pan, Mute, PluginParameter };
+
+struct AutomationTarget
+{
+    AutomationParameterType type = AutomationParameterType::Volume;
+    std::string pluginIdentifier, parameterId, parameterName;
+    int parameterIndex = -1, deviceIndex = -1;
+    double currentValue = 0.0;
+
+    bool operator== (const AutomationTarget& other) const
+    {
+        if (type != other.type)
+            return false;
+        if (type != AutomationParameterType::PluginParameter)
+            return true;
+        return pluginIdentifier == other.pluginIdentifier
+            && (parameterId.empty() ? parameterIndex == other.parameterIndex
+                                    : parameterId == other.parameterId);
+    }
+};
+
+struct AutomationPoint
+{
+    double beat = 0.0, value = 0.0;
+    friend bool operator== (const AutomationPoint&, const AutomationPoint&) = default;
+};
+
+struct AutomationEnvelope
+{
+    AutomationTarget target;
+    std::vector<AutomationPoint> points;
+};
+
+inline double automationValueAt (const AutomationEnvelope& envelope, double beat, double fallback)
+{
+    if (envelope.points.empty())
+        return fallback;
+    if (beat <= envelope.points.front().beat)
+        return envelope.points.front().value;
+    if (beat >= envelope.points.back().beat)
+        return envelope.points.back().value;
+
+    const auto next = std::upper_bound (envelope.points.begin(), envelope.points.end(), beat,
+        [] (double position, const AutomationPoint& point) { return position < point.beat; });
+    const auto previous = next - 1;
+    const double length = next->beat - previous->beat;
+    const double proportion = length > 0.0 ? (beat - previous->beat) / length : 0.0;
+    return previous->value + (next->value - previous->value) * proportion;
+}
+
+inline std::pair<double, double> automationValueRange (AutomationParameterType type)
+{
+    switch (type)
+    {
+        case AutomationParameterType::Volume: return { 0.0, 1.5 };
+        case AutomationParameterType::Pan: return { -1.0, 1.0 };
+        case AutomationParameterType::Mute: return { 0.0, 1.0 };
+        case AutomationParameterType::PluginParameter: return { 0.0, 1.0 };
+    }
+    return { 0.0, 1.0 };
+}
+
+inline bool isValidAutomationEnvelope (const AutomationEnvelope& envelope)
+{
+    constexpr std::size_t maxPoints = 65536;
+    if (envelope.points.empty() || envelope.points.size() > maxPoints)
+        return false;
+    if (envelope.target.type == AutomationParameterType::PluginParameter
+        && (envelope.target.pluginIdentifier.empty()
+            || envelope.target.deviceIndex < -1
+            || (envelope.target.parameterId.empty() && envelope.target.parameterIndex < 0)))
+        return false;
+
+    const auto [minimum, maximum] = automationValueRange (envelope.target.type);
+    if (! std::isfinite (envelope.target.currentValue)
+        || envelope.target.currentValue < minimum || envelope.target.currentValue > maximum)
+        return false;
+    double previousBeat = -1.0;
+    for (const auto& point : envelope.points)
+    {
+        if (! std::isfinite (point.beat) || point.beat < 0.0 || point.beat <= previousBeat
+            || ! std::isfinite (point.value) || point.value < minimum || point.value > maximum)
+            return false;
+        previousBeat = point.beat;
+    }
+    return true;
+}
 
 // Um clip colocado na linha do tempo de uma trilha (posição em beats).
 struct Placement
@@ -84,6 +172,7 @@ public:
 
     std::vector<std::unique_ptr<Placement>> clips;
     std::vector<std::unique_ptr<AudioPlacement>> audioClips;
+    std::vector<AutomationEnvelope> automation;
 
     Placement* addClip (double start, double length);
     Placement* find (int clipId) const;

@@ -112,6 +112,41 @@ TEST_CASE ("Offline track rendering captures audio before the master bus")
     REQUIRE (rendered.getMagnitude (1, rendered.getNumSamples()) > 0.1f);
 }
 
+TEST_CASE ("Audio clips receive a short safety fade at their start")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    source->samples->clear();
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample, 0.5f);
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 2.0;
+    clip.sourceBpm = 120.0;
+    clip.source = std::move (source);
+    clip.warpEnabled = false;
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (1, error));
+
+    juce::AudioBuffer<float> rendered (2, 4410);
+    const auto result = engine.renderTrackRange (0.0, 0.2, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    REQUIRE (std::abs (rendered.getSample (0, 0)) < 0.0001f);
+    REQUIRE (rendered.getSample (0, 80) > 0.05f);
+    REQUIRE (rendered.getSample (0, 80) < 0.5f);
+    REQUIRE (rendered.getSample (0, 400) > 0.49f);
+}
+
 TEST_CASE ("Audio from a track passes through its group bus before the master")
 {
     AudioEngine engine;
@@ -146,6 +181,58 @@ TEST_CASE ("Audio from a track passes through its group bus before the master")
     const auto settledLevel = std::abs (rendered.getSample (0, rendered.getNumSamples() - 1));
     REQUIRE (settledLevel > 0.12f);
     REQUIRE (settledLevel < 0.13f);
+}
+
+TEST_CASE ("Mixer automation changes the live audio level during playback")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+    engine.setTrackAutomation (1, {
+        { { roll::AutomationParameterType::Volume }, { { 0.0, 0.25 }, { 1.0, 1.0 } } },
+        { { roll::AutomationParameterType::Pan }, { { 0.0, -0.5 }, { 1.0, 0.5 } } },
+        { { roll::AutomationParameterType::Mute }, { { 0.0, 0.0 }, { 1.69, 0.0 }, { 1.7, 1.0 } } }
+    });
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    source->samples->clear();
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample, 0.25f);
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 2.0;
+    clip.sourceBpm = 120.0;
+    clip.source = std::move (source);
+    clip.warpEnabled = false;
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineRender (error));
+    TemporaryWavFile output;
+    const auto result = engine.renderMasterToWav (output.file, 0.9, {}, {});
+    const float liveAutomatedGain = engine.mixerGain (1);
+    const float liveAutomatedPan = engine.mixerPan (1);
+    const bool liveAutomatedMute = engine.mixerMuted (1);
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    juce::AudioFormatManager formats;
+    formats.registerBasicFormats();
+    auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (output.file));
+    REQUIRE (reader != nullptr);
+    juce::AudioBuffer<float> rendered (2, 39690);
+    REQUIRE (reader->read (&rendered, 0, rendered.getNumSamples(), 0, true, true));
+
+    const float initialLevel = rendered.getMagnitude (0, 2048);
+    const float automatedLevel = rendered.getMagnitude (30000, 2048);
+    REQUIRE (initialLevel > 0.02f);
+    REQUIRE (automatedLevel > initialLevel * 2.0f);
+    REQUIRE (liveAutomatedGain > 0.9f);
+    REQUIRE (liveAutomatedPan > 0.4f);
+    REQUIRE (liveAutomatedMute);
 }
 
 TEST_CASE ("Cancelling an offline WAV export removes the partial file")

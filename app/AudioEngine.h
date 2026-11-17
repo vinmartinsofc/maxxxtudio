@@ -65,8 +65,12 @@ private:
 class TrackMixer : public juce::AudioProcessor
 {
 public:
-    TrackMixer();
-    void set (float gain, float pan, bool muted) { targetGain = gain; targetPan = pan; mute = muted; }
+    explicit TrackMixer (const BlockShared&);
+    void set (float gain, float pan, bool muted, bool controlMuted);
+    void setAutomation (const std::vector<roll::AutomationEnvelope>&);
+    float liveGain() const { return liveGainValue.load (std::memory_order_relaxed); }
+    float livePan() const { return livePanValue.load (std::memory_order_relaxed); }
+    bool liveMute() const { return liveMuteValue.load (std::memory_order_relaxed); }
     float peak() const { return peakLevel; }
     void resetPeak();
 
@@ -89,8 +93,14 @@ public:
     void setStateInformation (const void*, int) override {}
 
 private:
+    const BlockShared& shared;
     std::atomic<float> targetGain { 1.0f }, targetPan { 0.0f }, peakLevel { 0.0f };
-    std::atomic<bool> mute { false };
+    std::atomic<bool> mute { false }, controlMute { false };
+    juce::SpinLock automationLock;
+    std::vector<roll::AutomationEnvelope> pendingAutomation, localAutomation;
+    std::uint64_t pendingAutomationVersion = 0, localAutomationVersion = 0;
+    std::atomic<float> liveGainValue { 1.0f }, livePanValue { 0.0f };
+    std::atomic<bool> liveMuteValue { false };
     float currentGain = 1.0f;
 };
 
@@ -145,6 +155,13 @@ struct DeviceInfo
     bool isInstrument = false;
     bool isBypassed = false;
     int groupId = 0;
+    struct Parameter
+    {
+        int index = -1;
+        juce::String id, name;
+        float value = 0.0f;
+    };
+    std::vector<Parameter> automatableParameters;
 };
 
 struct PluginState
@@ -245,7 +262,7 @@ private:
     double positionSamples = 0.0;
 };
 
-class AudioEngine
+class AudioEngine : private juce::ChangeListener
 {
 public:
     static constexpr int masterTrackId = 0;
@@ -255,6 +272,7 @@ public:
 
     SequencerGraph& graph()                    { return seqGraph; }
     juce::AudioPluginFormatManager& formats()  { return formatManager; }
+    juce::AudioDeviceManager& audioDeviceManager() { return deviceManager; }
 
     // trilhas
     void addTrack (int trackId, roll::TrackType type = roll::TrackType::Midi);
@@ -262,11 +280,16 @@ public:
     void publishNotes (int trackId, const std::vector<roll::Note>& notes);
     void publishAudioClips (int trackId, const std::vector<AudioClipPlayback>& clips);
     void setMixer (int trackId, float gain, float pan, bool muted);
+    void setMixer (int trackId, float gain, float pan, bool muted, bool controlMuted);
+    void setTrackAutomation (int trackId, const std::vector<roll::AutomationEnvelope>&);
     void setTrackRouting (int trackId, roll::TrackOutputRouting routing, int parentGroupId = 0);
     void setMasterMixer (float gain, float pan, bool muted = false);
     void resetPeak (int trackId);
     void previewNote (int trackId, int pitch, bool on, float velocity = 0.8f);
     void activeMask (int trackId, std::uint64_t& lo, std::uint64_t& hi) const;
+    float mixerGain (int trackId) const;
+    float mixerPan (int trackId) const;
+    bool mixerMuted (int trackId) const;
     float peak (int trackId) const;
     float masterPeak() const;
 
@@ -302,8 +325,11 @@ public:
     std::vector<PluginState> getPluginStates();
     bool restorePluginState (int trackId, int deviceId, const juce::MemoryBlock&);
     std::unique_ptr<juce::AudioProcessorEditor> createDeviceEditor (int trackId, int deviceId);
+    void saveAudioDeviceSettings();
 
 private:
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;
+
     struct Device
     {
         int id;
@@ -315,9 +341,12 @@ private:
     struct TrackNodes
     {
         juce::AudioProcessorGraph::Node::Ptr source, mixer;
+        juce::AudioProcessorGraph::Node::Ptr automationNode;
         TrackSource* sourcePtr = nullptr;
         TrackAudioSource* audioSourcePtr = nullptr;
         TrackMixer*  mixerPtr = nullptr;
+        juce::AudioProcessor* automationProcessor = nullptr;
+        std::vector<roll::AutomationEnvelope> automation;
         bool audioTrack = false;
         bool isMaster = false;
         bool isGroup = false;

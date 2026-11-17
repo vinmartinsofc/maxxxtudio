@@ -8,7 +8,8 @@ namespace roll
 Track::Track (const Track& other)
     : id (other.id), name (other.name), type (other.type), volume (other.volume),
       pan (other.pan), mute (other.mute), solo (other.solo), collapsed (other.collapsed),
-      outputRouting (other.outputRouting), parentGroupId (other.parentGroupId), nextId (other.nextId)
+      outputRouting (other.outputRouting), parentGroupId (other.parentGroupId),
+      automation (other.automation), nextId (other.nextId)
 {
     for (const auto& clip : other.clips)
         clips.push_back (std::make_unique<Placement> (*clip));
@@ -32,6 +33,7 @@ Track& Track::operator= (const Track& other)
     outputRouting = other.outputRouting;
     parentGroupId = other.parentGroupId;
     nextId = other.nextId;
+    automation = other.automation;
     clips.clear();
     audioClips.clear();
     for (const auto& clip : other.clips)

@@ -25,4 +25,9 @@ public:
                               ProgressCallback = {});
     static juce::Result load (const juce::File&, ProjectFileData&,
                               ProgressCallback = {});
+    static juce::File recoveryDirectory();
+    static std::vector<juce::File> recoveryFiles (const juce::File& directory);
+    static juce::Result saveRecovery (const juce::File& directory, const ProjectFileData&);
+    static void clearIncompleteRecoveryFiles (const juce::File& directory);
+    static void clearRecoveryFiles (const juce::File& directory);
 };

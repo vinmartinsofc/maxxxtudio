@@ -45,6 +45,8 @@ private:
 std::size_t trackWorkUnits (const roll::Track& track)
 {
     std::size_t count = 1;
+    for (const auto& envelope : track.automation)
+        count += 1 + envelope.points.size();
     for (const auto& clip : track.clips)
         count += 1 + clip->clip.notes().size();
     count += track.audioClips.size();
@@ -73,6 +75,20 @@ std::size_t xmlWorkUnits (const juce::XmlElement& xml)
                 else if (child->hasTagName ("AudioClip"))
                 {
                     ++count;
+                }
+                else if (child->hasTagName ("Automation"))
+                {
+                    for (auto* envelope = child->getFirstChildElement(); envelope != nullptr;
+                         envelope = envelope->getNextElement())
+                    {
+                        if (! envelope->hasTagName ("Envelope"))
+                            continue;
+                        ++count;
+                        for (auto* point = envelope->getFirstChildElement(); point != nullptr;
+                             point = point->getNextElement())
+                            if (point->hasTagName ("Point"))
+                                ++count;
+                    }
                 }
             }
         }
@@ -105,6 +121,36 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
     node->setAttribute ("solo", track.solo);
     node->setAttribute ("collapsed", track.collapsed);
     node->setAttribute ("routing", track.outputRouting == roll::TrackOutputRouting::ExtOut ? "external" : "master");
+
+    for (const auto& envelope : track.automation)
+    {
+        if (! roll::isValidAutomationEnvelope (envelope))
+            throw std::runtime_error ("A track contains an invalid automation envelope.");
+
+        auto* envelopeNode = node->createNewChildElement ("Automation");
+        auto* targetNode = envelopeNode->createNewChildElement ("Target");
+        switch (envelope.target.type)
+        {
+            case roll::AutomationParameterType::Volume: targetNode->setAttribute ("type", "volume"); break;
+            case roll::AutomationParameterType::Pan: targetNode->setAttribute ("type", "pan"); break;
+            case roll::AutomationParameterType::Mute: targetNode->setAttribute ("type", "mute"); break;
+            case roll::AutomationParameterType::PluginParameter: targetNode->setAttribute ("type", "plugin"); break;
+        }
+        targetNode->setAttribute ("pluginIdentifier", stringFromUtf8 (envelope.target.pluginIdentifier));
+        targetNode->setAttribute ("parameterId", stringFromUtf8 (envelope.target.parameterId));
+        targetNode->setAttribute ("parameterName", stringFromUtf8 (envelope.target.parameterName));
+        targetNode->setAttribute ("parameterIndex", envelope.target.parameterIndex);
+        targetNode->setAttribute ("deviceIndex", envelope.target.deviceIndex);
+        targetNode->setAttribute ("currentValue", envelope.target.currentValue);
+        for (const auto& point : envelope.points)
+        {
+            auto* pointNode = envelopeNode->createNewChildElement ("Point");
+            pointNode->setAttribute ("beat", point.beat);
+            pointNode->setAttribute ("value", point.value);
+            progress.completeUnit();
+        }
+        progress.completeUnit();
+    }
 
     for (const auto& clip : track.clips)
     {
@@ -205,7 +251,48 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
     std::set<int> clipIds;
     for (auto* child = node.getFirstChildElement(); child != nullptr; child = child->getNextElement())
     {
-        if (child->hasTagName ("MidiClip"))
+        if (child->hasTagName ("Automation"))
+        {
+            auto* targetNode = child->getChildByName ("Target");
+            if (targetNode == nullptr)
+                return false;
+
+            roll::AutomationEnvelope envelope;
+            const auto targetType = targetNode->getStringAttribute ("type");
+            if (targetType == "volume")
+                envelope.target.type = roll::AutomationParameterType::Volume;
+            else if (targetType == "pan")
+                envelope.target.type = roll::AutomationParameterType::Pan;
+            else if (targetType == "mute")
+                envelope.target.type = roll::AutomationParameterType::Mute;
+            else if (targetType == "plugin")
+                envelope.target.type = roll::AutomationParameterType::PluginParameter;
+            else
+                return false;
+
+            envelope.target.pluginIdentifier = targetNode->getStringAttribute ("pluginIdentifier").toStdString();
+            envelope.target.parameterId = targetNode->getStringAttribute ("parameterId").toStdString();
+            envelope.target.parameterName = targetNode->getStringAttribute ("parameterName").toStdString();
+            envelope.target.parameterIndex = targetNode->getIntAttribute ("parameterIndex", -1);
+            envelope.target.deviceIndex = targetNode->getIntAttribute ("deviceIndex", -1);
+            envelope.target.currentValue = targetNode->getDoubleAttribute ("currentValue", 0.0);
+            for (auto* pointNode = child->getFirstChildElement(); pointNode != nullptr;
+                 pointNode = pointNode->getNextElement())
+            {
+                if (! pointNode->hasTagName ("Point"))
+                    continue;
+                envelope.points.push_back ({ pointNode->getDoubleAttribute ("beat", -1.0),
+                                             pointNode->getDoubleAttribute ("value", 0.0) });
+                progress.completeUnit();
+            }
+            if (! roll::isValidAutomationEnvelope (envelope)
+                || std::any_of (track.automation.begin(), track.automation.end(),
+                    [&envelope] (const auto& existing) { return existing.target == envelope.target; }))
+                return false;
+            track.automation.push_back (std::move (envelope));
+            progress.completeUnit();
+        }
+        else if (child->hasTagName ("MidiClip"))
         {
             const int id = child->getIntAttribute ("id", -1);
             const double start = child->getDoubleAttribute ("start", -1.0);
@@ -371,6 +458,87 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
     {
         return juce::Result::fail (e.what());
     }
+}
+
+juce::File ProjectFile::recoveryDirectory()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("ProjectFreedom").getChildFile ("autosave");
+}
+
+std::vector<juce::File> ProjectFile::recoveryFiles (const juce::File& directory)
+{
+    juce::Array<juce::File> files;
+    directory.findChildFiles (files, juce::File::findFiles, false, "Recovery-*.pfs");
+    std::sort (files.begin(), files.end(), [] (const juce::File& left, const juce::File& right)
+    {
+        const auto leftTime = left.getLastModificationTime();
+        const auto rightTime = right.getLastModificationTime();
+        return leftTime == rightTime ? left.getFileName() > right.getFileName() : leftTime > rightTime;
+    });
+
+    return { files.begin(), files.end() };
+}
+
+juce::Result ProjectFile::saveRecovery (const juce::File& directory, const ProjectFileData& data)
+{
+    if (! directory.createDirectory())
+        return juce::Result::fail ("Unable to create the recovery folder.");
+
+    static std::atomic<std::uint64_t> recoverySequence { 0 };
+    const auto baseName = "Recovery-" + juce::String (juce::Time::getCurrentTime().toMilliseconds())
+                        + "-" + juce::String (recoverySequence.fetch_add (1, std::memory_order_relaxed));
+    const auto temporaryFile = directory.getChildFile (baseName + ".tmp");
+    const auto recoveryFile = directory.getChildFile (baseName + ".pfs");
+    const auto assetFolder = directory.getChildFile (baseName + "_Files");
+
+    const auto result = save (temporaryFile, data);
+    if (result.failed())
+    {
+        temporaryFile.deleteFile();
+        assetFolder.deleteRecursively();
+        return result;
+    }
+
+    if (! temporaryFile.moveFileTo (recoveryFile))
+    {
+        temporaryFile.deleteFile();
+        assetFolder.deleteRecursively();
+        return juce::Result::fail ("Unable to publish the recovery snapshot.");
+    }
+
+    auto completedFiles = recoveryFiles (directory);
+    for (std::size_t index = 2; index < completedFiles.size(); ++index)
+    {
+        completedFiles[index].deleteFile();
+        directory.getChildFile (completedFiles[index].getFileNameWithoutExtension() + "_Files")
+            .deleteRecursively();
+    }
+    clearIncompleteRecoveryFiles (directory);
+    return juce::Result::ok();
+}
+
+void ProjectFile::clearIncompleteRecoveryFiles (const juce::File& directory)
+{
+    juce::Array<juce::File> temporaryFiles;
+    directory.findChildFiles (temporaryFiles, juce::File::findFiles, false, "Recovery-*.tmp");
+    for (const auto& file : temporaryFiles)
+    {
+        file.deleteFile();
+        directory.getChildFile (file.getFileNameWithoutExtension() + "_Files").deleteRecursively();
+    }
+}
+
+void ProjectFile::clearRecoveryFiles (const juce::File& directory)
+{
+    juce::Array<juce::File> files;
+    directory.findChildFiles (files, juce::File::findFiles, false, "Recovery-*.pfs");
+    for (const auto& file : files)
+    {
+        file.deleteFile();
+        directory.getChildFile (file.getFileNameWithoutExtension() + "_Files").deleteRecursively();
+    }
+    clearIncompleteRecoveryFiles (directory);
 }
 
 juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,

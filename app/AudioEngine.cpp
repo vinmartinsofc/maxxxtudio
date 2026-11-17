@@ -3,9 +3,18 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <tuple>
 
 namespace
 {
+juce::File audioDeviceSettingsFile()
+{
+    auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                         .getChildFile ("ProjectFreedom");
+    directory.createDirectory();
+    return directory.getChildFile ("audio-device-settings.xml");
+}
+
 void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
                       std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback)
 {
@@ -72,6 +81,44 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
     {
         callback ({}, data);
     });
+}
+
+bool connectAudioChannels (juce::AudioProcessorGraph& graph,
+                           const juce::AudioProcessorGraph::Node::Ptr& source,
+                           const juce::AudioProcessorGraph::Node::Ptr& destination)
+{
+    auto* sourceProcessor = source != nullptr ? source->getProcessor() : nullptr;
+    auto* destinationProcessor = destination != nullptr ? destination->getProcessor() : nullptr;
+    if (sourceProcessor == nullptr || destinationProcessor == nullptr)
+        return false;
+
+    const int sourceChannels = sourceProcessor->getTotalNumOutputChannels();
+    const int destinationChannels = destinationProcessor->getTotalNumInputChannels();
+    if (sourceChannels <= 0 || destinationChannels <= 0)
+        return false;
+
+    bool connected = false;
+    for (int channel = 0; channel < std::min (2, destinationChannels); ++channel)
+    {
+        const auto sourceChannel = std::min (channel, sourceChannels - 1);
+        connected = graph.addConnection ({ { source->nodeID, sourceChannel },
+                                           { destination->nodeID, channel } }) || connected;
+    }
+    return connected;
+}
+
+bool sameAutomation (const std::vector<roll::AutomationEnvelope>& first,
+                     const std::vector<roll::AutomationEnvelope>& second)
+{
+    if (first.size() != second.size())
+        return false;
+    for (std::size_t i = 0; i < first.size(); ++i)
+        if (! (first[i].target == second[i].target)
+            || first[i].target.currentValue != second[i].target.currentValue
+            || first[i].target.parameterName != second[i].target.parameterName
+            || first[i].points != second[i].points)
+            return false;
+    return true;
 }
 }
 
@@ -193,6 +240,10 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             const double warpRatio = clip.warpEnabled && projectBpm > 0.0
                 ? projectBpm / clip.sourceBpm : 1.0;
             const double sourceStep = clip.source->sampleRate / outputRate * warpRatio;
+            const double safetyFadeBeats = shared.plan.beatsPerSample * outputRate * 0.004;
+            const double maximumFadeBeats = clip.lengthBeats * 0.5;
+            const double fadeInBeats = std::min (maximumFadeBeats,
+                std::max (clip.fadeInBeats, safetyFadeBeats));
             const double sourceStart = clip.sourceOffsetSeconds * clip.source->sampleRate
                                      + (activeStart - clip.startBeat)
                                        / shared.plan.beatsPerSample * sourceStep;
@@ -213,8 +264,8 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
                 const float fraction = static_cast<float> (sourcePosition - sourceIndex);
                 const double beat = activeStart + i * shared.plan.beatsPerSample;
                 double gain = 1.0;
-                if (clip.fadeInBeats > 0.0)
-                    gain *= roll::audioFadeCurveValue ((beat - clip.startBeat) / clip.fadeInBeats,
+                if (fadeInBeats > 0.0)
+                    gain *= roll::audioFadeCurveValue ((beat - clip.startBeat) / fadeInBeats,
                                                        clip.fadeInCurve);
                 if (clip.fadeOutBeats > 0.0)
                     gain *= 1.0 - roll::audioFadeCurveValue (
@@ -303,23 +354,289 @@ void AudioPreviewSource::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
 // ======================================================= TrackMixer
 
-TrackMixer::TrackMixer()
+class TrackAutomationProcessor final : public juce::AudioProcessor
+{
+public:
+    explicit TrackAutomationProcessor (const BlockShared& state)
+        : juce::AudioProcessor (BusesProperties()
+                                    .withInput  ("In", juce::AudioChannelSet::stereo(), true)
+                                    .withOutput ("Out", juce::AudioChannelSet::stereo(), true)),
+          shared (state)
+    {
+    }
+
+    void setAutomation (const std::vector<roll::AutomationEnvelope>& envelopes,
+                        const std::vector<std::tuple<juce::String, juce::AudioProcessor*, int>>& devices)
+    {
+        const juce::CriticalSection::ScopedLockType processorLock (getCallbackLock());
+        std::vector<Binding> bindings;
+        for (const auto& envelope : envelopes)
+        {
+            if (envelope.target.type != roll::AutomationParameterType::PluginParameter)
+                continue;
+
+            const auto device = std::find_if (devices.begin(), devices.end(),
+                [&envelope] (const auto& item)
+                {
+                    return std::get<0> (item) == juce::String (envelope.target.pluginIdentifier);
+                });
+            if (device == devices.end() || std::get<1> (*device) == nullptr)
+                continue;
+
+            auto* processor = std::get<1> (*device);
+            const juce::ScopedLock pluginCallbackLock (processor->getCallbackLock());
+            int index = 0;
+            juce::AudioProcessorParameter* match = nullptr;
+            for (auto* candidate : processor->getParameters())
+            {
+                if (candidate == nullptr || ! candidate->isAutomatable())
+                {
+                    ++index;
+                    continue;
+                }
+                const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (candidate);
+                const auto parameterId = hosted != nullptr ? hosted->getParameterID() : juce::String();
+                if ((! envelope.target.parameterId.empty()
+                     && parameterId
+                        == juce::String::fromUTF8 (envelope.target.parameterId.c_str()))
+                    || (envelope.target.parameterId.empty() && index == envelope.target.parameterIndex))
+                {
+                    match = candidate;
+                    break;
+                }
+                ++index;
+            }
+            if (match != nullptr)
+            {
+                float manualValue = match->getValue();
+                bool manualValueCaptured = false;
+                if (const auto current = std::find_if (localBindings.begin(), localBindings.end(),
+                        [match] (const auto& binding) { return binding.parameter == match; });
+                    current != localBindings.end())
+                {
+                    manualValue = current->manualValue;
+                    manualValueCaptured = current->manualValueCaptured;
+                }
+                bindings.push_back ({ processor, match, envelope, manualValue, manualValueCaptured });
+            }
+        }
+
+        const juce::SpinLock::ScopedLockType lock (bindingLock);
+        pendingBindings.swap (bindings);
+        ++pendingVersion;
+    }
+
+    void clearBindings()
+    {
+        const juce::ScopedLock processorLock (getCallbackLock());
+        const juce::SpinLock::ScopedLockType lock (bindingLock);
+        pendingBindings.clear();
+        localBindings.clear();
+        ++pendingVersion;
+        localVersion = pendingVersion;
+        wasPlaying = false;
+        needsRestore = false;
+    }
+
+    const juce::String getName() const override { return "Track Automation"; }
+    void prepareToPlay (double, int) override {}
+    void releaseResources() override {}
+    void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override
+    {
+        {
+            const juce::SpinLock::ScopedTryLockType lock (bindingLock);
+            if (lock.isLocked() && pendingVersion != localVersion)
+            {
+                localBindings.swap (pendingBindings);
+                localVersion = pendingVersion;
+            }
+        }
+
+        const bool playing = shared.playing && shared.plan.count > 0;
+        if (! playing)
+        {
+            if (wasPlaying)
+                needsRestore = true;
+            if (needsRestore)
+            {
+                bool restored = true;
+                for (const auto& binding : localBindings)
+                {
+                    const juce::CriticalSection::ScopedTryLockType processorLock (
+                        binding.processor->getCallbackLock());
+                    if (processorLock.isLocked())
+                        binding.parameter->setValue (binding.manualValueCaptured
+                            ? binding.manualValue
+                            : static_cast<float> (binding.envelope.target.currentValue));
+                    else
+                        restored = false;
+                }
+                needsRestore = ! restored;
+            }
+            wasPlaying = false;
+            return;
+        }
+
+        wasPlaying = true;
+        needsRestore = false;
+        const double beat = shared.plan.seg[0].a;
+        for (auto& binding : localBindings)
+        {
+            const juce::CriticalSection::ScopedTryLockType processorLock (
+                binding.processor->getCallbackLock());
+            if (processorLock.isLocked())
+            {
+                if (! binding.manualValueCaptured)
+                {
+                    binding.manualValue = binding.parameter->getValue();
+                    binding.manualValueCaptured = true;
+                }
+                binding.parameter->setValue (static_cast<float> (
+                    roll::automationValueAt (binding.envelope, beat, binding.envelope.target.currentValue)));
+            }
+        }
+    }
+
+    bool acceptsMidi() const override { return true; }
+    bool producesMidi() const override { return true; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return {}; }
+    void changeProgramName (int, const juce::String&) override {}
+    void getStateInformation (juce::MemoryBlock&) override {}
+    void setStateInformation (const void*, int) override {}
+
+private:
+    struct Binding
+    {
+        juce::AudioProcessor* processor = nullptr;
+        juce::AudioProcessorParameter* parameter = nullptr;
+        roll::AutomationEnvelope envelope;
+        float manualValue = 0.0f;
+        bool manualValueCaptured = false;
+    };
+
+    const BlockShared& shared;
+    juce::SpinLock bindingLock;
+    std::vector<Binding> pendingBindings, localBindings;
+    std::uint64_t pendingVersion = 0, localVersion = 0;
+    bool wasPlaying = false, needsRestore = false;
+};
+
+TrackMixer::TrackMixer (const BlockShared& state)
     : juce::AudioProcessor (BusesProperties()
                                 .withInput  ("In",  juce::AudioChannelSet::stereo(), true)
-                                .withOutput ("Out", juce::AudioChannelSet::stereo(), true)) {}
+                                .withOutput ("Out", juce::AudioChannelSet::stereo(), true)),
+      shared (state)
+{
+}
+
+void TrackMixer::set (float gain, float pan, bool muted, bool controlMuted)
+{
+    targetGain.store (gain);
+    targetPan.store (pan);
+    mute.store (muted);
+    controlMute.store (controlMuted);
+    liveGainValue.store (gain, std::memory_order_relaxed);
+    livePanValue.store (pan, std::memory_order_relaxed);
+    liveMuteValue.store (controlMuted, std::memory_order_relaxed);
+}
+
+void TrackMixer::setAutomation (const std::vector<roll::AutomationEnvelope>& automation)
+{
+    const juce::SpinLock::ScopedLockType lock (automationLock);
+    pendingAutomation = automation;
+    ++pendingAutomationVersion;
+}
 
 void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
+    {
+        const juce::SpinLock::ScopedTryLockType lock (automationLock);
+        if (lock.isLocked() && pendingAutomationVersion != localAutomationVersion)
+        {
+            localAutomation.swap (pendingAutomation);
+            localAutomationVersion = pendingAutomationVersion;
+        }
+    }
+
     const int n = buffer.getNumSamples();
     const float target = mute.load() ? 0.0f : targetGain.load();
     const float pan = juce::jlimit (-1.0f, 1.0f, targetPan.load());
+    const auto findEnvelope = [this] (roll::AutomationParameterType type) -> const roll::AutomationEnvelope*
+    {
+        const auto found = std::find_if (localAutomation.begin(), localAutomation.end(),
+            [type] (const auto& envelope) { return envelope.target.type == type; });
+        return found == localAutomation.end() ? nullptr : &*found;
+    };
+    const auto* volumeEnvelope = findEnvelope (roll::AutomationParameterType::Volume);
+    const auto* panEnvelope = findEnvelope (roll::AutomationParameterType::Pan);
+    const auto* muteEnvelope = findEnvelope (roll::AutomationParameterType::Mute);
+    const bool hasMixerAutomation = shared.playing && shared.plan.count > 0
+        && (volumeEnvelope != nullptr || panEnvelope != nullptr || muteEnvelope != nullptr);
+    float peakNow = 0.0f;
+
+    if (hasMixerAutomation)
+    {
+        float liveGain = targetGain.load();
+        float livePan = pan;
+        bool liveMute = controlMute.load();
+        for (int i = 0; i < n; ++i)
+        {
+            double beat = 0.0;
+            bool hasBeat = false;
+            for (int segmentIndex = 0; segmentIndex < shared.plan.count; ++segmentIndex)
+            {
+                const auto& segment = shared.plan.seg[segmentIndex];
+                if (i >= segment.offset && i < segment.offset + segment.samples)
+                {
+                    beat = segment.a + static_cast<double> (i - segment.offset) * shared.plan.beatsPerSample;
+                    hasBeat = true;
+                    break;
+                }
+            }
+
+            const float automatedGain = hasBeat && volumeEnvelope != nullptr
+                ? static_cast<float> (roll::automationValueAt (*volumeEnvelope, beat, targetGain.load()))
+                : targetGain.load();
+            const float automatedPan = hasBeat && panEnvelope != nullptr
+                ? static_cast<float> (roll::automationValueAt (*panEnvelope, beat, pan))
+                : pan;
+            const bool envelopeMuted = hasBeat && muteEnvelope != nullptr
+                && roll::automationValueAt (*muteEnvelope, beat, 0.0) >= 0.5;
+            const bool automatedMute = mute.load() || envelopeMuted;
+            liveGain = automatedGain;
+            livePan = automatedPan;
+            liveMute = controlMute.load() || envelopeMuted;
+            const float gain = automatedMute ? 0.0f : automatedGain;
+            const float left = automatedPan > 0.0f ? 1.0f - automatedPan : 1.0f;
+            const float right = automatedPan < 0.0f ? 1.0f + automatedPan : 1.0f;
+
+            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            {
+                const float side = channel == 0 ? left : right;
+                auto* samples = buffer.getWritePointer (channel);
+                samples[i] *= gain * side;
+                peakNow = std::max (peakNow, std::abs (samples[i]));
+            }
+        }
+        liveGainValue.store (liveGain, std::memory_order_relaxed);
+        livePanValue.store (livePan, std::memory_order_relaxed);
+        liveMuteValue.store (liveMute, std::memory_order_relaxed);
+        currentGain = target;
+        peakLevel = std::max (peakNow, peakLevel.load() * 0.92f);
+        return;
+    }
+
     const float gl = pan > 0.0f ? 1.0f - pan : 1.0f;
     const float gr = pan < 0.0f ? 1.0f + pan : 1.0f;
 
     const float start = currentGain;
     const float step = (target - start) / static_cast<float> (std::max (1, n));
-    float peakNow = 0.0f;
-
     for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
     {
         auto* data = buffer.getWritePointer (ch);
@@ -333,6 +650,9 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         }
     }
     currentGain = target;
+    liveGainValue.store (targetGain.load(), std::memory_order_relaxed);
+    livePanValue.store (pan, std::memory_order_relaxed);
+    liveMuteValue.store (controlMute.load(), std::memory_order_relaxed);
     peakLevel = std::max (peakNow, peakLevel.load() * 0.92f);       // queda suave para o medidor
 }
 
@@ -582,24 +902,53 @@ AudioEngine::AudioEngine()
     master.isMaster = true;
     auto busIn = std::make_unique<PassThroughProcessor>();
     master.source = seqGraph.addNode (std::move (busIn));
-    auto mix = std::make_unique<TrackMixer>();
+    auto automation = std::make_unique<TrackAutomationProcessor> (seqGraph.sharedBlock());
+    master.automationProcessor = automation.get();
+    master.automationNode = seqGraph.addNode (std::move (automation));
+    auto mix = std::make_unique<TrackMixer> (seqGraph.sharedBlock());
     master.mixerPtr = mix.get();
     master.mixer = seqGraph.addNode (std::move (mix));
     tracks[masterTrackId] = std::move (master);
     rewireMaster();
 
-    deviceManager.initialiseWithDefaultDevices (0, 2);
+    const auto settingsFile = audioDeviceSettingsFile();
+    const auto savedSettings = settingsFile.existsAsFile()
+        ? juce::XmlDocument::parse (settingsFile) : nullptr;
+    if (settingsFile.existsAsFile() && savedSettings == nullptr)
+        juce::Logger::writeToLog ("AudioEngine: nao foi possivel ler as preferencias do dispositivo de audio.");
+
+    const auto error = deviceManager.initialise (0, 2, savedSettings.get(), true);
+    if (error.isNotEmpty())
+        juce::Logger::writeToLog ("AudioEngine: " + error);
+    deviceManager.addChangeListener (this);
     player.setProcessor (&seqGraph);
     deviceManager.addAudioCallback (&player);
 }
 
 AudioEngine::~AudioEngine()
 {
+    deviceManager.removeChangeListener (this);
     audioLoadPool.removeAllJobs (true, -1);
     previewSourcePtr->stop();
     deviceManager.removeAudioCallback (&player);
     player.setProcessor (nullptr);
     seqGraph.clear();
+}
+
+void AudioEngine::changeListenerCallback (juce::ChangeBroadcaster* source)
+{
+    if (source == &deviceManager)
+        saveAudioDeviceSettings();
+}
+
+void AudioEngine::saveAudioDeviceSettings()
+{
+    const auto state = deviceManager.createStateXml();
+    if (state == nullptr)
+        return;
+
+    if (! state->writeTo (audioDeviceSettingsFile()))
+        juce::Logger::writeToLog ("AudioEngine: nao foi possivel salvar as preferencias do dispositivo de audio.");
 }
 
 AudioEngine::TrackNodes* AudioEngine::find (int trackId)
@@ -636,7 +985,10 @@ void AudioEngine::addTrack (int trackId, roll::TrackType type)
         t.source = seqGraph.addNode (std::move (src));
     }
 
-    auto mix = std::make_unique<TrackMixer>();
+    auto automation = std::make_unique<TrackAutomationProcessor> (seqGraph.sharedBlock());
+    t.automationProcessor = automation.get();
+    t.automationNode = seqGraph.addNode (std::move (automation));
+    auto mix = std::make_unique<TrackMixer> (seqGraph.sharedBlock());
     t.mixerPtr = mix.get();
     t.mixer = seqGraph.addNode (std::move (mix));
 
@@ -650,8 +1002,10 @@ void AudioEngine::removeTrack (int trackId)
     auto* t = find (trackId);
     if (t == nullptr) return;
 
+    static_cast<TrackAutomationProcessor*> (t->automationProcessor)->clearBindings();
     for (auto& d : t->devices) seqGraph.removeNode (d.node->nodeID);
     seqGraph.removeNode (t->source->nodeID);
+    seqGraph.removeNode (t->automationNode->nodeID);
     seqGraph.removeNode (t->mixer->nodeID);
     tracks.erase (trackId);
 }
@@ -676,44 +1030,33 @@ void AudioEngine::rewireMaster()
     if (m == nullptr) return;
 
     clearOutputConnectionsOf (m->source->nodeID);
+    clearConnectionsOf (m->automationNode->nodeID);
     clearConnectionsOf (m->mixer->nodeID);
     for (auto& d : m->devices) clearConnectionsOf (d.node->nodeID);
+    std::vector<std::tuple<juce::String, juce::AudioProcessor*, int>> devices;
+    for (std::size_t i = 0; i < m->devices.size(); ++i)
+        devices.emplace_back (m->devices[i].pluginIdentifier, m->devices[i].node->getProcessor(),
+                              static_cast<int> (i));
+    static_cast<TrackAutomationProcessor*> (m->automationProcessor)
+        ->setAutomation (m->automation, devices);
 
     for (int ch = 0; ch < 2; ++ch)
         seqGraph.addConnection ({ { m->mixer->nodeID, ch }, { outputNode->nodeID, ch } });
 
-    if (m->devices.empty())
-    {
-        for (int ch = 0; ch < 2; ++ch)
-            seqGraph.addConnection ({ { m->source->nodeID, ch }, { m->mixer->nodeID, ch } });
-        return;
-    }
+    for (int ch = 0; ch < 2; ++ch)
+        seqGraph.addConnection ({ { m->source->nodeID, ch }, { m->automationNode->nodeID, ch } });
 
-    for (size_t i = 0; i < m->devices.size(); ++i)
+    auto previous = m->automationNode;
+    for (const auto& device : m->devices)
     {
-        auto* proc = m->devices[i].node->getProcessor();
-        const int inputs = proc->getTotalNumInputChannels();
-        if (i == 0)
-        {
-            for (int ch = 0; ch < 2 && inputs > 0; ++ch)
-                seqGraph.addConnection ({ { m->source->nodeID, ch }, { m->devices[i].node->nodeID, std::min (ch, inputs - 1) } });
-        }
-        else if (inputs > 0)
-        {
-            auto* previous = m->devices[i - 1].node->getProcessor();
-            const int outputs = std::max (1, previous->getTotalNumOutputChannels());
-            for (int ch = 0; ch < 2; ++ch)
-                seqGraph.addConnection ({ { m->devices[i - 1].node->nodeID, std::min (ch, outputs - 1) },
-                                          { m->devices[i].node->nodeID, std::min (ch, inputs - 1) } });
-        }
-
-        if (i + 1 == m->devices.size())
-        {
-            const int outputs = std::max (1, proc->getTotalNumOutputChannels());
-            for (int ch = 0; ch < 2; ++ch)
-                seqGraph.addConnection ({ { m->devices[i].node->nodeID, std::min (ch, outputs - 1) }, { m->mixer->nodeID, ch } });
-        }
+        auto* processor = device.node->getProcessor();
+        if (processor->getTotalNumInputChannels() <= 0
+            || processor->getTotalNumOutputChannels() <= 0)
+            continue;
+        if (connectAudioChannels (seqGraph, previous, device.node))
+            previous = device.node;
     }
+    connectAudioChannels (seqGraph, previous, m->mixer);
 }
 
 // Cadeia: MIDI -> instrumento -> efeitos ou áudio -> efeitos -> mixer -> Master / Ext. Out
@@ -729,11 +1072,18 @@ void AudioEngine::rewire (TrackNodes& t)
         clearOutputConnectionsOf (t.source->nodeID);
     else
         clearConnectionsOf (t.source->nodeID);
+    clearConnectionsOf (t.automationNode->nodeID);
     clearConnectionsOf (t.mixer->nodeID);
     for (auto& d : t.devices) clearConnectionsOf (d.node->nodeID);
 
     using AG = juce::AudioProcessorGraph;
     const int midi = AG::midiChannelIndex;
+    std::vector<std::tuple<juce::String, juce::AudioProcessor*, int>> devices;
+    for (std::size_t i = 0; i < t.devices.size(); ++i)
+        devices.emplace_back (t.devices[i].pluginIdentifier, t.devices[i].node->getProcessor(),
+                              static_cast<int> (i));
+    static_cast<TrackAutomationProcessor*> (t.automationProcessor)
+        ->setAutomation (t.automation, devices);
 
     auto* master = find (masterTrackId);
     auto* parentGroup = t.parentGroupId != 0 ? find (t.parentGroupId) : nullptr;
@@ -747,65 +1097,43 @@ void AudioEngine::rewire (TrackNodes& t)
 
     if (t.audioTrack)
     {
-        if (t.devices.empty())
+        for (int ch = 0; ch < 2; ++ch)
         {
-            for (int ch = 0; ch < 2; ++ch)
-                seqGraph.addConnection ({ { t.source->nodeID, ch }, { t.mixer->nodeID, ch } });
-            return;
+            seqGraph.addConnection ({ { t.source->nodeID, ch }, { t.automationNode->nodeID, ch } });
         }
 
-        for (size_t i = 0; i < t.devices.size(); ++i)
+        auto previous = t.automationNode;
+        for (const auto& device : t.devices)
         {
-            auto* proc = t.devices[i].node->getProcessor();
-            const int inputs = proc->getTotalNumInputChannels();
-            if (i == 0)
-            {
-                for (int ch = 0; ch < 2 && inputs > 0; ++ch)
-                    seqGraph.addConnection ({ { t.source->nodeID, ch }, { t.devices[i].node->nodeID, std::min (ch, inputs - 1) } });
-            }
-            else if (inputs > 0)
-            {
-                auto* previous = t.devices[i - 1].node->getProcessor();
-                const int outputs = std::max (1, previous->getTotalNumOutputChannels());
-                for (int ch = 0; ch < 2; ++ch)
-                    seqGraph.addConnection ({ { t.devices[i - 1].node->nodeID, std::min (ch, outputs - 1) },
-                                              { t.devices[i].node->nodeID, std::min (ch, inputs - 1) } });
-            }
-
-            if (i + 1 == t.devices.size())
-            {
-                const int outputs = std::max (1, proc->getTotalNumOutputChannels());
-                for (int ch = 0; ch < 2; ++ch)
-                    seqGraph.addConnection ({ { t.devices[i].node->nodeID, std::min (ch, outputs - 1) }, { t.mixer->nodeID, ch } });
-            }
+            auto* processor = device.node->getProcessor();
+            if (processor->getTotalNumInputChannels() <= 0
+                || processor->getTotalNumOutputChannels() <= 0)
+                continue;
+            if (connectAudioChannels (seqGraph, previous, device.node))
+                previous = device.node;
         }
+        connectAudioChannels (seqGraph, previous, t.mixer);
         return;
     }
 
-    if (t.devices.empty()) return;
-    if (t.devices.front().instrument)
-        seqGraph.addConnection ({ { t.source->nodeID, midi }, { t.devices.front().node->nodeID, midi } });
+    if (t.devices.empty() || ! t.devices.front().instrument)
+        return;
 
-    for (size_t i = 0; i < t.devices.size(); ++i)
+    seqGraph.addConnection ({ { t.source->nodeID, midi }, { t.automationNode->nodeID, midi } });
+    seqGraph.addConnection ({ { t.automationNode->nodeID, midi },
+                              { t.devices.front().node->nodeID, midi } });
+
+    auto previous = t.devices.front().node;
+    for (std::size_t i = 1; i < t.devices.size(); ++i)
     {
-        auto* proc = t.devices[i].node->getProcessor();
-        const int outs = std::max (1, proc->getTotalNumOutputChannels());
-        const bool last = (i + 1 == t.devices.size());
-        if (! last)
-        {
-            auto* next = t.devices[i + 1].node->getProcessor();
-            const int inputs = next->getTotalNumInputChannels();
-            if (inputs > 0)
-                for (int ch = 0; ch < 2; ++ch)
-                    seqGraph.addConnection ({ { t.devices[i].node->nodeID, std::min (ch, outs - 1) },
-                                              { t.devices[i + 1].node->nodeID, std::min (ch, inputs - 1) } });
-        }
-        else
-        {
-            for (int ch = 0; ch < 2; ++ch)
-                seqGraph.addConnection ({ { t.devices[i].node->nodeID, std::min (ch, outs - 1) }, { t.mixer->nodeID, ch } });
-        }
+        auto* processor = t.devices[i].node->getProcessor();
+        if (processor->getTotalNumInputChannels() <= 0
+            || processor->getTotalNumOutputChannels() <= 0)
+            continue;
+        if (connectAudioChannels (seqGraph, previous, t.devices[i].node))
+            previous = t.devices[i].node;
     }
+    connectAudioChannels (seqGraph, previous, t.mixer);
 }
 
 void AudioEngine::publishNotes (int trackId, const std::vector<roll::Note>& notes)
@@ -821,7 +1149,31 @@ void AudioEngine::publishAudioClips (int trackId, const std::vector<AudioClipPla
 
 void AudioEngine::setMixer (int trackId, float gain, float pan, bool muted)
 {
-    if (auto* t = find (trackId)) t->mixerPtr->set (gain, pan, muted);
+    setMixer (trackId, gain, pan, muted, muted);
+}
+
+void AudioEngine::setMixer (int trackId, float gain, float pan, bool muted, bool controlMuted)
+{
+    if (auto* t = find (trackId)) t->mixerPtr->set (gain, pan, muted, controlMuted);
+}
+
+void AudioEngine::setTrackAutomation (int trackId,
+                                      const std::vector<roll::AutomationEnvelope>& automation)
+{
+    auto* track = find (trackId);
+    if (track == nullptr)
+        return;
+    if (sameAutomation (track->automation, automation))
+        return;
+
+    track->automation = automation;
+    track->mixerPtr->setAutomation (automation);
+    std::vector<std::tuple<juce::String, juce::AudioProcessor*, int>> devices;
+    for (std::size_t i = 0; i < track->devices.size(); ++i)
+        devices.emplace_back (track->devices[i].pluginIdentifier,
+                              track->devices[i].node->getProcessor(), static_cast<int> (i));
+    static_cast<TrackAutomationProcessor*> (track->automationProcessor)
+        ->setAutomation (automation, devices);
 }
 
 void AudioEngine::previewNote (int trackId, int pitch, bool on, float velocity)
@@ -834,6 +1186,24 @@ void AudioEngine::activeMask (int trackId, std::uint64_t& lo, std::uint64_t& hi)
     lo = hi = 0;
     if (auto* t = find (trackId); t != nullptr && t->sourcePtr != nullptr)
         t->sourcePtr->activeMask (lo, hi);
+}
+
+float AudioEngine::mixerGain (int trackId) const
+{
+    const auto* t = find (trackId);
+    return t != nullptr && t->mixerPtr != nullptr ? t->mixerPtr->liveGain() : 1.0f;
+}
+
+float AudioEngine::mixerPan (int trackId) const
+{
+    const auto* t = find (trackId);
+    return t != nullptr && t->mixerPtr != nullptr ? t->mixerPtr->livePan() : 0.0f;
+}
+
+bool AudioEngine::mixerMuted (int trackId) const
+{
+    const auto* t = find (trackId);
+    return t != nullptr && t->mixerPtr != nullptr && t->mixerPtr->liveMute();
 }
 
 float AudioEngine::peak (int trackId) const
@@ -1221,6 +1591,7 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
                 // um instrumento por trilha: o novo substitui o anterior
                 if (! t->devices.empty() && t->devices.front().instrument)
                 {
+                    static_cast<TrackAutomationProcessor*> (t->automationProcessor)->clearBindings();
                     d.groupId = t->devices.front().groupId;
                     seqGraph.removeNode (t->devices.front().node->nodeID);
                     t->devices.erase (t->devices.begin());
@@ -1250,6 +1621,7 @@ void AudioEngine::removeDevice (int trackId, int deviceId)
     auto* t = find (trackId);
     if (t == nullptr) return;
 
+    static_cast<TrackAutomationProcessor*> (t->automationProcessor)->clearBindings();
     for (auto it = t->devices.begin(); it != t->devices.end(); ++it)
         if (it->id == deviceId)
         {
@@ -1411,7 +1783,24 @@ std::vector<DeviceInfo> AudioEngine::devices (int trackId) const
     std::vector<DeviceInfo> out;
     if (auto* t = find (trackId))
         for (const auto& d : t->devices)
-            out.push_back ({ d.id, d.name, d.pluginIdentifier, d.instrument, d.node->isBypassed(), d.groupId });
+        {
+            DeviceInfo info { d.id, d.name, d.pluginIdentifier, d.instrument, d.node->isBypassed(), d.groupId };
+            if (auto* processor = d.node->getProcessor())
+            {
+                const auto parameters = processor->getParameters();
+                for (int index = 0; index < parameters.size(); ++index)
+                {
+                    auto* parameter = parameters[index];
+                    if (parameter == nullptr || ! parameter->isAutomatable())
+                        continue;
+                    const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (parameter);
+                    info.automatableParameters.push_back (
+                        { index, hosted != nullptr ? hosted->getParameterID() : juce::String(),
+                          parameter->getName (64), parameter->getValue() });
+                }
+            }
+            out.push_back (std::move (info));
+        }
     return out;
 }
 

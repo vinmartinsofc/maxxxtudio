@@ -45,13 +45,17 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     addAndMakeVisible (stopButton);
     addAndMakeVisible (rewindButton);
     addAndMakeVisible (projectButton);
+    addAndMakeVisible (optionsButton);
     addAndMakeVisible (metronomeButton);
     addAndMakeVisible (metronomeVolumeSlider);
     for (auto* b : std::initializer_list<juce::Component*> { &playButton, &stopButton, &rewindButton }) b->setMouseClickGrabsKeyboardFocus (false);
     metronomeButton.setMouseClickGrabsKeyboardFocus (false);
     projectButton.setMouseClickGrabsKeyboardFocus (false);
+    optionsButton.setMouseClickGrabsKeyboardFocus (false);
     projectButton.setTooltip ("Abrir, salvar ou criar um projeto");
     projectButton.onClick = [this] { if (onProjectMenu) onProjectMenu(); };
+    optionsButton.setTooltip ("Preferencias de audio, plugins e fades (Ctrl+,)");
+    optionsButton.onClick = [this] { if (onOptionsMenu) onOptionsMenu(); };
     metronomeButton.setTooltip ("Ativar ou desativar o metronomo");
     metronomeButton.setClickingTogglesState (true);
     metronomeButton.setToggleState (graph.isMetronomeEnabled(), juce::dontSendNotification);
@@ -159,8 +163,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     bpmLabel.onTextChange = [this]
     {
         const double v = std::clamp (bpmLabel.getText().getDoubleValue(), 20.0, 999.0);
-        graph.setBpm (v);
-        bpmLabel.setText (juce::String (v, 2), juce::dontSendNotification);
+        setBpm (v);
     };
 
     bpmCaption.setColour (juce::Label::textColourId, theme::textDim());
@@ -243,8 +246,11 @@ void TransportBar::setComputerMidiKeyboardEnabled (bool enabled)
 
 void TransportBar::setBpm (double bpm)
 {
+    const double previousBpm = graph.getBpm();
     graph.setBpm (std::clamp (bpm, 20.0, 999.0));
     bpmLabel.setText (juce::String (graph.getBpm(), 2), juce::dontSendNotification);
+    if (std::abs (graph.getBpm() - previousBpm) > 1.0e-6 && onBpmChanged)
+        onBpmChanged (graph.getBpm());
 }
 
 void TransportBar::setMetronomeState (bool enabled, float gain)
@@ -313,6 +319,8 @@ void TransportBar::resized()
     auto area = getLocalBounds().reduced (8, 4);
     const bool compact = getWidth() < 1120;
     projectButton.setBounds (area.removeFromLeft (72));
+    area.removeFromLeft (8);
+    optionsButton.setBounds (area.removeFromLeft (72));
     area.removeFromLeft (8);
     bpmCaption.setBounds (area.removeFromLeft (34));
     bpmLabel.setBounds (area.removeFromLeft (76));

@@ -61,12 +61,14 @@ public:
     int groupTracks (const std::vector<int>& trackIds);
     bool ungroupTrack (int groupId);
     void selectTrack (int id, bool toggleSelection = false);
+    void selectTrackRange (int anchorTrackId, int targetTrackId, bool additive = false);
     void setTrackSolo (int id, bool solo, bool additive);
     void selectClip (int trackId, int clipId);
 
     roll::Placement* addClip (int trackId, double start, double length);
     int copyClip (int fromTrack, int clipId, int toTrack, double start);
     int copyClip (const roll::Placement& source, int toTrack, double start);
+    int copyClipReplacingRange (const roll::Placement& source, int toTrack, double start);
     int duplicateClip (int trackId, int clipId);
     void deleteClip (int trackId, int clipId);
     int splitClip (int trackId, int clipId, double beat);
@@ -77,10 +79,12 @@ public:
     roll::AudioPlacement* addAudioClipReplacingRange (
         int trackId, double start, double length, const std::string& filePath, const std::string& name,
         const std::vector<roll::WaveformRange>& waveform,
-        double durationSeconds = 0.0, double sourceBpm = 120.0);
+        double durationSeconds = 0.0, double sourceBpm = 120.0,
+        double edgeFadeBeats = 0.0);
     void deleteAudioClip (int trackId, int clipId);
     int copyAudioClip (int fromTrack, int clipId, int toTrack, double start);
     int copyAudioClip (const roll::AudioPlacement& source, int toTrack, double start);
+    int copyAudioClipReplacingRange (const roll::AudioPlacement& source, int toTrack, double start);
     int duplicateAudioClip (int trackId, int clipId);
     int splitAudioClip (int trackId, int clipId, double beat);
     bool resizeAudioClip (int trackId, int clipId, double length);
@@ -89,6 +93,8 @@ public:
     bool setAudioClipSourceBpm (int trackId, int clipId, double sourceBpm);
     bool setAudioClipWarpEnabled (int trackId, int clipId, bool enabled);
     bool setClipEnabled (int trackId, int clipId, bool audio, bool enabled);
+    bool setAutomationEnvelope (int trackId, roll::AutomationEnvelope);
+    bool removeAutomationEnvelope (int trackId, const roll::AutomationTarget&);
     // Move para outra trilha/posição, substituindo apenas o trecho sobreposto.
     // Devolve o novo id do clip (ou -1 se os argumentos forem inválidos).
     int  moveClip (int fromTrack, int clipId, int toTrack, double newStart);
@@ -119,6 +125,7 @@ public:
 private:
     struct Snapshot
     {
+        roll::Track master;
         std::vector<roll::Track> tracks;
         std::vector<int> selectedTrackIds;
         int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;

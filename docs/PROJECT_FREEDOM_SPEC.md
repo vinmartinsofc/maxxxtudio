@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.33 (Ctrl+arrastar pode substituir parcialmente a própria origem)
+- **Versão do documento:** 1.47 (Recuperação automática de sessões após falha)
 - **⚠️ Ordem de trabalho vigente:** fila de pendências do usuário no §4.3. O documento `PLANO_DE_ACAO_FASE_4.md`, citado em versões antigas, não está presente no repositório. O §4.3 prevalece sobre o roadmap legado do §14.
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -70,7 +70,7 @@ O dono do projeto produz música há 13+ anos no Ableton Live e estuda programa�
 
 ### 1.4 Não-objetivos (por enquanto)
 
-Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch de áudio, gravação de áudio, automação (até o §14 chegar lá), VST2, AU, CLAP, suporte a macOS (o código é portável, mas **não é testado** lá).
+Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch de áudio, gravação de áudio, gravação de automação em tempo real, VST2, AU, CLAP, suporte a macOS (o código é portável, mas **não é testado** lá).
 
 ### 1.5 Restrições
 
@@ -182,10 +182,13 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
 | Áudio | Mixer por trilha: volume, pan, mute, medidor; Solo exclusivo, por seleção múltipla e Ctrl+clique aditivo | 🟡 (build/testes; falta validação manual na UI) |
 | Áudio | Grupos planos como barramentos reais: faixas-filhas → mixer/efeitos do grupo → Master ou Ext. Out; Solo respeita grupo e filhos | 🟡 (build/testes; falta validação manual com plugins) |
-| Arranjo | Selecionar múltiplas faixas com Shift/Ctrl+clique, com destaque visual | 🟡 (build/testes; falta validação manual na UI) |
+| Automação | Modo `A`, escolha de volume/pan/mute ou parâmetro VST3 por slot, edição de breakpoints no Arrangement, atualização dos controles de mixer durante playback e persistência `.pfs` | Implementado; falta QA manual com plugins reais |
+| Arranjo | Selecionar múltiplas faixas com Shift/Ctrl+clique, com destaque visual | Shift-clique seleciona o intervalo entre a âncora e a faixa clicada; Ctrl/Cmd-clique continua aditivo. Build/testes passaram; falta QA manual na UI. |
+| Arranjo | Excluir simultaneamente as faixas selecionadas e identificar visualmente faixas-filhas de grupo | Delete/Backspace remove todas as faixas selecionadas; o conector colorido indica a relação com o grupo. O projeto mantém ao menos uma faixa. |
+| Arranjo | Clique seleciona o clip inteiro; arrastar seleção múltipla MIDI/áudio move o conjunto, Ctrl+arrastar copia | Prévia mostra todos os destinos; posições relativas são preservadas e regiões ocupadas são substituídas. Falta QA manual na UI. |
 | Arranjo | Agrupar seleção com Ctrl+G e desagrupar com Ctrl+Shift+G; menu de contexto; grupos sem clips e sem nesting | 🟡 |
 | Arranjo | Duplicar faixa MIDI/áudio com clips, mixer e cadeia de plugins, via Ctrl+D sem clip selecionado ou menu de contexto | 🟡 (build/testes; falta validação manual com VST3) |
-| Transporte | Play/Pause (Espaço), Shift+Espaço retoma da posição pausada/Stop, Home, Ctrl+L alterna loop na seleção, BPM, posição | 🟡 (falta teste manual) |
+| Transporte | Play/Pause (Espaço), inicia no começo do clip inteiro selecionado, no ponto clicado no conteúdo ou no começo do intervalo; clique no fundo define o ponto de inserção; Shift+Espaço retoma da posição pausada/Stop, Home, Ctrl+L alterna loop na seleção, BPM, posição | 🟡 (falta teste manual) |
 | Arranjo | Várias trilhas, clips (criar/mover/redimensionar/copiar/duplicar/apagar); mover/copiar sobre conteúdo substitui apenas a região sobreposta; prévia visual no arraste | ✅ (build/testes; falta QA manual na UI) |
 | Arranjo | Ctrl+C/X/V em clips de áudio/MIDI, incluindo colar em outra trilha do mesmo tipo; Ctrl+D duplica a seleção e substitui clips no destino sem deslocar outras faixas | 🟡 (build/testes; falta teste manual na UI) |
 | Arranjo | Tecla `0` ativa/desativa o clip selecionado | ✅ |
@@ -201,13 +204,14 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Piano roll | Marcador de inserção (clique no fundo), Preview on/off | ✅ |
 | Piano roll | Tecla `0` ativa/desativa as notas selecionadas sem removê-las | 🟡 (build/testes; falta teste manual na UI) |
 | Projeto | **Salvar/abrir** (`.pfs`, leitura legada `.freedom`, progresso global) | ✅ |
+| Projeto | **Autosave de recuperação** a cada 2 min em `%APPDATA%\ProjectFreedom\autosave`, com duas gerações e oferta de restauração na próxima inicialização | ✅ |
 | Projeto | **Desfazer global** (arranjo/mixer/dispositivos) | ⬜ |
 | Entrada | Teclado do computador: modo M; notas A–L com teclas pretas; Z/X oitava; C/V velocidade | ✅ (pendente teste sonoro manual) |
 | Entrada | MIDI de teclado/controlador, gravação | ⬜ |
 | Exportação | Master em WAV 24-bit, offline, com cauda configurável e progresso/cancelamento | ✅ |
 | Arranjo | Consolidar seleção de áudio em WAV 24-bit com os plugins da faixa, sem incluir Master/mixer | 🟡 (build e teste offline; falta validação manual com VST3 real) |
 | Exportação | MIDI (clip/trilha/projeto) | ⬜ |
-| Config. | Seleção de dispositivo de áudio, buffer, taxa de amostragem | ⬜ (usa o padrão do sistema) |
+| Config. | Preferências com seleção de dispositivo/canais de entrada e saída, taxa de amostragem e buffer; configurações persistidas | 🟡 (driver real requer QA manual) |
 | Acessibilidade | Anel de foco, F6 alterna painéis, setas selecionam trilha | 🟡 parcial |
 | Tarefas em background | `TaskRegistry`/`TaskScope`, indicador por target e barra global; carregamento por faixa; scan com progresso/cancelamento; progresso ao abrir/salvar projetos | ✅ etapas a–b e d / 🟡 etapa c (falta QA com plugins reais) |
 
@@ -226,27 +230,32 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | Abrir `.pfs` por duplo clique; Ctrl+L para alternar loop; Shift+Espaço para retomar | Concluído |
 | Consolidar áudio após a cadeia de dispositivos da faixa e antes do mixer/Master | Implementado; falta QA com VST3 real |
 | Grade adaptativa (“narrow”) e recolhimento individual de trilhas; recolher grupo oculta suas filhas | Implementado; falta QA visual manual |
+| Excluir várias faixas selecionadas com Delete/Backspace | Implementado; mantém ao menos uma faixa no projeto; falta QA manual |
+| Indicador visual de faixas-filhas pertencentes a um grupo | Implementado com conector colorido alinhado ao recuo das filhas; falta QA manual |
+| Seleção de clip inteiro versus foco/seleção de tempo | Clique na faixa superior seleciona o clip inteiro; clique no conteúdo posiciona o playhead naquele ponto; arrastar no conteúdo seleciona um intervalo que pode atravessar vários clips/faixas, incluindo fragmentos de áudio. O indicador diferencia clip inteiro, região e playhead; Play inicia conforme esse estado. |
+| Menu de preferências | Botão Opções na barra superior, menu Projeto ou `Ctrl+,`; abas Áudio, Plugins VST3 e Record/Warp/Launch; permite configurar dispositivo/buffer/canais, adicionar/remover pastas VST3, reescanear plugins e habilitar fades de borda de 4 ms em novos áudios importados. |
+| Recuperação de sessão | Autosave a cada 2 minutos em `%APPDATA%\ProjectFreedom\autosave`; mantém duas cópias completas, pergunta na inicialização e remove os snapshots ao salvar ou fechar normalmente. |
 
 **Pendências — ordem original do usuário, com duplicatas agrupadas**
 
 | Ordem | Feature | Estado / nota para evitar ambiguidade |
 |---:|---|---|
 | 1 | Posicionamento e snap de clips MIDI/áudio | Snap em beats já existe; mover clips agora substitui somente a região ocupada, preservando as partes restantes. Ainda falta QA manual para os casos de encaixe reportados. |
-| 2 | Ctrl+arrastar para copiar clips selecionados | Ctrl+arrastar copia um clip e mostra a prévia do destino; o projeto só altera os clips ao soltar. Se a cópia se sobrepuser à própria origem, a área sobreposta é substituída e as partes restantes são preservadas. Cópia por arraste de seleção múltipla ainda pendente de confirmação. |
-| 3 | Popups de pitch/velocity interceptando Ctrl+C/Ctrl+V no Arrangement | Pendente de reprodução e correção. |
-| 4 | Mostrar minutos/tempo do projeto na parte inferior do Arrangement | Pendente. |
-| 5 | Auto-scroll/expansão do Arrangement enquanto se arrasta além da borda visível | Pendente. |
+| 2 | Arrastar clips selecionados; Ctrl+arrastar copia | Arrastar um clip ou seleção múltipla move todos os selecionados; Ctrl+arrastar copia. A prévia mostra cada destino, mantém posições relativas e substitui regiões ocupadas ao soltar. Clique simples destaca o clip inteiro. Falta QA manual na UI. |
+| 3 | Popups de pitch/velocity interferindo com atalhos no Arrangement | Teclado MIDI só captura teclas sem modificadores; Ctrl/Cmd+C/V seguem para os atalhos do Arrangement. Indicador continua visual, sem foco de teclado ou mouse. Ainda falta QA manual na UI. |
+| 4 | Mostrar minutos/tempo do projeto na parte inferior do Arrangement | Régua inferior exibe marcações mm:ss conforme BPM/zoom; leitura fixa mostra o tempo atual. |
+| 5 | Auto-scroll/expansão do Arrangement enquanto se arrasta além da borda visível | Ao mover/copiar clips ou selecionar intervalo, aproximar o ponteiro das bordas rola a vista; ao alcançar o fim, a linha do tempo cresce em incrementos visíveis. |
 | 6 | Drag/drop de MIDI/áudio sobre conteúdo existente para substituí-lo | Ao mover/copiar clips e soltar arquivos de áudio em trilhas de áudio, só a região sobreposta é substituída e o restante é preservado. Importar arquivos MIDI continua sendo uma feature futura separada. |
 | 7 | Grade sincronizada ao BPM | A grade musical do Arrangement e do editor de áudio já usa beats e o BPM do projeto; falta confirmar se o pedido significa outro comportamento. |
 | 8 | Favoritos de plugins | Pendente; os favoritos atuais cobrem apenas arquivos/pastas de áudio. |
 | 9 | Cores customizáveis para trilhas MIDI/áudio | Pendente; hoje as cores são geradas automaticamente e não podem ser escolhidas. |
 | 10 | Iniciar reprodução/escuta de trechos específicos pelo Piano Roll | Pendente; clicar na régua reposiciona o playhead, mas não inicia reprodução local. |
-| 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | **IMPORTANTE — pendente.** |
+| 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | `A` exibe os parâmetros automatizáveis e seus valores atuais; todas as curvas salvas ficam visíveis, com o parâmetro ativo destacado. Os controles de volume, pan e mute do mixer acompanham os valores automatizados; o AudioEngine aplica parâmetros VST3 durante a reprodução, restaura o valor manual ao parar e protege bindings ao remover/reordenar plugins. Persistido no `.pfs`; falta QA manual com plugins reais. |
 | 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp existem; controle independente de pitch ainda está pendente. |
 | 13 | Groove MIDI (8th/16th e ritmos não quantizados) | **IMPORTANTE — pendente.** |
 | Futuro | Gravação de áudio em tempo real e importação/exportação MIDI | Pendente; exportação MIDI também aparece no §14. |
 
-**Próxima tarefa sugerida:** testar o encaixe e o feedback visual na UI e investigar os casos ainda difíceis de posicionamento (ordem 1); Ctrl+arrastar uma seleção múltipla também precisa de confirmação (ordem 2).
+**Próxima tarefa sugerida:** validar visualmente o clique, movimento e cópia de seleções múltiplas, além das mudanças recentes de exclusão/agrupamento; depois investigar os casos difíceis de encaixe e posicionamento (ordem 1).
 
 ---
 
@@ -605,8 +614,8 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
   - Estado do plugin: `AudioPluginInstance::getStateInformation` → `MemoryBlock::toBase64Encoding()`; restaurar com `setStateInformation` **após** o plugin carregar.
   - Plugin ausente ao abrir: manter um dispositivo "plugin ausente" **preservando o estado** e avisar; não perder dados.
   - **Aceite:** salvar, fechar, abrir → mesmas trilhas, clips, notas, loop, BPM, mixer e **sons dos plugins** (preset recuperado).
-- [ ] **T4.4 — Cópia de segurança / autosave**
-  - A cada N minutos (padrão 2) grava `nome.pfp.bak` ao lado (ou em `%APPDATA%\ProjectFreedom\autosave`); oferecer recuperar após crash.
+- [x] **T4.4 — Cópia de segurança / autosave**
+  - A cada 2 minutos grava uma sessão completa em `%APPDATA%\ProjectFreedom\autosave`, publica o snapshot só depois de concluir a gravação, mantém duas gerações e oferece recuperar na inicialização após falha. Snapshots são removidos após salvamento ou fechamento normal.
 
 ### Marco 5 — Desfazer/refazer global
 
@@ -732,6 +741,20 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.47** | Autosave de sessão completa a cada 2 minutos, duas gerações em AppData, recuperação oferecida na inicialização e remoção após saída normal |
+| **Doc 1.46** | Fade de segurança curto (4 ms) no início dos clips de áudio; controles de mixer acompanham em tempo real os valores automatizados de volume, pan e mute |
+| **Doc 1.45** | Monitor ao vivo de automação e curvas simultâneas; atualização segura de parâmetros VST3 e restauração de valores ao parar; roteamento de áudio tolerante a plugins sem canais de áudio |
+| **Doc 1.44** | Automação por breakpoints no Arrangement para mixer e parâmetros VST3; atalho A, edição com snap e persistência de envelopes em `.pfs` |
+| **Doc 1.43** | Menu de preferências com dispositivo/buffer/canais de áudio, pastas e scan VST3, e opção persistente de fades curtos nas bordas de áudio importado |
+| **Doc 1.42** | Clique na parte superior seleciona o clip inteiro; clique no conteúdo MIDI/áudio posiciona o playhead no ponto, e arraste seleciona tempo através de vários clips/faixas; indicadores distintos para clip, região e playhead |
+| **Doc 1.41** | Ao selecionar um clip MIDI/áudio, Play inicia do seu começo, em vez da posição arbitrária do clique dentro dele |
+| **Doc 1.40** | Arrastar uma seleção múltipla move todos os clips; Ctrl+arrastar copia o conjunto; clique simples redesenha o destaque do clip selecionado |
+| **Doc 1.39** | Ctrl+arrastar copia seleção múltipla de clips MIDI/áudio como conjunto; preview de cada destino e cópia com substituição por snapshots |
+| **Doc 1.38** | Delete/Backspace remove simultaneamente as faixas selecionadas; conector colorido identifica as faixas-filhas e o grupo a que pertencem |
+| **Doc 1.37** | Shift-clique em cabeçalho seleciona todas as faixas entre a âncora e o destino; Ctrl/Cmd+Shift adiciona o intervalo à seleção |
+| **Doc 1.36** | Auto-scroll nas bordas do Arrangement durante movimento/cópia de clips e seleção por intervalo; expande a linha do tempo ao atingir o fim |
+| **Doc 1.35** | Régua inferior do Arrangement exibe tempo em mm:ss e leitura de posição, sincronizada ao BPM, zoom e rolagem horizontal |
+| **Doc 1.34** | Teclado MIDI do computador ignora teclas com Shift/Ctrl/Cmd/Alt, evitando interferir com atalhos; indicador permanece sem foco e sem interceptar mouse |
 | **Doc 1.33** | Ctrl+arrastar pode substituir a própria origem no destino final; o trecho sobreposto é substituído sem alterações durante o gesto |
 | **Doc 1.32** | Arraste de clips usa prévia sem aplicar substituições durante o gesto; Ctrl+cópia preserva a origem e recusa sobreposição dela mesma na mesma trilha |
 | **Doc 1.31** | Ctrl+arrastar copia clips sobre conteúdo ocupado com substituição parcial; inclui prévia visual de destino e aplica substituição parcial a drops de áudio |

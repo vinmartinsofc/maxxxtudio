@@ -52,6 +52,44 @@ TEST_CASE ("ProjectModel copies audio clips from a clipboard snapshot")
     REQUIRE (copy->waveform.size() == 2);
 }
 
+TEST_CASE ("ProjectModel copies snapshot clips over occupied content without losing the source snapshot")
+{
+    ProjectModel midiProject;
+    auto* midiTrack = midiProject.addTrack (roll::TrackType::Midi);
+    auto* midiSource = midiProject.addClip (midiTrack->id, 0.0, 2.0);
+    auto* midiOccupied = midiProject.addClip (midiTrack->id, 4.0, 4.0);
+    REQUIRE (midiSource != nullptr);
+    REQUIRE (midiOccupied != nullptr);
+    midiSource->clip.addNote ({ 72, 0.25, 1.0, 90 });
+    const int midiTrackId = midiTrack->id;
+    const int midiSourceId = midiSource->id;
+    const roll::Placement midiSnapshot (*midiSource);
+    const int midiCopyId = midiProject.copyClipReplacingRange (midiSnapshot, midiTrackId, 4.0);
+
+    REQUIRE (midiCopyId > 0);
+    REQUIRE (midiProject.track (midiTrackId)->find (midiSourceId) != nullptr);
+    REQUIRE (midiProject.track (midiTrackId)->find (midiCopyId)->start == 4.0);
+    REQUIRE (midiProject.track (midiTrackId)->find (midiCopyId)->clip.notes().front().pitch == 72);
+
+    ProjectModel audioProject;
+    auto* audioTrack = audioProject.addTrack (roll::TrackType::Audio);
+    auto* audioSource = audioProject.addAudioClip (audioTrack->id, 0.0, 2.0,
+        "C:/audio/source.wav", "source.wav", { { -0.5f, 0.5f } }, 1.0, 120.0);
+    auto* audioOccupied = audioProject.addAudioClip (audioTrack->id, 4.0, 4.0,
+        "C:/audio/occupied.wav", "occupied.wav", { { -1.0f, 1.0f } }, 2.0, 100.0);
+    REQUIRE (audioSource != nullptr);
+    REQUIRE (audioOccupied != nullptr);
+    const int audioTrackId = audioTrack->id;
+    const int audioSourceId = audioSource->id;
+    const roll::AudioPlacement audioSnapshot (*audioSource);
+    const int audioCopyId = audioProject.copyAudioClipReplacingRange (audioSnapshot, audioTrackId, 4.0);
+
+    REQUIRE (audioCopyId > 0);
+    REQUIRE (audioProject.track (audioTrackId)->findAudioClip (audioSourceId) != nullptr);
+    REQUIRE (audioProject.track (audioTrackId)->findAudioClip (audioCopyId)->start == 4.0);
+    REQUIRE (audioProject.track (audioTrackId)->findAudioClip (audioCopyId)->filePath == "C:/audio/source.wav");
+}
+
 TEST_CASE ("Moving a MIDI clip replaces only the overlapped destination range")
 {
     ProjectModel project;
@@ -319,6 +357,26 @@ TEST_CASE ("Dropping audio onto occupied content replaces only the overlapped ra
     }));
 }
 
+TEST_CASE ("Imported audio can receive short non-overlapping edge fades")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Audio);
+    REQUIRE (track != nullptr);
+
+    auto* regular = project.addAudioClipReplacingRange (
+        track->id, 0.0, 1.0, "C:/audio/regular.wav", "regular.wav", {}, 0.5, 120.0, 0.02);
+    REQUIRE (regular != nullptr);
+    REQUIRE (regular->fadeInBeats == Catch::Approx (0.02));
+    REQUIRE (regular->fadeOutBeats == Catch::Approx (0.02));
+
+    auto* shortClip = project.addAudioClipReplacingRange (
+        track->id, 2.0, 0.04, "C:/audio/short.wav", "short.wav", {}, 0.02, 120.0, 1.0);
+    REQUIRE (shortClip != nullptr);
+    REQUIRE (shortClip->fadeInBeats == Catch::Approx (0.02));
+    REQUIRE (shortClip->fadeOutBeats == Catch::Approx (0.02));
+    REQUIRE (shortClip->fadeInBeats + shortClip->fadeOutBeats <= shortClip->lengthBeats);
+}
+
 TEST_CASE ("Moving a clip fully over another clip removes the covered destination")
 {
     ProjectModel project;
@@ -387,6 +445,66 @@ TEST_CASE ("ProjectModel toggles multi-track selection without losing the primar
     project.selectTrack (first);
     REQUIRE (project.selectedTrackId == first);
     REQUIRE (project.selectedTrackIds.size() == 1);
+}
+
+TEST_CASE ("ProjectModel selects a contiguous track range from an anchor in either direction")
+{
+    ProjectModel project;
+    const int first = project.addTrack (roll::TrackType::Midi)->id;
+    const int second = project.addTrack (roll::TrackType::Audio)->id;
+    const int third = project.addTrack (roll::TrackType::Midi)->id;
+    const int fourth = project.addTrack (roll::TrackType::Audio)->id;
+
+    project.selectTrack (first);
+    project.selectTrackRange (second, fourth);
+    REQUIRE (project.selectedTrackIds == std::vector<int> { second, third, fourth });
+    REQUIRE (project.selectedTrackId == fourth);
+
+    project.selectTrackRange (third, first);
+    REQUIRE (project.selectedTrackIds == std::vector<int> { first, second, third });
+    REQUIRE (project.selectedTrackId == first);
+}
+
+TEST_CASE ("ProjectModel can add a track range to an existing multi-selection")
+{
+    ProjectModel project;
+    const int first = project.addTrack (roll::TrackType::Midi)->id;
+    const int second = project.addTrack (roll::TrackType::Midi)->id;
+    const int third = project.addTrack (roll::TrackType::Midi)->id;
+    const int fourth = project.addTrack (roll::TrackType::Midi)->id;
+
+    project.selectTrack (first);
+    project.selectTrack (fourth, true);
+    project.selectTrackRange (second, third, true);
+
+    REQUIRE (project.isTrackSelected (first));
+    REQUIRE (project.isTrackSelected (second));
+    REQUIRE (project.isTrackSelected (third));
+    REQUIRE (project.isTrackSelected (fourth));
+    REQUIRE (project.selectedTrackId == third);
+}
+
+TEST_CASE ("ProjectModel validates automation and includes it in undo and redo")
+{
+    ProjectModel model;
+    auto* track = model.addTrack();
+    REQUIRE (track != nullptr);
+
+    roll::AutomationEnvelope envelope;
+    envelope.target.type = roll::AutomationParameterType::Volume;
+    envelope.target.currentValue = 0.8;
+    envelope.points = { { 0.0, 0.8 }, { 4.0, 0.2 } };
+    const int trackId = track->id;
+    REQUIRE (model.setAutomationEnvelope (trackId, envelope));
+    REQUIRE (track->automation.size() == 1);
+    REQUIRE (model.undo());
+    REQUIRE (model.track (trackId)->automation.empty());
+    REQUIRE (model.redo());
+    REQUIRE (model.track (trackId)->automation.size() == 1);
+
+    envelope.points[1].value = 2.0;
+    REQUIRE_FALSE (model.setAutomationEnvelope (trackId, envelope));
+    REQUIRE (model.track (trackId)->automation.size() == 1);
 }
 
 TEST_CASE ("ProjectModel reorders audio and MIDI tracks and supports undo")

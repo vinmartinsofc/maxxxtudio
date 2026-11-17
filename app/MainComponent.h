@@ -32,6 +32,7 @@ public:
     void setMainWindow (juce::TopLevelWindow*);
     void updatePluginWindowZOrder();
     void openProjectFromFile (const juce::File&);
+    void offerRecoveryBeforeOpening (std::function<void()> continueStartup);
     void requestClose (std::function<void()> onCloseApproved);
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -64,14 +65,17 @@ private:
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
     void showProjectMenu();
+    void showOptionsWindow();
     void chooseProjectFile (bool open, std::function<void (bool)> onSaveComplete = {});
     void chooseWavExportFile();
     void showWavRenderOptions (const juce::File&);
     void startWavRender (const juce::File&, double tailSeconds);
     void setAudioRenderUiEnabled (bool);
     void saveProject (const juce::File&, std::function<void (bool)> onComplete = {});
-    void loadProject (const juce::File&);
-    void applyLoadedProject (const juce::File&, ProjectFileData, const std::shared_ptr<TaskScope>&);
+    void saveRecoverySnapshot();
+    void loadProject (const juce::File&, bool recovering = false);
+    void applyLoadedProject (const juce::File&, ProjectFileData, const std::shared_ptr<TaskScope>&,
+                             bool recovering);
     void advanceProjectLoadTask();
     void finishProjectLoadTask();
     void restoreNextProjectPlugin();
@@ -124,7 +128,9 @@ private:
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
     std::unique_ptr<juce::FileChooser> audioExportChooser;
+    std::unique_ptr<class OptionsWindow> optionsWindow;
     juce::File currentProjectFile;
+    double nextRecoverySaveTime = 0.0;
     std::shared_ptr<TaskScope> projectLoadTask;
     std::vector<PluginState> pendingProjectPlugins;
     std::vector<std::pair<PluginState, int>> loadedProjectPlugins;
@@ -141,12 +147,14 @@ private:
     int pendingAudioLoads = 0, pendingPreviewLoads = 0;
     bool scanningPlugins = false;
     bool projectFileOperationInProgress = false;
+    bool recoverySaveInProgress = false;
     bool trackDuplicationInProgress = false;
     bool audioRenderInProgress = false;
     size_t projectLoadWorkTotal = 0, projectLoadWorkDone = 0;
     juce::String scanMessage;
 
     bool showingDevices = false;
+    bool createFadesOnClipEdges = false;
     bool audioClipEditorOpen = false;
     bool pianoRollVisible = true;
     bool suppressSongStartOnce = false;

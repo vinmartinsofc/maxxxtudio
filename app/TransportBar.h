@@ -38,6 +38,7 @@ public:
     std::function<void (bool)> onPianoRollToggled;
     std::function<void (bool)> onComputerMidiKeyboardToggled;
     std::function<void (double beats)> onPosition;   // chamado ~30x/s com o playhead
+    std::function<void (double bpm)> onBpmChanged;
     std::function<void()> onBeforePlay;
     std::function<void()> onBeforePause, onBeforeStop;
     void setBrowserVisible (bool);
@@ -51,6 +52,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     std::function<void()> onProjectMenu;
+    std::function<void()> onOptionsMenu;
 
 private:
     void timerCallback() override;
@@ -61,6 +63,7 @@ private:
     IconButton stopButton { icons::Icon::Stop, "Parar" };
     IconButton rewindButton { icons::Icon::Rewind, "Voltar ao inicio" };
     juce::TextButton projectButton { "Projeto" };
+    juce::TextButton optionsButton { "Opcoes" };
     juce::TextButton metronomeButton { "Metronomo" };
     juce::Slider metronomeVolumeSlider;
     juce::TextButton loopButton { "Loop" }, browserButton { "Plugins" }, fileBrowserButton { "Audio" },

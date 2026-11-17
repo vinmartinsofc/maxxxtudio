@@ -100,7 +100,10 @@ public:
             laf->setColour (juce::Slider::trackColourId, theme::accent());
         }
         window = std::make_unique<MainWindow> (getApplicationName());
-        openProjectArgument (commandLine);
+        window->offerRecoveryBeforeOpening ([this, commandLine]
+        {
+            openProjectArgument (commandLine);
+        });
     }
     void shutdown() override                       { window.reset(); }
     void systemRequestedQuit() override
@@ -168,6 +171,14 @@ private:
         {
             if (mainComponent != nullptr)
                 mainComponent->openProjectFromFile (file);
+        }
+
+        void offerRecoveryBeforeOpening (std::function<void()> continueStartup)
+        {
+            if (mainComponent != nullptr)
+                mainComponent->offerRecoveryBeforeOpening (std::move (continueStartup));
+            else if (continueStartup)
+                continueStartup();
         }
 
         void closeButtonPressed() override

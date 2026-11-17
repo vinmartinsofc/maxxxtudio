@@ -138,17 +138,6 @@ BrowserPanel::BrowserPanel (PluginScanner& s) : scanner (s), tree (std::make_uni
     instrumentsButton.onClick = [this] { setFilter (Filter::Instruments); };
     effectsButton.onClick     = [this] { setFilter (Filter::Effects); };
 
-    rescanButton.onClick = [this]
-    {
-        setStatus ("Procurando plugins...");
-        scanner.startScan();
-    };
-    addAndMakeVisible (rescanButton);
-
-    foldersButton.setTooltip ("Adicionar ou remover pastas de busca de plugins");
-    foldersButton.onClick = [this] { showSearchPathsMenu(); };
-    addAndMakeVisible (foldersButton);
-
     status.setFont (juce::FontOptions (12.5f));
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
@@ -191,97 +180,6 @@ juce::File BrowserPanel::treeStateFile() const
                          .getChildFile ("ProjectFreedom");
     directory.createDirectory();
     return directory.getChildFile ("plugin-tree-state.xml");
-}
-
-void BrowserPanel::showSearchPathsMenu()
-{
-    constexpr int addVst3 = 1;
-    struct PathAction
-    {
-        juce::String formatName;
-        juce::File directory;
-    };
-
-    juce::PopupMenu menu;
-    menu.addItem (addVst3, "Adicionar pasta VST3...");
-
-    std::vector<PathAction> removals;
-    const auto paths = scanner.customSearchPaths ("VST3");
-    if (! paths.empty())
-    {
-        menu.addSeparator();
-        menu.addSectionHeader ("Pastas VST3");
-        for (const auto& path : paths)
-        {
-            const int id = 100 + static_cast<int> (removals.size());
-            menu.addItem (id, "Remover " + path.getFullPathName());
-            removals.push_back ({ "VST3", path });
-        }
-    }
-    if (removals.empty())
-    {
-        menu.addSeparator();
-        menu.addItem (0, "Nenhuma pasta customizada", false);
-    }
-
-    juce::Component::SafePointer<BrowserPanel> safeThis (this);
-    menu.showMenuAsync (juce::PopupMenu::Options(),
-        [safeThis, removals = std::move (removals)] (int result)
-        {
-            if (safeThis == nullptr)
-                return;
-            if (result == addVst3)
-            {
-                safeThis->chooseSearchPath ("VST3");
-                return;
-            }
-            const auto index = result - 100;
-            if (index < 0 || index >= static_cast<int> (removals.size()))
-                return;
-
-            const auto& action = removals[static_cast<std::size_t> (index)];
-            const auto pathResult = safeThis->scanner.removeCustomSearchPath (action.formatName, action.directory);
-            if (pathResult.wasOk())
-            {
-                safeThis->setStatus ("Pasta removida; atualizando plugins...");
-                safeThis->scanner.startScan();
-            }
-            else
-                safeThis->setStatus (pathResult.getErrorMessage());
-        });
-}
-
-void BrowserPanel::chooseSearchPath (const juce::String& formatName)
-{
-    if (pathChooser != nullptr)
-        return;
-
-    pathChooser = std::make_unique<juce::FileChooser> (
-        "Adicionar pasta de plugins " + formatName,
-        juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory));
-    juce::Component::SafePointer<BrowserPanel> safeThis (this);
-    pathChooser->launchAsync (juce::FileBrowserComponent::openMode
-                                  | juce::FileBrowserComponent::canSelectDirectories,
-        [safeThis, formatName] (const juce::FileChooser& chooser)
-        {
-            if (safeThis == nullptr)
-                return;
-
-            const auto directory = chooser.getResult();
-            safeThis->pathChooser.reset();
-            if (directory == juce::File())
-                return;
-
-            const auto result = safeThis->scanner.addCustomSearchPath (formatName, directory);
-            if (result.failed())
-            {
-                safeThis->setStatus (result.getErrorMessage());
-                return;
-            }
-
-            safeThis->setStatus ("Pasta adicionada; atualizando plugins...");
-            safeThis->scanner.startScan();
-        });
 }
 
 void BrowserPanel::saveTreeState()
@@ -488,8 +386,6 @@ void BrowserPanel::resized()
 {
     auto area = getLocalBounds().reduced (8);
     auto head = area.removeFromTop (24);
-    rescanButton.setBounds (head.removeFromRight (64));
-    foldersButton.setBounds (head.removeFromRight (58));
     title.setBounds (head);
     area.removeFromTop (6);
     search.setBounds (area.removeFromTop (26));

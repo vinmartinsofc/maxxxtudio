@@ -13,14 +13,47 @@ juce::Colour ArrangementView::colourFor (int trackId)
     return juce::Colour::fromHSV (std::fmod (static_cast<float> (trackId) * 0.137f + 0.45f, 1.0f), 0.45f, 0.78f, 1.0f);
 }
 
+namespace
+{
+juce::String formatTimelineTime (double seconds)
+{
+    const int totalSeconds = std::max (0, juce::roundToInt (seconds));
+    return juce::String (totalSeconds / 60).paddedLeft ('0', 2)
+         + ":" + juce::String (totalSeconds % 60).paddedLeft ('0', 2);
+}
+}
+
 // ============================================================ Lanes (clips)
 
 class ArrangementView::Lanes : public juce::Component, public juce::DragAndDropTarget,
                                public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
-    enum class Mode { None, Move, Resize, FadeIn, FadeOut, FadeInCurve, FadeOutCurve,
-                      RangeSelect, EmptyClickPending, ShiftPending, CtrlPending };
+    enum class Mode { None, Move, Resize, AutomationEdit, FadeIn, FadeOut, FadeInCurve, FadeOutCurve,
+                      RangeSelect, EmptyClickPending, ClipTimeSelectPending, ShiftPending, CtrlPending };
+
+    struct ClipSelection
+    {
+        int trackId = -1;
+        int clipId = -1;
+        bool audio = false;
+    };
+
+    struct MultiDragSource
+    {
+        ClipSelection selection;
+        int trackIndex = -1;
+        double start = 0.0, length = 0.0;
+        std::unique_ptr<roll::Placement> midiClip;
+        std::unique_ptr<roll::AudioPlacement> audioClip;
+    };
+
+    struct MovePreviewItem
+    {
+        int trackIndex = -1;
+        double start = 0.0, length = 0.0;
+        bool replacesSource = false;
+    };
 
     Lanes (ProjectModel& p, ArrangementView& o) : project (p), owner (o)
     {
@@ -30,10 +63,133 @@ public:
 
     void timerCallback() override
     {
+        if (dragActive && (mode == Mode::Move || mode == Mode::RangeSelect))
+            autoScrollDuringDrag();
+
         if (mode == Mode::FadeIn || mode == Mode::FadeOut
             || mode == Mode::FadeInCurve || mode == Mode::FadeOutCurve
-            || mode == Mode::RangeSelect)
+            || mode == Mode::RangeSelect || mode == Mode::AutomationEdit)
             repaint();
+    }
+
+    void autoScrollDuringDrag()
+    {
+        const auto viewportBounds = owner.viewport.getScreenBounds();
+        const auto mouse = juce::Desktop::getMousePosition();
+        const int pointerX = mouse.x - viewportBounds.getX();
+        const int visibleWidth = owner.viewport.getMaximumVisibleWidth();
+        constexpr int edgeSize = 36;
+        int delta = 0;
+        if (pointerX < edgeSize)
+            delta = -std::clamp ((edgeSize - pointerX) / 2, 2, 24);
+        else if (pointerX > visibleWidth - edgeSize)
+            delta = std::clamp ((pointerX - (visibleWidth - edgeSize)) / 2, 2, 24);
+        else
+            return;
+
+        int viewX = owner.viewport.getViewPositionX();
+        int maxViewX = std::max (0, getWidth() - visibleWidth);
+        if (delta > 0 && viewX >= maxViewX)
+        {
+            const double visibleBeats = visibleWidth / owner.pixelsPerBeat;
+            project.growTo (project.totalBeats + std::max (16.0, visibleBeats));
+            owner.updateSizes();
+            viewX = owner.viewport.getViewPositionX();
+            maxViewX = std::max (0, getWidth() - visibleWidth);
+        }
+
+        const int nextViewX = std::clamp (viewX + delta, 0, maxViewX);
+        if (nextViewX == viewX)
+            return;
+
+        owner.viewport.setViewPosition (nextViewX, owner.viewport.getViewPositionY());
+        owner.syncPositions();
+        const auto currentView = owner.viewport.getViewPosition();
+        const juce::Point<float> pointerInLanes (
+            static_cast<float> (pointerX + currentView.x),
+            static_cast<float> (mouse.y - viewportBounds.getY() + currentView.y));
+        const auto modifiers = juce::ModifierKeys::getCurrentModifiers();
+        if (mode == Mode::Move)
+            updateMovePreview (pointerInLanes, modifiers);
+        else
+            updateRangeSelection (pointerInLanes, modifiers);
+        repaint();
+    }
+
+    void updateRangeSelection (juce::Point<float> position, juce::ModifierKeys modifiers)
+    {
+        const double beat = position.x / owner.pixelsPerBeat;
+        rangeEndBeat = std::max (0.0, modifiers.isAltDown() ? beat : owner.snapBeat (beat));
+        rangeEndTrack = std::clamp (owner.rowAt (juce::roundToInt (position.y)),
+                                    0, static_cast<int> (project.tracks.size()) - 1);
+    }
+
+    void updateMovePreview (juce::Point<float> position, juce::ModifierKeys modifiers)
+    {
+        const double beat = position.x / owner.pixelsPerBeat;
+        const double requestedStart = origStart + (beat - downBeat);
+        const double newStart = std::max (0.0, modifiers.isAltDown()
+            ? requestedStart : owner.snapBeat (requestedStart));
+        const int ti = std::clamp (owner.rowAt (juce::roundToInt (position.y)),
+                                   0, static_cast<int> (project.tracks.size()) - 1);
+        const auto* targetTrack = project.tracks[static_cast<std::size_t> (ti)].get();
+        movePreviewActive = true;
+        movePreviewStart = newStart;
+        movePreviewTrackIndex = ti;
+        movePreviewIsCopy = movePreviewIsCopy || modifiers.isCtrlDown();
+        multiMovePreviewItems.clear();
+        if (multiDragSources.size() > 1)
+        {
+            const int trackOffset = ti - multiDragAnchorTrackIndex;
+            const double beatOffset = newStart - origStart;
+            movePreviewAllowed = true;
+            movePreviewReplacesSource = false;
+            for (const auto& source : multiDragSources)
+            {
+                const int targetIndex = source.trackIndex + trackOffset;
+                const double targetStart = source.start + beatOffset;
+                if (targetIndex < 0 || targetIndex >= static_cast<int> (project.tracks.size())
+                    || targetStart < 0.0)
+                {
+                    movePreviewAllowed = false;
+                    continue;
+                }
+
+                const auto* target = project.tracks[static_cast<std::size_t> (targetIndex)].get();
+                const auto* sourceTrack = project.track (source.selection.trackId);
+                if (target == nullptr || sourceTrack == nullptr || target->type != sourceTrack->type)
+                {
+                    movePreviewAllowed = false;
+                    continue;
+                }
+
+                const bool replacesSource = std::any_of (multiDragSources.begin(), multiDragSources.end(),
+                    [&source, target, targetStart] (const auto& other)
+                    {
+                        if (other.selection.trackId != target->id)
+                            return false;
+                        return targetStart < other.start + other.length - 1.0e-9
+                            && targetStart + source.length > other.start + 1.0e-9;
+                    });
+                movePreviewReplacesSource = movePreviewReplacesSource || replacesSource;
+                multiMovePreviewItems.push_back ({ targetIndex, targetStart, source.length, replacesSource });
+            }
+            movePreviewAllowed = movePreviewAllowed
+                && multiMovePreviewItems.size() == multiDragSources.size();
+            setMouseCursor (movePreviewIsCopy ? juce::MouseCursor::CopyingCursor
+                                              : juce::MouseCursor::DraggingHandCursor);
+            return;
+        }
+
+        const auto* sourceTrack = project.track (curTrack);
+        movePreviewReplacesSource = movePreviewIsCopy && targetTrack != nullptr
+            && curTrack == targetTrack->id
+            && newStart < origStart + origLen - 1.0e-9
+            && newStart + origLen > origStart + 1.0e-9;
+        movePreviewAllowed = targetTrack != nullptr && sourceTrack != nullptr
+            && targetTrack->type == sourceTrack->type;
+        setMouseCursor (movePreviewIsCopy ? juce::MouseCursor::CopyingCursor
+                                          : juce::MouseCursor::DraggingHandCursor);
     }
 
     void updateSize()
@@ -157,11 +313,7 @@ public:
                                               static_cast<float> (rowHeight - (t.collapsed ? 6 : 9)));
                     if (! r.toNearestInt().intersects (cb)) continue;
 
-                    const bool inRange = hasRangeSelection && static_cast<int> (i) >= std::min (rangeStartTrack, rangeEndTrack)
-                        && static_cast<int> (i) <= std::max (rangeStartTrack, rangeEndTrack)
-                        && clip->start >= std::min (rangeStartBeat, rangeEndBeat) - 1.0e-9
-                        && clip->end() <= std::max (rangeStartBeat, rangeEndBeat) + 1.0e-9;
-                    const bool selected = isClipSelected (t.id, clip->id, true) || inRange;
+                    const bool selected = isClipSelected (t.id, clip->id, true);
                     g.setColour (selected ? base.brighter (0.25f) : base);
                     g.fillRoundedRectangle (r, 4.0f);
                     if (t.collapsed)
@@ -284,11 +436,7 @@ public:
                                           static_cast<float> (rowHeight - (t.collapsed ? 6 : 9)));
                 if (! r.toNearestInt().intersects (cb)) continue;
 
-                const bool inRange = hasRangeSelection && static_cast<int> (i) >= std::min (rangeStartTrack, rangeEndTrack)
-                    && static_cast<int> (i) <= std::max (rangeStartTrack, rangeEndTrack)
-                    && p->start >= std::min (rangeStartBeat, rangeEndBeat) - 1.0e-9
-                    && p->end() <= std::max (rangeStartBeat, rangeEndBeat) + 1.0e-9;
-                const bool sel = isClipSelected (t.id, p->id, false) || inRange;
+                const bool sel = isClipSelected (t.id, p->id, false);
                 g.setColour (sel ? base.brighter (0.25f) : base);
                 g.fillRoundedRectangle (r, 4.0f);
                 if (t.collapsed)
@@ -353,6 +501,64 @@ public:
             }
         }
 
+        if (owner.automationMode)
+        {
+            for (size_t i = 0; i < project.tracks.size(); ++i)
+            {
+                const auto& track = *project.tracks[i];
+                if (owner.rowHeight (static_cast<int> (i)) <= 0)
+                    continue;
+                if (! track.automation.empty())
+                {
+                    const float top = static_cast<float> (owner.rowTop (static_cast<int> (i)) + 4);
+                    const float height = static_cast<float> (std::max (10, owner.rowHeight (static_cast<int> (i)) - 8));
+                    g.setColour (theme::panel().withAlpha (0.72f));
+                    g.fillRect (0.0f, top, static_cast<float> (getWidth()), height);
+                }
+                for (const auto& envelope : track.automation)
+                {
+                    const bool selected = envelope.target == owner.automationTarget;
+                    if (automationEditTrackId == track.id
+                        && automationEditEnvelope.target == envelope.target)
+                        drawAutomationEnvelope (g, static_cast<int> (i), track,
+                                               automationEditEnvelope, selected);
+                    else
+                        drawAutomationEnvelope (g, static_cast<int> (i), track, envelope, selected);
+                }
+                if (automationEditTrackId == track.id
+                    && findEnvelope (track, owner.automationTarget) == nullptr
+                    && ! automationEditEnvelope.points.empty())
+                    drawAutomationEnvelope (g, static_cast<int> (i), track,
+                                           automationEditEnvelope, true);
+            }
+            if (project.masterTrack != nullptr)
+            {
+                const int row = static_cast<int> (project.tracks.size());
+                const auto& track = *project.masterTrack;
+                if (owner.rowHeight (row) > 0 && ! track.automation.empty())
+                {
+                    const float top = static_cast<float> (owner.rowTop (row) + 4);
+                    const float height = static_cast<float> (std::max (10, owner.rowHeight (row) - 8));
+                    g.setColour (theme::panel().withAlpha (0.72f));
+                    g.fillRect (0.0f, top, static_cast<float> (getWidth()), height);
+                }
+                if (owner.rowHeight (row) > 0)
+                    for (const auto& envelope : track.automation)
+                    {
+                        const bool selected = envelope.target == owner.automationTarget;
+                        if (automationEditTrackId == track.id
+                            && automationEditEnvelope.target == envelope.target)
+                            drawAutomationEnvelope (g, row, track, automationEditEnvelope, selected);
+                        else
+                            drawAutomationEnvelope (g, row, track, envelope, selected);
+                    }
+                if (owner.rowHeight (row) > 0 && automationEditTrackId == track.id
+                    && findEnvelope (track, owner.automationTarget) == nullptr
+                    && ! automationEditEnvelope.points.empty())
+                    drawAutomationEnvelope (g, row, track, automationEditEnvelope, true);
+            }
+        }
+
         if (hasRangeSelection)
         {
             const double startBeat = std::min (rangeStartBeat, rangeEndBeat);
@@ -374,9 +580,21 @@ public:
             g.drawRect (selectionBounds, selecting ? 2.0f : 1.0f);
             g.drawVerticalLine (static_cast<int> (x), y, y + height);
             g.drawVerticalLine (static_cast<int> (x + width), y, y + height);
-            if (! selecting)
+            if (height >= 30.0f && width >= 120.0f)
             {
-                const auto hint = juce::Rectangle<int> (static_cast<int> (x) + 6, static_cast<int> (y) + 5, 245, 18);
+                const auto label = juce::Rectangle<int> (static_cast<int> (x) + 6,
+                    static_cast<int> (y) + 5, 146, 18);
+                g.setColour (theme::panel().withAlpha (0.9f));
+                g.fillRoundedRectangle (label.toFloat(), 3.0f);
+                g.setColour (theme::text());
+                g.setFont (juce::FontOptions (11.5f));
+                g.drawText (theme::ui ("Selecao de tempo"),
+                            label.reduced (4, 0), juce::Justification::centredLeft, true);
+            }
+            if (! selecting && height >= 48.0f && width >= 245.0f)
+            {
+                const auto hint = juce::Rectangle<int> (static_cast<int> (x) + 6,
+                    static_cast<int> (y) + 25, 245, 18);
                 g.setColour (theme::panel().withAlpha (0.9f));
                 g.fillRoundedRectangle (hint.toFloat(), 3.0f);
                 g.setColour (theme::text());
@@ -565,11 +783,22 @@ public:
     {
         grabKeyboardFocus();
         mode = Mode::None;
+        dragActive = false;
         movePreviewActive = movePreviewIsCopy = false;
         movePreviewAllowed = true;
         movePreviewReplacesSource = false;
+        multiDragSources.clear();
+        multiMovePreviewItems.clear();
+        multiDragAnchorTrackIndex = -1;
 
         const int row = owner.rowAt (juce::roundToInt (e.position.y));
+        if (owner.automationMode && e.mods.isLeftButtonDown()
+            && row >= 0 && row <= static_cast<int> (project.tracks.size()))
+        {
+            beginAutomationEdit (e, row);
+            return;
+        }
+
         if (e.mods.isShiftDown() && e.mods.isLeftButtonDown()
             && row >= 0 && row < static_cast<int> (project.tracks.size()))
         {
@@ -670,26 +899,39 @@ public:
                 origLen = h.clip->clip.length();
             }
             downBeat = e.position.x / owner.pixelsPerBeat;
+            captureMultiDragSources (pendingSelection);
             mode = Mode::CtrlPending;
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
             notifyInteraction (true);
             return;
         }
 
-        selectedClips.clear();
-        selectionAnchor = { trackId,
+        const ClipSelection clickedClip { trackId,
             h.audioClip != nullptr ? h.audioClip->id : h.clip->id,
             h.audioClip != nullptr };
-        selectedClips.push_back (selectionAnchor);
-        const double rawClickBeat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
-        const double clickBeat = e.mods.isAltDown() ? rawClickBeat : owner.snapBeat (rawClickBeat);
-
+        mode = fadeModeAt (h, e.position);
+        const bool focusesClipTime = mode == Mode::None && isClipTimeSelectionArea (h, e.position);
+        const bool dragExistingSelection = ! focusesClipTime && selectedClips.size() > 1
+            && isClipSelected (clickedClip.trackId, clickedClip.clipId, clickedClip.audio);
+        if (focusesClipTime)
+        {
+            selectedClips.clear();
+            selectionAnchor = {};
+        }
+        else if (! dragExistingSelection)
+        {
+            selectedClips.clear();
+            selectionAnchor = clickedClip;
+            selectedClips.push_back (selectionAnchor);
+        }
+        const double rawBeat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
+        const double seekBeat = focusesClipTime && ! e.mods.isAltDown()
+            ? owner.snapBeat (rawBeat) : rawBeat;
         if (h.audioClip != nullptr)
         {
             project.selectAudioClip (trackId, h.audioClip->id);
             if (owner.onSeek)
-                owner.onSeek (std::clamp (clickBeat,
-                                          h.audioClip->start, h.audioClip->end()));
+                owner.onSeek (focusesClipTime ? seekBeat : h.audioClip->start);
             curTrack = trackId; curClip = -1; curAudioClipId = h.audioClip->id;
             origStart = h.audioClip->start; origLen = h.audioClip->lengthBeats;
             origFadeIn = h.audioClip->fadeInBeats; origFadeOut = h.audioClip->fadeOutBeats;
@@ -700,17 +942,23 @@ public:
         {
             project.selectClip (trackId, h.clip->id);
             if (owner.onSeek)
-                owner.onSeek (std::clamp (clickBeat,
-                                          h.clip->start, h.clip->end()));
+                owner.onSeek (focusesClipTime ? seekBeat : h.clip->start);
             curTrack = trackId; curClip = h.clip->id; curAudioClipId = -1;
             origStart = h.clip->start; origLen = h.clip->clip.length();
         }
         downBeat = e.position.x / owner.pixelsPerBeat;
         downY = e.position.y;
         const float right = static_cast<float> ((h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
-        mode = fadeModeAt (h, e.position);
-        if (mode == Mode::None)
+        if (focusesClipTime)
+        {
+            mode = Mode::ClipTimeSelectPending;
+            selectionDownPosition = e.position;
+            pendingRangeTrack = h.trackIndex;
+        }
+        else if (mode == Mode::None)
             mode = (e.position.x > right - 7.0f) ? Mode::Resize : Mode::Move;
+        if (mode == Mode::Move && dragExistingSelection)
+            captureMultiDragSources (clickedClip);
         if (mode == Mode::FadeInCurve || mode == Mode::FadeOutCurve)
             setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
         else
@@ -718,6 +966,7 @@ public:
                                 ? juce::MouseCursor::LeftRightResizeCursor
                                 : juce::MouseCursor::DraggingHandCursor);
         notifyInteraction (true);
+        repaint();
     }
 
     void showContextMenu (const Hit& h, int trackId)
@@ -856,12 +1105,23 @@ public:
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
+        if (mode == Mode::AutomationEdit)
+        {
+            if (e.getDistanceFromDragStart() >= 2.0f)
+            {
+                automationWasDragged = true;
+                updateAutomationPoint (e);
+            }
+            return;
+        }
+
         if (mode == Mode::EmptyClickPending)
         {
             if (e.position.getDistanceFrom (selectionDownPosition) < 4.0f)
                 return;
 
             mode = Mode::RangeSelect;
+            dragActive = true;
             selectedClips.clear();
             selectionAnchor = {};
             hasRangeSelection = true;
@@ -879,11 +1139,36 @@ public:
             return;
         }
 
+        if (mode == Mode::ClipTimeSelectPending)
+        {
+            if (e.position.getDistanceFrom (selectionDownPosition) < 4.0f)
+                return;
+
+            mode = Mode::RangeSelect;
+            dragActive = true;
+            selectedClips.clear();
+            selectionAnchor = {};
+            hasRangeSelection = true;
+            const double rawBeat = std::max (0.0, selectionDownPosition.x / owner.pixelsPerBeat);
+            const double endBeat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
+            rangeStartBeat = e.mods.isAltDown() ? rawBeat : owner.snapBeat (rawBeat);
+            rangeEndBeat = e.mods.isAltDown() ? endBeat : owner.snapBeat (endBeat);
+            rangeStartTrack = pendingRangeTrack;
+            rangeEndTrack = std::clamp (owner.rowAt (juce::roundToInt (e.position.y)),
+                                        0, static_cast<int> (project.tracks.size()) - 1);
+            const int trackId = project.tracks[static_cast<std::size_t> (pendingRangeTrack)]->id;
+            project.selectClip (trackId, -1);
+            notifyInteraction (true, 0, true);
+            repaint();
+            return;
+        }
+
         if (mode == Mode::ShiftPending)
         {
             if (e.position.getDistanceFrom (selectionDownPosition) < 4.0f)
                 return;
             mode = Mode::RangeSelect;
+            dragActive = true;
             selectedClips.clear();
             selectionAnchor = {};
             hasRangeSelection = true;
@@ -906,18 +1191,17 @@ public:
             if (e.position.getDistanceFrom (selectionDownPosition) < 4.0f)
                 return;
             mode = Mode::Move;
+            movePreviewIsCopy = true;
         }
         if (mode == Mode::None) return;
+        dragActive = true;
         if (mode != Mode::RangeSelect)
             project.beginEdit();
-        const double beat = e.position.x / owner.pixelsPerBeat;
         const bool noSnap = e.mods.isAltDown();
 
         if (mode == Mode::RangeSelect)
         {
-            rangeEndBeat = std::max (0.0, noSnap ? beat : owner.snapBeat (beat));
-            rangeEndTrack = std::clamp (owner.rowAt (juce::roundToInt (e.position.y)),
-                                        0, static_cast<int> (project.tracks.size()) - 1);
+            updateRangeSelection (e.position, e.mods);
             notifyInteraction (true, 0, true);
             repaint();
             return;
@@ -925,31 +1209,14 @@ public:
 
         if (mode == Mode::Move)
         {
-            double newStart = origStart + (beat - downBeat);
-            newStart = std::max (0.0, noSnap ? newStart : owner.snapBeat (newStart));
-
-            const int ti = std::clamp (owner.rowAt (juce::roundToInt (e.position.y)),
-                                       0, static_cast<int> (project.tracks.size()) - 1);
-            const auto* targetTrack = project.tracks[static_cast<size_t> (ti)].get();
-            const auto* sourceTrack = project.track (curTrack);
-            movePreviewActive = true;
-            movePreviewStart = newStart;
-            movePreviewTrackIndex = ti;
-            movePreviewIsCopy = movePreviewIsCopy || e.mods.isCtrlDown();
-            movePreviewReplacesSource = movePreviewIsCopy && targetTrack != nullptr
-                && curTrack == targetTrack->id
-                && newStart < origStart + origLen - 1.0e-9
-                && newStart + origLen > origStart + 1.0e-9;
-            movePreviewAllowed = targetTrack != nullptr && sourceTrack != nullptr
-                && targetTrack->type == sourceTrack->type;
-            setMouseCursor (movePreviewIsCopy ? juce::MouseCursor::CopyingCursor
-                                               : juce::MouseCursor::DraggingHandCursor);
+            updateMovePreview (e.position, e.mods);
             notifyInteraction (true, 0, true);
             repaint();
             return;
         }
         else if (mode == Mode::Resize)
         {
+            const double beat = e.position.x / owner.pixelsPerBeat;
             if (curAudioClipId >= 0)
             {
                 const double minimumLength = owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0;
@@ -977,6 +1244,7 @@ public:
         }
         else if (mode == Mode::FadeIn || mode == Mode::FadeOut)
         {
+            const double beat = e.position.x / owner.pixelsPerBeat;
             if (auto* track = project.track (curTrack))
                 if (auto* clip = track->findAudioClip (curAudioClipId))
                 {
@@ -1008,6 +1276,15 @@ public:
 
     void mouseUp (const juce::MouseEvent& e) override
     {
+        dragActive = false;
+        if (mode == Mode::AutomationEdit)
+        {
+            finishAutomationEdit();
+            mode = Mode::None;
+            repaint();
+            return;
+        }
+
         if (mode == Mode::EmptyClickPending)
         {
             const double rawBeat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
@@ -1022,6 +1299,17 @@ public:
                           icons::Icon::Pointer, false, 900);
             mode = Mode::None;
             movePreviewActive = false;
+            updateCursor (e.position);
+            repaint();
+            return;
+        }
+
+        if (mode == Mode::ClipTimeSelectPending)
+        {
+            notifyAction ("Ponto de reproducao posicionado", icons::Icon::Pointer, false, 650);
+            mode = Mode::None;
+            movePreviewActive = false;
+            curAudioClipId = -1;
             updateCursor (e.position);
             repaint();
             return;
@@ -1043,58 +1331,133 @@ public:
             notifyAction ("Selecao atualizada", icons::Icon::SelectRegion, false, 650);
             mode = Mode::None;
             movePreviewActive = false;
+            multiDragSources.clear();
+            multiMovePreviewItems.clear();
+            multiDragAnchorTrackIndex = -1;
             curAudioClipId = -1;
             repaint();
             return;
         }
 
         bool moveFailed = false;
+        bool editEndedAfterRollback = false;
         if (mode == Mode::Move && e.getDistanceFromDragStart() >= 4.0f
             && ! project.tracks.empty())
         {
-            const double beat = e.position.x / owner.pixelsPerBeat;
-            const double requestedStart = origStart + (beat - downBeat);
-            const double start = std::max (0.0, e.mods.isAltDown()
-                ? requestedStart : owner.snapBeat (requestedStart));
-            movePreviewTrackIndex = std::clamp (
-                owner.rowAt (juce::roundToInt (e.position.y)), 0,
-                static_cast<int> (project.tracks.size()) - 1);
-            movePreviewStart = start;
-            movePreviewIsCopy = movePreviewIsCopy || e.mods.isCtrlDown();
-            const auto* targetTrack = project.tracks[static_cast<std::size_t> (movePreviewTrackIndex)].get();
-            const auto* sourceTrack = project.track (curTrack);
-            movePreviewReplacesSource = movePreviewIsCopy && curTrack == targetTrack->id
-                && start < origStart + origLen - 1.0e-9
-                && start + origLen > origStart + 1.0e-9;
-            movePreviewAllowed = targetTrack != nullptr && sourceTrack != nullptr
-                && targetTrack->type == sourceTrack->type;
-            const int trackId = targetTrack->id;
-            const bool copy = movePreviewIsCopy;
-            int newId = -1;
-            if (curAudioClipId >= 0)
-                newId = copy ? project.copyAudioClip (curTrack, curAudioClipId, trackId, start)
-                             : project.moveAudioClip (curTrack, curAudioClipId, trackId, start);
-            else
-                newId = copy ? project.copyClip (curTrack, curClip, trackId, start)
-                             : project.moveClip (curTrack, curClip, trackId, start);
-
-            if (newId >= 0)
+            updateMovePreview (e.position, e.mods);
+            if (multiDragSources.size() > 1)
             {
-                curTrack = trackId;
-                if (curAudioClipId >= 0)
-                    curAudioClipId = newId;
+                if (! movePreviewAllowed || multiMovePreviewItems.size() != multiDragSources.size())
+                    moveFailed = true;
                 else
-                    curClip = newId;
-                selectedClips = { { trackId, newId, curAudioClipId >= 0 } };
-                selectionAnchor = selectedClips.front();
-                hasRangeSelection = false;
-                setProjectSelection (selectionAnchor);
-                movePreviewStart = start;
-                movePreviewIsCopy = copy;
+                {
+                    bool unchangedPlacement = true;
+                    for (std::size_t i = 0; i < multiDragSources.size() && unchangedPlacement; ++i)
+                        unchangedPlacement = multiMovePreviewItems[i].trackIndex == multiDragSources[i].trackIndex
+                            && std::abs (multiMovePreviewItems[i].start - multiDragSources[i].start) <= 1.0e-9;
+                    if (! unchangedPlacement)
+                    {
+                        bool changed = false;
+                        if (! movePreviewIsCopy)
+                        {
+                            for (const auto& source : multiDragSources)
+                            {
+                                const auto* track = project.track (source.selection.trackId);
+                                const bool exists = track != nullptr && (source.selection.audio
+                                    ? track->findAudioClip (source.selection.clipId) != nullptr
+                                    : track->find (source.selection.clipId) != nullptr);
+                                if (! exists)
+                                    continue;
+
+                                if (source.selection.audio)
+                                    project.deleteAudioClip (source.selection.trackId, source.selection.clipId);
+                                else
+                                    project.deleteClip (source.selection.trackId, source.selection.clipId);
+                                changed = true;
+                            }
+                        }
+
+                        std::vector<ClipSelection> copies;
+                        for (std::size_t i = 0; i < multiDragSources.size() && ! moveFailed; ++i)
+                        {
+                            const auto& source = multiDragSources[i];
+                            const auto& preview = multiMovePreviewItems[i];
+                            const int targetTrackId = project.tracks[static_cast<std::size_t> (preview.trackIndex)]->id;
+                            const int newId = source.selection.audio
+                                ? project.copyAudioClipReplacingRange (*source.audioClip, targetTrackId, preview.start)
+                                : project.copyClipReplacingRange (*source.midiClip, targetTrackId, preview.start);
+                            if (newId < 0)
+                            {
+                                moveFailed = true;
+                                break;
+                            }
+                            copies.push_back ({ targetTrackId, newId, source.selection.audio });
+                            changed = true;
+                        }
+
+                        if (moveFailed && changed)
+                        {
+                            project.endEdit();
+                            project.undo();
+                            editEndedAfterRollback = true;
+                        }
+                        else if (! moveFailed)
+                        {
+                            selectedClips = std::move (copies);
+                            selectionAnchor = selectedClips.front();
+                            hasRangeSelection = false;
+                            setProjectSelection (selectedClips.back());
+                            updateRangeFromSelection (true);
+                        }
+                    }
+                }
             }
             else
             {
-                moveFailed = true;
+                const double beat = e.position.x / owner.pixelsPerBeat;
+                const double requestedStart = origStart + (beat - downBeat);
+                const double start = std::max (0.0, e.mods.isAltDown()
+                    ? requestedStart : owner.snapBeat (requestedStart));
+                movePreviewTrackIndex = std::clamp (
+                    owner.rowAt (juce::roundToInt (e.position.y)), 0,
+                    static_cast<int> (project.tracks.size()) - 1);
+                movePreviewStart = start;
+                movePreviewIsCopy = movePreviewIsCopy || e.mods.isCtrlDown();
+                const auto* targetTrack = project.tracks[static_cast<std::size_t> (movePreviewTrackIndex)].get();
+                const auto* sourceTrack = project.track (curTrack);
+                movePreviewReplacesSource = movePreviewIsCopy && curTrack == targetTrack->id
+                    && start < origStart + origLen - 1.0e-9
+                    && start + origLen > origStart + 1.0e-9;
+                movePreviewAllowed = targetTrack != nullptr && sourceTrack != nullptr
+                    && targetTrack->type == sourceTrack->type;
+                const int trackId = targetTrack->id;
+                const bool copy = movePreviewIsCopy;
+                int newId = -1;
+                if (curAudioClipId >= 0)
+                    newId = copy ? project.copyAudioClip (curTrack, curAudioClipId, trackId, start)
+                                 : project.moveAudioClip (curTrack, curAudioClipId, trackId, start);
+                else
+                    newId = copy ? project.copyClip (curTrack, curClip, trackId, start)
+                                 : project.moveClip (curTrack, curClip, trackId, start);
+
+                if (newId >= 0)
+                {
+                    curTrack = trackId;
+                    if (curAudioClipId >= 0)
+                        curAudioClipId = newId;
+                    else
+                        curClip = newId;
+                    selectedClips = { { trackId, newId, curAudioClipId >= 0 } };
+                    selectionAnchor = selectedClips.front();
+                    hasRangeSelection = false;
+                    setProjectSelection (selectionAnchor);
+                    movePreviewStart = start;
+                    movePreviewIsCopy = copy;
+                }
+                else
+                {
+                    moveFailed = true;
+                }
             }
         }
 
@@ -1105,10 +1468,13 @@ public:
                           icons::Icon::Pointer, false, 900);
         else
             notifyInteraction (false, 700);
-        if (mode != Mode::RangeSelect)
+        if (mode != Mode::RangeSelect && ! editEndedAfterRollback)
             project.endEdit();
         mode = Mode::None;
         movePreviewActive = false;
+        multiDragSources.clear();
+        multiMovePreviewItems.clear();
+        multiDragAnchorTrackIndex = -1;
         updateCursor (e.position);
         curAudioClipId = -1;
         repaint();
@@ -1116,6 +1482,9 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (owner.automationMode)
+            return;
+
         const auto h = hit (e.position);
         if (h.audioClip != nullptr)
         {
@@ -1150,6 +1519,20 @@ public:
         const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
         const auto key = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
         auto* t = project.selectedTrack();
+        if (! ctrl && ! k.getModifiers().isAltDown() && ! k.getModifiers().isShiftDown()
+            && key == 'A')
+        {
+            owner.toggleAutomationModeFromKey();
+            return true;
+        }
+        if (owner.automationMode
+            && (k.isKeyCode (juce::KeyPress::deleteKey) || k.isKeyCode (juce::KeyPress::backspaceKey)))
+        {
+            const int trackId = project.selectedTrackId;
+            if (trackId >= 0)
+                project.removeAutomationEnvelope (trackId, owner.automationTarget);
+            return true;
+        }
 
         if (ctrl && k.getModifiers().isShiftDown() && key == 'M')
         {
@@ -1263,6 +1646,20 @@ public:
                 return true;
             }
             if (t != nullptr && t->find (project.selectedClipId) != nullptr) { project.deleteClip (t->id, project.selectedClipId); return true; }
+            if (project.selectedTrackIds.size() > 1)
+            {
+                auto tracksToDelete = project.selectedTrackIds;
+                std::stable_sort (tracksToDelete.begin(), tracksToDelete.end(),
+                    [this] (int a, int b) { return project.trackIndex (a) > project.trackIndex (b); });
+                for (const int trackId : tracksToDelete)
+                    if (project.tracks.size() > 1 && project.track (trackId) != nullptr)
+                        project.removeTrack (trackId);
+
+                if (std::any_of (tracksToDelete.begin(), tracksToDelete.end(),
+                                 [this] (int trackId) { return project.track (trackId) != nullptr; }))
+                    notifyAction ("O projeto precisa manter ao menos uma trilha", icons::Icon::Pointer, false, 1200);
+                return true;
+            }
             if (t != nullptr)
             {
                 project.removeTrack (t->id);
@@ -1359,6 +1756,226 @@ public:
     }
 
 private:
+    static const roll::AutomationEnvelope* findEnvelope (
+        const roll::Track& track, const roll::AutomationTarget& target)
+    {
+        const auto found = std::find_if (track.automation.begin(), track.automation.end(),
+            [&target] (const auto& envelope) { return envelope.target == target; });
+        return found == track.automation.end() ? nullptr : &*found;
+    }
+
+    void drawAutomationEnvelope (juce::Graphics& g, int row, const roll::Track& track,
+                                 const roll::AutomationEnvelope& envelope, bool selected)
+    {
+        if (envelope.points.empty())
+            return;
+
+        const auto [minimum, maximum] = roll::automationValueRange (envelope.target.type);
+        if (maximum <= minimum)
+            return;
+        const float top = static_cast<float> (owner.rowTop (row) + 7);
+        const float height = static_cast<float> (std::max (10, owner.rowHeight (row) - 14));
+        const auto valueY = [=] (double value)
+        {
+            const double proportion = (value - minimum) / (maximum - minimum);
+            return top + height * static_cast<float> (1.0 - std::clamp (proportion, 0.0, 1.0));
+        };
+
+        juce::Path path;
+        const auto& points = envelope.points;
+        path.startNewSubPath (static_cast<float> (points.front().beat * owner.pixelsPerBeat),
+                              valueY (points.front().value));
+        for (std::size_t i = 1; i < points.size(); ++i)
+        {
+            const float x = static_cast<float> (points[i].beat * owner.pixelsPerBeat);
+            if (envelope.target.type == roll::AutomationParameterType::Mute)
+                path.lineTo (x, valueY (points[i - 1].value));
+            path.lineTo (x, valueY (points[i].value));
+        }
+
+        g.setColour (selected ? theme::accent() : colourFor (track.id).brighter (0.65f).withAlpha (0.58f));
+        g.strokePath (path, juce::PathStrokeType (selected ? 2.8f : 1.5f));
+        g.setColour (selected ? juce::Colours::white : theme::text().withAlpha (0.72f));
+        for (const auto& point : points)
+        {
+            const float x = static_cast<float> (point.beat * owner.pixelsPerBeat);
+            const float y = valueY (point.value);
+            const float size = selected ? 8.0f : 5.0f;
+            g.fillEllipse (x - size * 0.5f, y - size * 0.5f, size, size);
+        }
+        juce::String label;
+        switch (envelope.target.type)
+        {
+            case roll::AutomationParameterType::Volume: label = "Volume"; break;
+            case roll::AutomationParameterType::Pan: label = "Pan"; break;
+            case roll::AutomationParameterType::Mute: label = "Mute"; break;
+            case roll::AutomationParameterType::PluginParameter:
+                label = juce::String::fromUTF8 (envelope.target.parameterName.c_str());
+                break;
+        }
+        if (label.isNotEmpty())
+        {
+            const float x = static_cast<float> (points.front().beat * owner.pixelsPerBeat) + 7.0f;
+            const float y = valueY (points.front().value) - 16.0f;
+            const auto labelBounds = juce::Rectangle<float> (x, y, 108.0f, 14.0f);
+            g.setColour (theme::panel().withAlpha (0.9f));
+            g.fillRoundedRectangle (labelBounds, 3.0f);
+            g.setColour (selected ? theme::accent() : theme::text().withAlpha (0.8f));
+            g.setFont (juce::FontOptions (9.5f));
+            g.drawText (label, labelBounds.reduced (3.0f, 0.0f),
+                        juce::Justification::centredLeft, true);
+        }
+    }
+
+    double automationBeatAt (const juce::MouseEvent& e) const
+    {
+        const double rawBeat = std::max (0.0, static_cast<double> (e.position.x) / owner.pixelsPerBeat);
+        return e.mods.isAltDown() || owner.gridBeats() <= 0.0 ? rawBeat : owner.snapBeat (rawBeat);
+    }
+
+    double automationValueAtY (int row, float y) const
+    {
+        const auto [minimum, maximum] = roll::automationValueRange (owner.automationTarget.type);
+        const float top = static_cast<float> (owner.rowTop (row) + 7);
+        const float height = static_cast<float> (std::max (10, owner.rowHeight (row) - 14));
+        const double proportion = std::clamp (1.0 - (static_cast<double> (y) - top) / height, 0.0, 1.0);
+        double value = minimum + proportion * (maximum - minimum);
+        if (owner.automationTarget.type == roll::AutomationParameterType::Mute)
+            value = value >= 0.5 ? 1.0 : 0.0;
+        return value;
+    }
+
+    void beginAutomationEdit (const juce::MouseEvent& e, int row)
+    {
+        automationEditRow = row;
+        automationEditTrackId = row == static_cast<int> (project.tracks.size())
+            ? 0 : project.tracks[static_cast<std::size_t> (row)]->id;
+        auto* track = automationEditTrackId == 0 ? project.masterTrack.get()
+                                                  : project.track (automationEditTrackId);
+        if (track == nullptr)
+        {
+            automationEditTrackId = -1;
+            return;
+        }
+
+        if (owner.automationTarget.type == roll::AutomationParameterType::PluginParameter)
+        {
+            const auto choices = owner.automationParametersProvider
+                ? owner.automationParametersProvider (automationEditTrackId)
+                : std::vector<AutomationParameterChoice>();
+            const auto match = std::find_if (choices.begin(), choices.end(),
+                [this] (const auto& choice) { return choice.target == owner.automationTarget; });
+            if (match == choices.end())
+            {
+                automationEditTrackId = -1;
+                notifyAction ("Parametro indisponivel nesta trilha",
+                              icons::Icon::Automation, false, 1000);
+                return;
+            }
+            owner.automationTarget.currentValue = match->target.currentValue;
+        }
+
+        project.selectTrack (automationEditTrackId);
+        if (const auto* existing = findEnvelope (*track, owner.automationTarget))
+            automationEditEnvelope = *existing;
+        else
+        {
+            automationEditEnvelope = {};
+            automationEditEnvelope.target = owner.automationTarget;
+            if (owner.automationTarget.type == roll::AutomationParameterType::Volume)
+                automationEditEnvelope.target.currentValue = track->volume;
+            else if (owner.automationTarget.type == roll::AutomationParameterType::Pan)
+                automationEditEnvelope.target.currentValue = track->pan;
+            else if (owner.automationTarget.type == roll::AutomationParameterType::Mute)
+                automationEditEnvelope.target.currentValue = track->mute ? 1.0 : 0.0;
+        }
+
+        const double beat = automationBeatAt (e);
+        const float x = static_cast<float> (beat * owner.pixelsPerBeat);
+        const int rowTop = owner.rowTop (row);
+        const float rowValueY = static_cast<float> (e.position.y);
+        automationPointIndex = -1;
+        double nearestDistance = 9.0;
+        for (std::size_t i = 0; i < automationEditEnvelope.points.size(); ++i)
+        {
+            const auto& point = automationEditEnvelope.points[i];
+            const auto [minimum, maximum] = roll::automationValueRange (owner.automationTarget.type);
+            const float pointY = static_cast<float> (rowTop + 7)
+                + static_cast<float> (std::max (10, owner.rowHeight (row) - 14))
+                    * static_cast<float> (1.0 - std::clamp ((point.value - minimum) / (maximum - minimum), 0.0, 1.0));
+            const double distance = std::hypot (static_cast<double> (x - point.beat * owner.pixelsPerBeat),
+                                                static_cast<double> (rowValueY - pointY));
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                automationPointIndex = static_cast<int> (i);
+            }
+        }
+
+        automationPointWasExisting = automationPointIndex >= 0;
+        automationDoubleClick = e.getNumberOfClicks() > 1;
+        automationWasDragged = false;
+        if (! automationPointWasExisting)
+        {
+            automationEditEnvelope.points.push_back ({ beat, automationValueAtY (row, e.position.y) });
+            normalizeAutomationPoints (static_cast<int> (automationEditEnvelope.points.size()) - 1);
+        }
+        mode = Mode::AutomationEdit;
+        repaint();
+    }
+
+    void normalizeAutomationPoints (int pointIndex)
+    {
+        auto& points = automationEditEnvelope.points;
+        if (pointIndex < 0 || pointIndex >= static_cast<int> (points.size()))
+            return;
+        const auto movedPoint = points[static_cast<std::size_t> (pointIndex)];
+        for (int i = static_cast<int> (points.size()) - 1; i >= 0; --i)
+            if (i != pointIndex
+                && std::abs (points[static_cast<std::size_t> (i)].beat - movedPoint.beat) < 1.0e-9)
+                points.erase (points.begin() + i);
+        std::sort (points.begin(), points.end(),
+            [] (const auto& a, const auto& b) { return a.beat < b.beat; });
+        const auto found = std::find_if (points.begin(), points.end(),
+            [&movedPoint] (const auto& point)
+            {
+                return point.beat == movedPoint.beat && point.value == movedPoint.value;
+            });
+        automationPointIndex = found == points.end() ? -1 : static_cast<int> (found - points.begin());
+    }
+
+    void updateAutomationPoint (const juce::MouseEvent& e)
+    {
+        if (automationPointIndex < 0
+            || automationPointIndex >= static_cast<int> (automationEditEnvelope.points.size()))
+            return;
+        auto& point = automationEditEnvelope.points[static_cast<std::size_t> (automationPointIndex)];
+        point.beat = automationBeatAt (e);
+        point.value = automationValueAtY (automationEditRow, e.position.y);
+        normalizeAutomationPoints (automationPointIndex);
+        repaint();
+    }
+
+    void finishAutomationEdit()
+    {
+        if (automationEditTrackId < 0)
+            return;
+        if (automationPointWasExisting && ! automationWasDragged && ! automationDoubleClick)
+        {
+            if (automationPointIndex >= 0
+                && automationPointIndex < static_cast<int> (automationEditEnvelope.points.size()))
+                automationEditEnvelope.points.erase (
+                    automationEditEnvelope.points.begin() + automationPointIndex);
+        }
+
+        if (automationEditEnvelope.points.empty())
+            project.removeAutomationEnvelope (automationEditTrackId, owner.automationTarget);
+        else if (! project.setAutomationEnvelope (automationEditTrackId, automationEditEnvelope))
+            notifyAction ("Nao foi possivel salvar a automacao", icons::Icon::Automation, false, 1000);
+        automationEditTrackId = -1;
+        automationPointIndex = -1;
+    }
+
     void notifyAction (const juce::String& message, icons::Icon icon, bool active, int holdMilliseconds)
     {
         if (owner.onInteractionChanged)
@@ -1379,21 +1996,16 @@ private:
             case Mode::FadeOut:       message = active ? (dragging ? "Ajustando fade de saida" : "Segurando fade de saida") : "Fade de saida ajustado"; icon = icons::Icon::FadeOut; break;
             case Mode::FadeInCurve:   message = active ? (dragging ? "Ajustando curva do fade" : "Segurando curva do fade") : "Curva do fade ajustada"; icon = icons::Icon::FadeIn; break;
             case Mode::FadeOutCurve:  message = active ? (dragging ? "Ajustando curva do fade" : "Segurando curva do fade") : "Curva do fade ajustada"; icon = icons::Icon::FadeOut; break;
+            case Mode::AutomationEdit: message = active ? "Editando automacao" : "Automacao editada"; icon = icons::Icon::Automation; break;
             case Mode::RangeSelect:   message = active ? "Selecionando regiao" : "Regiao selecionada"; icon = icons::Icon::SelectRegion; break;
             case Mode::EmptyClickPending: message = active ? "Posicionando cursor" : "Cursor posicionado"; break;
+            case Mode::ClipTimeSelectPending: message = "Focando regiao do clipe"; icon = icons::Icon::SelectRegion; break;
             case Mode::ShiftPending:  message = active ? "Segurando selecao de clipe" : "Clipe selecionado"; break;
             case Mode::CtrlPending:   message = active ? "Segurando selecao de clipe" : "Selecao atualizada"; break;
             case Mode::None:          return;
         }
         notifyAction (message, icon, active, holdMilliseconds);
     }
-
-    struct ClipSelection
-    {
-        int trackId = -1;
-        int clipId = -1;
-        bool audio = false;
-    };
 
     struct ClipboardClip
     {
@@ -1432,6 +2044,61 @@ private:
         start = clip->start;
         end = clip->end();
         return true;
+    }
+
+    void captureMultiDragSources (const ClipSelection& anchor)
+    {
+        multiDragSources.clear();
+        multiMovePreviewItems.clear();
+        if (selectedClips.size() <= 1 || ! isClipSelected (anchor.trackId, anchor.clipId, anchor.audio))
+            return;
+
+        multiDragAnchorTrackIndex = project.trackIndex (anchor.trackId);
+        for (const auto& selected : selectedClips)
+        {
+            MultiDragSource source;
+            source.selection = selected;
+            source.trackIndex = project.trackIndex (selected.trackId);
+            double end = 0.0;
+            if (source.trackIndex < 0 || ! getClipBounds (selected, source.start, end))
+            {
+                multiDragSources.clear();
+                multiDragAnchorTrackIndex = -1;
+                return;
+            }
+            source.length = end - source.start;
+
+            const auto* track = project.track (selected.trackId);
+            if (selected.audio)
+            {
+                const auto* clip = track != nullptr ? track->findAudioClip (selected.clipId) : nullptr;
+                if (clip == nullptr)
+                {
+                    multiDragSources.clear();
+                    multiDragAnchorTrackIndex = -1;
+                    return;
+                }
+                source.audioClip = std::make_unique<roll::AudioPlacement> (*clip);
+            }
+            else
+            {
+                const auto* clip = track != nullptr ? track->find (selected.clipId) : nullptr;
+                if (clip == nullptr)
+                {
+                    multiDragSources.clear();
+                    multiDragAnchorTrackIndex = -1;
+                    return;
+                }
+                source.midiClip = std::make_unique<roll::Placement> (*clip);
+            }
+            multiDragSources.push_back (std::move (source));
+        }
+
+        if (multiDragSources.size() != selectedClips.size())
+        {
+            multiDragSources.clear();
+            multiDragAnchorTrackIndex = -1;
+        }
     }
 
     bool getSelectedClipBounds (double& start, double& end) const
@@ -2095,6 +2762,11 @@ private:
             setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
             return;
         }
+        if (isClipTimeSelectionArea (h, position))
+        {
+            setMouseCursor (juce::MouseCursor::IBeamCursor);
+            return;
+        }
         if (h.clip == nullptr && h.audioClip == nullptr)
         {
             setMouseCursor (juce::MouseCursor::NormalCursor);
@@ -2150,11 +2822,62 @@ private:
         return inDistance <= outDistance ? Mode::FadeIn : Mode::FadeOut;
     }
 
+    bool isClipTimeSelectionArea (const Hit& h, juce::Point<float> position) const
+    {
+        if ((h.clip == nullptr && h.audioClip == nullptr) || h.trackIndex < 0)
+            return false;
+
+        const int rowHeight = owner.rowHeight (h.trackIndex);
+        if (rowHeight <= collapsedTrackHeight)
+            return false;
+
+        const float clipTop = static_cast<float> (owner.rowTop (h.trackIndex) + 4);
+        const float clipBottom = static_cast<float> (owner.rowTop (h.trackIndex) + rowHeight - 5);
+        const float right = static_cast<float> (
+            (h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
+        constexpr float titleHeight = 14.0f;
+        return position.y >= clipTop + titleHeight && position.y < clipBottom
+            && position.x <= right - 7.0f;
+    }
+
     void drawMovePreview (juce::Graphics& g, double ppb)
     {
         if (! movePreviewActive || mode != Mode::Move || movePreviewTrackIndex < 0
             || movePreviewTrackIndex >= static_cast<int> (project.tracks.size()))
             return;
+
+        if (movePreviewIsCopy && multiDragSources.size() > 1)
+        {
+            for (const auto& item : multiMovePreviewItems)
+            {
+                const int rowTop = owner.rowTop (item.trackIndex);
+                const int rowHeight = owner.rowHeight (item.trackIndex);
+                if (rowHeight <= 0 || item.length <= 0.0)
+                    continue;
+
+                const juce::Rectangle<float> preview (
+                    static_cast<float> (item.start * ppb), static_cast<float> (rowTop + 3),
+                    static_cast<float> (item.length * ppb),
+                    static_cast<float> (std::max (1, rowHeight - 6)));
+                const auto colour = movePreviewAllowed ? theme::accent() : juce::Colours::red;
+                g.setColour (colour.withAlpha (0.32f));
+                g.fillRoundedRectangle (preview, 4.0f);
+                g.setColour (colour);
+                g.drawRoundedRectangle (preview, 4.0f, 2.0f);
+                if (preview.getWidth() >= 42.0f)
+                {
+                    g.setColour (juce::Colours::white);
+                    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+                    g.drawText (movePreviewAllowed
+                                    ? (movePreviewIsCopy ? (item.replacesSource ? "SUBSTITUI" : "COPIA")
+                                                         : "MOVER")
+                                    : "TIPO INCOMPATIVEL",
+                                preview.toNearestInt().reduced (5, 0),
+                                juce::Justification::centredLeft, true);
+                }
+            }
+            return;
+        }
 
         const auto* track = project.track (curTrack);
         double length = origLen;
@@ -2265,8 +2988,11 @@ private:
 
     ProjectModel& project;
     ArrangementView& owner;
+    roll::AutomationEnvelope automationEditEnvelope;
+    int automationEditTrackId = -1, automationPointIndex = -1, automationEditRow = -1;
+    bool automationPointWasExisting = false, automationWasDragged = false, automationDoubleClick = false;
     Mode mode = Mode::None;
-    bool movePreviewActive = false, movePreviewIsCopy = false, movePreviewAllowed = true;
+    bool dragActive = false, movePreviewActive = false, movePreviewIsCopy = false, movePreviewAllowed = true;
     bool movePreviewReplacesSource = false;
     int movePreviewTrackIndex = -1;
     double movePreviewStart = 0.0;
@@ -2279,7 +3005,11 @@ private:
     bool hasRangeSelection = false;
     double rangeStartBeat = 0.0, rangeEndBeat = 0.0;
     int rangeStartTrack = 0, rangeEndTrack = 0;
+    int multiDragAnchorTrackIndex = -1;
+    int pendingRangeTrack = -1;
     std::vector<ClipSelection> selectedClips;
+    std::vector<MultiDragSource> multiDragSources;
+    std::vector<MovePreviewItem> multiMovePreviewItems;
     std::vector<ClipboardClip> clipboard;
     ClipSelection selectionAnchor, pendingSelection;
     juce::Point<float> selectionDownPosition;
@@ -2845,6 +3575,53 @@ private:
     }
 };
 
+class ArrangementView::TimeRuler final : public juce::Component
+{
+public:
+    explicit TimeRuler (ArrangementView& o) : owner (o) {}
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::panelLight().darker (0.12f));
+        g.setColour (theme::border());
+        g.drawHorizontalLine (0, 0.0f, static_cast<float> (getWidth()));
+
+        const double pixelsPerSecond = owner.pixelsPerBeat * owner.bpm / 60.0;
+        if (pixelsPerSecond <= 0.0)
+            return;
+
+        static constexpr double intervals[] { 1.0, 2.0, 5.0, 10.0, 15.0, 30.0,
+                                                60.0, 120.0, 300.0, 600.0,
+                                                1200.0, 1800.0, 3600.0 };
+        const auto interval = *std::find_if (std::begin (intervals), std::end (intervals),
+            [pixelsPerSecond] (double seconds) { return seconds * pixelsPerSecond >= 100.0; });
+        const auto clip = g.getClipBounds();
+        const int firstTick = std::max (0, static_cast<int> (std::floor (
+            clip.getX() / (interval * pixelsPerSecond))));
+        const int lastTick = static_cast<int> (std::ceil (
+            clip.getRight() / (interval * pixelsPerSecond)));
+
+        g.setFont (juce::FontOptions (11.5f));
+        for (int tick = firstTick; tick <= lastTick; ++tick)
+        {
+            const double seconds = tick * interval;
+            const int x = juce::roundToInt (seconds * pixelsPerSecond);
+            g.setColour (theme::border().brighter (0.25f));
+            g.drawVerticalLine (x, 5.0f, static_cast<float> (getHeight() - 1));
+            g.setColour (theme::textDim());
+            g.drawText (formatTimelineTime (seconds), x + 5, 3, 52, getHeight() - 6,
+                        juce::Justification::centredLeft, false);
+        }
+
+        const int playheadX = juce::roundToInt (owner.playhead * owner.pixelsPerBeat);
+        g.setColour (theme::playhead().withAlpha (0.8f));
+        g.drawVerticalLine (playheadX, 2.0f, static_cast<float> (getHeight() - 1));
+    }
+
+private:
+    ArrangementView& owner;
+};
+
 // ============================================================ Header (cabeçalho de trilha)
 
 class ArrangementView::Header : public juce::Component
@@ -2997,6 +3774,25 @@ public:
         repaint();
     }
 
+    void refreshLiveMixerValues (ArrangementView::LiveMixerValues values)
+    {
+        if (! volume.isMouseButtonDown())
+        {
+            volume.setValue (values.gain, juce::dontSendNotification);
+            updateVolumeText (values.gain);
+        }
+        if (! pan.isMouseButtonDown())
+        {
+            pan.setValue (values.pan, juce::dontSendNotification);
+            updatePanText (values.pan);
+        }
+        if (! mute.isMouseButtonDown())
+        {
+            mute.setToggleState (values.muted, juce::dontSendNotification);
+            mute.setButtonText (values.muted ? "OFF" : "ON");
+        }
+    }
+
     void updatePanText (double value)
     {
         const auto amount = juce::roundToInt (std::abs (value) * 100.0);
@@ -3037,6 +3833,23 @@ public:
         g.fillRect (getLocalBounds());
         g.setColour (colourFor (trackId));
         g.fillRect (0, 0, 6, getHeight());
+        if (track != nullptr && track->parentGroupId != 0)
+        {
+            const int index = project.trackIndex (trackId);
+            const bool hasPreviousSibling = index > 0
+                && project.tracks[static_cast<std::size_t> (index - 1)]->parentGroupId == track->parentGroupId;
+            const bool hasNextSibling = index + 1 < static_cast<int> (project.tracks.size())
+                && project.tracks[static_cast<std::size_t> (index + 1)]->parentGroupId == track->parentGroupId;
+            const float connectorX = 42.0f;
+            const float middleY = static_cast<float> (getHeight()) * 0.5f;
+            g.setColour (colourFor (track->parentGroupId).brighter (0.25f));
+            if (hasPreviousSibling)
+                g.drawLine (connectorX, 0.0f, connectorX, middleY, 2.0f);
+            if (hasNextSibling)
+                g.drawLine (connectorX, middleY, connectorX, static_cast<float> (getHeight()), 2.0f);
+            g.drawLine (connectorX, middleY, connectorX + 6.0f, middleY, 2.0f);
+            g.fillEllipse (connectorX + 4.0f, middleY - 2.0f, 4.0f, 4.0f);
+        }
         g.setColour (theme::border());
         g.drawHorizontalLine (getHeight() - 1, 0.0f, static_cast<float> (getWidth()));
 
@@ -3147,9 +3960,7 @@ public:
                 owner.grabFocus();
                 return;
             }
-            const bool toggleSelection = e.mods.isShiftDown()
-                || e.mods.isCtrlDown() || e.mods.isCommandDown();
-            project.selectTrack (trackId, toggleSelection);
+            owner.selectTrackFromHeader (trackId, e.mods);
             owner.grabFocus();
             return;
         }
@@ -3164,10 +3975,8 @@ public:
             return;
         }
 
-        const bool toggleSelection = ! e.mods.isPopupMenu()
-            && (e.mods.isShiftDown() || e.mods.isCtrlDown() || e.mods.isCommandDown());
         owner.lanes->clearSelection();
-        project.selectTrack (trackId, toggleSelection);
+        owner.selectTrackFromHeader (trackId, e.mods);
         owner.grabFocus();
     }
 
@@ -3390,6 +4199,16 @@ public:
             updateDbText (db);
         }
         repaint();
+    }
+
+    void refreshLiveMixerValues (ArrangementView::LiveMixerValues values)
+    {
+        if (! volume.isMouseButtonDown())
+        {
+            const float db = roll::gainToDecibels (values.gain);
+            volume.setValue (db, juce::dontSendNotification);
+            updateDbText (db);
+        }
     }
 
     void updatePeakDbText (float level)
@@ -3697,11 +4516,14 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
 {
     lanes = std::make_unique<Lanes> (project, *this);
     ruler = std::make_unique<Ruler> (project, *this);
+    timeRuler = std::make_unique<TimeRuler> (*this);
     overview = std::make_unique<Overview> (project, *this);
     addAndMakeVisible (viewport);
     addAndMakeVisible (headerHolder);
     addAndMakeVisible (rulerHolder);
     addAndMakeVisible (*overview);
+    addAndMakeVisible (timeRulerHolder);
+    addAndMakeVisible (timeReadout);
     addAndMakeVisible (addTrackButton);
     addAndMakeVisible (addAudioTrackButton);
     addAndMakeVisible (gridBox);
@@ -3709,6 +4531,8 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     addAndMakeVisible (locatorSetButton);
     addAndMakeVisible (locatorNextButton);
     addAndMakeVisible (locatorDeleteButton);
+    addAndMakeVisible (automationModeButton);
+    addAndMakeVisible (automationTargetButton);
     rulerHolder.addAndMakeVisible (*ruler);
 
     viewport.setViewedComponent (lanes.get(), false);
@@ -3723,10 +4547,22 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     locatorSetButton.setMouseClickGrabsKeyboardFocus (false);
     locatorNextButton.setMouseClickGrabsKeyboardFocus (false);
     locatorDeleteButton.setMouseClickGrabsKeyboardFocus (false);
+    automationModeButton.setClickingTogglesState (true);
+    automationModeButton.setMouseClickGrabsKeyboardFocus (false);
+    automationTargetButton.setMouseClickGrabsKeyboardFocus (false);
+    automationStatusLabel.setColour (juce::Label::backgroundColourId, theme::panelLight().darker (0.18f));
+    automationStatusLabel.setColour (juce::Label::textColourId, theme::text());
+    automationStatusLabel.setFont (juce::FontOptions (10.5f));
+    automationStatusLabel.setJustificationType (juce::Justification::centredLeft);
+    automationStatusLabel.setMinimumHorizontalScale (0.7f);
+    automationStatusLabel.setVisible (false);
+    addAndMakeVisible (automationStatusLabel);
     locatorPreviousButton.setTooltip ("Ir para a marcacao anterior");
     locatorSetButton.setTooltip ("Adicionar marcacao no playhead (Ctrl+Shift+M)");
     locatorNextButton.setTooltip ("Ir para a proxima marcacao");
     locatorDeleteButton.setTooltip ("Remover a marcacao selecionada");
+    automationModeButton.setTooltip ("Alternar modo de automacao (A)");
+    automationTargetButton.setTooltip ("Selecionar parametro para visualizar e editar");
     locatorPreviousButton.onClick = [this] { navigateLocator (false); };
     locatorSetButton.onClick = [this] { project.addLocator (snapBeat (playhead)); };
     locatorNextButton.onClick = [this] { navigateLocator (true); };
@@ -3740,6 +4576,17 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
         if (locatorId >= 0)
             project.removeLocator (locatorId);
     };
+    automationModeButton.onClick = [this]
+    {
+        setAutomationMode (automationModeButton.getToggleState());
+    };
+    automationTargetButton.onClick = [this] { showAutomationTargetMenu(); };
+    timeRulerHolder.addAndMakeVisible (*timeRuler);
+    timeReadout.setColour (juce::Label::backgroundColourId, theme::panelLight().darker (0.12f));
+    timeReadout.setColour (juce::Label::textColourId, theme::text());
+    timeReadout.setFont (juce::FontOptions (11.5f));
+    timeReadout.setJustificationType (juce::Justification::centred);
+    timeReadout.setTooltip ("Posição atual no projeto");
     addTrackButton.onClick = [this] { project.addTrack(); };
     addAudioTrackButton.onClick = [this] { project.addTrack (roll::TrackType::Audio); };
     static constexpr double gridValues[] { 1.0, 0.5, 0.25, 0.125, 0.0625,
@@ -3767,6 +4614,7 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     project.addChangeListener (this);
     refresh();
     updateLocatorControls();
+    updateAutomationTargetButton();
     startTimerHz (30);
 }
 
@@ -3872,6 +4720,25 @@ void ArrangementView::toggleTrackCollapsed (int trackId)
     }
 }
 
+void ArrangementView::selectTrackFromHeader (int trackId, juce::ModifierKeys modifiers)
+{
+    const bool additive = modifiers.isCtrlDown() || modifiers.isCommandDown();
+    if (modifiers.isShiftDown())
+    {
+        int anchor = project.track (trackSelectionAnchorId) != nullptr
+            ? trackSelectionAnchorId : project.selectedTrackId;
+        if (project.track (anchor) == nullptr)
+            anchor = trackId;
+        project.selectTrackRange (anchor, trackId, additive);
+        if (project.track (trackSelectionAnchorId) == nullptr)
+            trackSelectionAnchorId = anchor;
+        return;
+    }
+
+    project.selectTrack (trackId, additive);
+    trackSelectionAnchorId = trackId;
+}
+
 void ArrangementView::setAdaptiveGrid (bool enabled)
 {
     adaptiveGridEnabled = enabled;
@@ -3883,6 +4750,221 @@ void ArrangementView::setAdaptiveGrid (bool enabled)
 
     updateGridSelection();
     lanes->repaint();
+}
+
+void ArrangementView::toggleAutomationMode()
+{
+    setAutomationMode (! automationMode);
+}
+
+void ArrangementView::toggleAutomationModeFromKey()
+{
+    if (automationModeKeyDown)
+        return;
+    automationModeKeyDown = true;
+    toggleAutomationMode();
+}
+
+void ArrangementView::setAutomationMode (bool enabled)
+{
+    automationMode = enabled;
+    automationModeButton.setToggleState (enabled, juce::dontSendNotification);
+    automationModeButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
+    automationModeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    updateAutomationStatus();
+    lanes->repaint();
+}
+
+void ArrangementView::showAutomationTargetMenu()
+{
+    juce::PopupMenu menu;
+    menu.addSectionHeader (theme::ui ("Mixer"));
+    std::vector<AutomationParameterChoice> choices;
+    const int trackId = project.selectedTrackId;
+    const auto* track = trackId == 0 ? project.masterTrack.get() : project.track (trackId);
+    const auto addMixerChoice = [&] (int id, roll::AutomationParameterType type,
+                                     const juce::String& label, double value)
+    {
+        AutomationParameterChoice choice;
+        choice.target.type = type;
+        choice.target.currentValue = value;
+        choice.label = label;
+        const bool selected = automationTarget == choice.target;
+        menu.addItem (id, label, true, selected);
+        choices.push_back (std::move (choice));
+    };
+    addMixerChoice (1, roll::AutomationParameterType::Volume,
+                    theme::ui ("Volume"), track != nullptr ? track->volume : 1.0);
+    addMixerChoice (2, roll::AutomationParameterType::Pan,
+                    theme::ui ("Pan"), track != nullptr ? track->pan : 0.0);
+    addMixerChoice (3, roll::AutomationParameterType::Mute,
+                    theme::ui ("Mute"), track != nullptr && track->mute ? 1.0 : 0.0);
+
+    std::vector<std::pair<int, roll::AutomationTarget>> targets;
+    if (track != nullptr && automationParametersProvider)
+    {
+        menu.addSeparator();
+        menu.addSectionHeader (theme::ui ("Plugins e efeitos"));
+        int nextId = 100;
+        for (auto& choice : automationParametersProvider (trackId))
+        {
+            const auto existing = std::find_if (targets.begin(), targets.end(),
+                [&choice] (const auto& current) { return current.second == choice.target; });
+            if (existing != targets.end())
+                continue;
+            const int id = nextId++;
+            menu.addItem (id, choice.label,
+                          true, automationTarget == choice.target);
+            targets.emplace_back (id, choice.target);
+        }
+    }
+
+    juce::Component::SafePointer<ArrangementView> safeThis (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&automationTargetButton),
+        [safeThis, choices = std::move (choices), targets = std::move (targets)] (int result)
+        {
+            if (safeThis == nullptr)
+                return;
+            auto selected = std::find_if (choices.begin(), choices.end(),
+                [result] (const auto& choice)
+                {
+                    if (result == 1) return choice.target.type == roll::AutomationParameterType::Volume;
+                    if (result == 2) return choice.target.type == roll::AutomationParameterType::Pan;
+                    if (result == 3) return choice.target.type == roll::AutomationParameterType::Mute;
+                    return false;
+                });
+            if (selected != choices.end())
+                safeThis->automationTarget = selected->target;
+            else
+            {
+                const auto pluginTarget = std::find_if (targets.begin(), targets.end(),
+                    [result] (const auto& target) { return target.first == result; });
+                if (pluginTarget == targets.end())
+                    return;
+                safeThis->automationTarget = pluginTarget->second;
+            }
+            safeThis->updateAutomationTargetButton();
+            safeThis->lanes->repaint();
+        });
+}
+
+void ArrangementView::updateAutomationTargetButton()
+{
+    juce::String label;
+    switch (automationTarget.type)
+    {
+        case roll::AutomationParameterType::Volume: label = theme::ui ("Volume"); break;
+        case roll::AutomationParameterType::Pan: label = theme::ui ("Pan"); break;
+        case roll::AutomationParameterType::Mute: label = theme::ui ("Mute"); break;
+        case roll::AutomationParameterType::PluginParameter:
+            label = juce::String::fromUTF8 (automationTarget.parameterName.c_str());
+            if (label.isEmpty())
+                label = theme::ui ("Parametro");
+            break;
+    }
+    automationTargetButton.setButtonText (label);
+    automationTargetButton.setTooltip (theme::ui ("Parametro de automacao: ") + label);
+}
+
+void ArrangementView::updateAutomationStatus()
+{
+    automationStatusLabel.setVisible (automationMode && automationStatusLabel.getWidth() > 80);
+    if (! automationMode)
+        return;
+
+    const int trackId = project.selectedTrackId;
+    const auto* track = trackId == 0 ? project.masterTrack.get() : project.track (trackId);
+    const auto choices = track != nullptr && automationParametersProvider
+        ? automationParametersProvider (trackId)
+        : std::vector<AutomationParameterChoice>();
+    juce::StringArray parameterNames;
+    for (const auto& choice : choices)
+        parameterNames.add (choice.target.parameterName.empty()
+            ? choice.label : juce::String::fromUTF8 (choice.target.parameterName.c_str()));
+
+    juce::String status = "A | Mixer: Volume, Pan, Mute";
+    if (! parameterNames.isEmpty())
+    {
+        juce::StringArray previewNames;
+        const int previewCount = std::min (3, parameterNames.size());
+        for (int i = 0; i < previewCount; ++i)
+            previewNames.add (parameterNames[i]);
+        const int remaining = parameterNames.size() - previewCount;
+        status += " | " + juce::String (parameterNames.size()) + " plugin params: "
+                + previewNames.joinIntoString (", ");
+        if (remaining > 0)
+            status += " +" + juce::String (remaining);
+    }
+
+    juce::String targetName;
+    double value = automationTarget.currentValue;
+    if (automationTarget.type == roll::AutomationParameterType::PluginParameter)
+    {
+        targetName = juce::String::fromUTF8 (automationTarget.parameterName.c_str());
+        const auto choice = std::find_if (choices.begin(), choices.end(),
+            [this] (const auto& item) { return item.target == automationTarget; });
+        if (choice != choices.end())
+            value = choice->target.currentValue;
+    }
+    else if (track != nullptr)
+    {
+        switch (automationTarget.type)
+        {
+            case roll::AutomationParameterType::Volume:
+                targetName = "Volume";
+                value = track->volume;
+                break;
+            case roll::AutomationParameterType::Pan:
+                targetName = "Pan";
+                value = track->pan;
+                break;
+            case roll::AutomationParameterType::Mute:
+                targetName = "Mute";
+                value = track->mute ? 1.0 : 0.0;
+                break;
+            case roll::AutomationParameterType::PluginParameter:
+                break;
+        }
+    }
+
+    const roll::AutomationEnvelope* activeEnvelope = nullptr;
+    if (track != nullptr)
+        if (const auto envelope = std::find_if (track->automation.begin(), track->automation.end(),
+                [this] (const auto& item) { return item.target == automationTarget; });
+            envelope != track->automation.end())
+            activeEnvelope = &*envelope;
+    if (activeEnvelope != nullptr && automationTarget.type != roll::AutomationParameterType::PluginParameter
+        && playbackStateProvider && playbackStateProvider())
+    {
+        value = roll::automationValueAt (*activeEnvelope, playhead, value);
+    }
+
+    juce::String valueText;
+    switch (automationTarget.type)
+    {
+        case roll::AutomationParameterType::Volume:
+            valueText = juce::String (
+                roll::gainToDecibels (static_cast<float> (std::max (0.0, value)), -100.0f), 1)
+                + " dB";
+            break;
+        case roll::AutomationParameterType::Pan:
+            valueText = value < -0.01 ? juce::String ("L ") + juce::String (-value * 100.0, 0) + "%"
+                : value > 0.01 ? juce::String ("R ") + juce::String (value * 100.0, 0) + "%"
+                               : "Center";
+            break;
+        case roll::AutomationParameterType::Mute:
+            valueText = value >= 0.5 ? "On" : "Off";
+            break;
+        case roll::AutomationParameterType::PluginParameter:
+            valueText = juce::String (value * 100.0, 1) + "%";
+            break;
+    }
+    if (targetName.isEmpty())
+        targetName = "Parameter";
+    status += " | " + targetName + (activeEnvelope != nullptr ? " [Automated]: " : " [Available]: ")
+            + valueText;
+    automationStatusLabel.setText (status, juce::dontSendNotification);
+    automationStatusLabel.setTooltip (status);
 }
 
 void ArrangementView::updateAdaptiveGrid()
@@ -3936,7 +5018,23 @@ void ArrangementView::setPlayhead (double beats)
     lanes->setPlayhead (beats);
     ruler->repaint (oldX - 6, 0, 14, rulerHeight);
     ruler->repaint (static_cast<int> (beats * pixelsPerBeat) - 6, 0, 14, rulerHeight);
+    timeReadout.setText (formatTimelineTime (playhead * 60.0 / bpm),
+                         juce::dontSendNotification);
+    timeRuler->repaint (oldX - 2, 0, 5, timeRulerHeight);
+    timeRuler->repaint (static_cast<int> (beats * pixelsPerBeat) - 2, 0, 5, timeRulerHeight);
     overview->repaint();
+    updateAutomationStatus();
+}
+
+void ArrangementView::setBpm (double beatsPerMinute)
+{
+    if (! std::isfinite (beatsPerMinute) || beatsPerMinute <= 0.0)
+        return;
+
+    bpm = beatsPerMinute;
+    timeReadout.setText (formatTimelineTime (playhead * 60.0 / bpm),
+                         juce::dontSendNotification);
+    timeRuler->repaint();
 }
 
 void ArrangementView::setLoopEnabled (bool on)
@@ -3973,6 +5071,9 @@ void ArrangementView::updateSizes()
 {
     lanes->updateSize();
     ruler->setSize (std::max (1, lanes->getWidth()), rulerHeight);
+    timeRuler->setSize (std::max (1, lanes->getWidth()), timeRulerHeight);
+    timeRuler->repaint();
+    setBpm (bpm);
     syncPositions();
 }
 
@@ -3980,6 +5081,7 @@ void ArrangementView::syncPositions()
 {
     const auto vp = viewport.getViewPosition();
     ruler->setTopLeftPosition (-vp.x, 0);
+    timeRuler->setTopLeftPosition (-vp.x, 0);
     overview->repaint();
     headerHolder.setSize (headerWidth, viewport.getMaximumVisibleHeight());
     for (size_t i = 0; i < headers.size(); ++i)
@@ -4072,12 +5174,17 @@ void ArrangementView::changeListenerCallback (juce::ChangeBroadcaster*)
         if (masterHeader != nullptr) masterHeader->refreshText();
     }
     updateLocatorControls();
+    updateAutomationTargetButton();
+    updateAutomationStatus();
     lanes->repaint();
     ruler->repaint();
 }
 
 void ArrangementView::timerCallback()
 {
+    if (! juce::KeyPress::isKeyCurrentlyDown ('A'))
+        automationModeKeyDown = false;
+
     const auto vp = viewport.getViewPosition();
     static juce::Point<int> last;
     if (vp != last) { last = vp; syncPositions(); }
@@ -4087,6 +5194,14 @@ void ArrangementView::timerCallback()
         for (auto& h : headers) h->setPeak (meterProvider (h->id()));
         if (masterHeader != nullptr) masterHeader->setPeak (meterProvider (0));
     }
+    if (liveMixerProvider)
+    {
+        for (auto& h : headers)
+            h->refreshLiveMixerValues (liveMixerProvider (h->id()));
+        if (masterHeader != nullptr)
+            masterHeader->refreshLiveMixerValues (liveMixerProvider (0));
+    }
+    updateAutomationStatus();
 }
 
 void ArrangementView::paint (juce::Graphics& g)
@@ -4124,8 +5239,19 @@ void ArrangementView::resized()
     locatorSetButton.setBounds (right - 26, buttonY, 24, buttonHeight);
     right -= 28;
     locatorPreviousButton.setBounds (right - 26, buttonY, 24, buttonHeight);
+    right -= 28;
+    automationTargetButton.setBounds (right - 110, buttonY, 108, buttonHeight);
+    right -= 112;
+    automationModeButton.setBounds (right - 28, buttonY, 26, buttonHeight);
+    automationStatusLabel.setBounds (headerWidth + 4, buttonY,
+        std::max (0, automationModeButton.getX() - headerWidth - 8), buttonHeight);
+    updateAutomationStatus();
+    auto timeArea = area.removeFromBottom (timeRulerHeight);
     auto left = area.removeFromLeft (headerWidth);
+    timeArea.removeFromLeft (headerWidth);
     viewport.setBounds (area);
     headerHolder.setBounds (left.withHeight (viewport.getMaximumVisibleHeight()));
+    timeReadout.setBounds (left.getX(), timeArea.getY(), headerWidth, timeRulerHeight);
+    timeRulerHolder.setBounds (timeArea);
     updateSizes();
 }

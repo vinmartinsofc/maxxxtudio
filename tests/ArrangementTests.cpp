@@ -4,6 +4,35 @@
 
 using namespace roll;
 
+TEST_CASE("Automation envelopes interpolate validated breakpoint values")
+{
+    AutomationEnvelope envelope;
+    envelope.target.type = AutomationParameterType::Pan;
+    envelope.target.currentValue = 0.0;
+    envelope.points = { { 1.0, -1.0 }, { 3.0, 1.0 } };
+
+    REQUIRE(isValidAutomationEnvelope (envelope));
+    REQUIRE(automationValueAt (envelope, 0.0, 0.25) == -1.0);
+    REQUIRE(automationValueAt (envelope, 2.0, 0.25) == 0.0);
+    REQUIRE(automationValueAt (envelope, 4.0, 0.25) == 1.0);
+
+    envelope.points[1].beat = 1.0;
+    REQUIRE_FALSE(isValidAutomationEnvelope (envelope));
+    envelope.points[1] = { 3.0, 1.1 };
+    REQUIRE_FALSE(isValidAutomationEnvelope (envelope));
+
+    AutomationTarget firstEffect;
+    firstEffect.type = AutomationParameterType::PluginParameter;
+    firstEffect.pluginIdentifier = "vendor.effect";
+    firstEffect.parameterId = "cutoff";
+    firstEffect.deviceIndex = 0;
+    auto secondEffect = firstEffect;
+    secondEffect.deviceIndex = 1;
+    REQUIRE (firstEffect == secondEffect);
+    secondEffect.parameterId = "resonance";
+    REQUIRE_FALSE (firstEffect == secondEffect);
+}
+
 TEST_CASE("Adaptive arrangement grid keeps snap spacing usable while zooming")
 {
     REQUIRE(adaptiveGridBeat (24.0) == 0.5);
