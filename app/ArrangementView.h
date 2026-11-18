@@ -50,6 +50,7 @@ public:
     std::function<void (const juce::String&, icons::Icon, bool active, int holdMilliseconds)> onInteractionChanged;
 
     void setPlayhead (double beats);
+    void scrollToBeat (double beats);
     void setBpm (double beatsPerMinute);
     void setLoopEnabled (bool on);
     void setGridBeat (double beats);

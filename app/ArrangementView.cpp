@@ -5124,6 +5124,23 @@ void ArrangementView::setPlayhead (double beats)
     updateAutomationStatus();
 }
 
+void ArrangementView::scrollToBeat (double beats)
+{
+    const int beatX = static_cast<int> (std::lround (std::max (0.0, beats) * pixelsPerBeat));
+    const int viewX = viewport.getViewPositionX();
+    const int visibleWidth = viewport.getMaximumVisibleWidth();
+    constexpr int margin = 24;
+    int targetX = viewX;
+
+    if (beatX < viewX)
+        targetX = std::max (0, beatX - margin);
+    else if (beatX >= viewX + visibleWidth)
+        targetX = beatX - visibleWidth + margin;
+
+    if (targetX != viewX)
+        viewport.setViewPosition (targetX, viewport.getViewPositionY());
+}
+
 void ArrangementView::setBpm (double beatsPerMinute)
 {
     if (! std::isfinite (beatsPerMinute) || beatsPerMinute <= 0.0)

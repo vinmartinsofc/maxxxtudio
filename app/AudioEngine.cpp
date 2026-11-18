@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <tuple>
 
 namespace
@@ -20,7 +21,7 @@ juce::File audioDeviceSettingsFile()
 void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
                       std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback)
 {
-    auto reader = formats.createReaderFor (file);
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
     if (reader == nullptr)
     {
         juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("Formato de audio nao suportado.", {}); });

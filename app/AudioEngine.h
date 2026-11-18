@@ -276,6 +276,7 @@ public:
     SequencerGraph& graph()                    { return seqGraph; }
     juce::AudioPluginFormatManager& formats()  { return formatManager; }
     juce::AudioDeviceManager& audioDeviceManager() { return deviceManager; }
+    const juce::AudioFormatManager& audioFormats() const { return audioFormatManager; }
 
     // trilhas
     void addTrack (int trackId, roll::TrackType type = roll::TrackType::Midi);

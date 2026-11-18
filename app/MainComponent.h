@@ -70,6 +70,8 @@ private:
     bool selectedTrackSpan (double& start, double& end) const;
     void playSelectedTrack();
     void resumeFromPausedPosition();
+    void seekTransport (double beats);
+    double projectEndBeat() const;
     bool handleTransportKeyPress (const juce::KeyPress&);
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
@@ -121,7 +123,7 @@ private:
     TransportBar transport { engine.graph() };
     TaskStatusBar taskStatusBar { taskRegistry };
     BrowserPanel browser { scanner };
-    AudioFileBrowser audioBrowser;
+    AudioFileBrowser audioBrowser { engine.audioFormats() };
     ArrangementView arrangement { project };
     PianoRollEditor editor { model };
     AudioClipEditor audioClipEditor;

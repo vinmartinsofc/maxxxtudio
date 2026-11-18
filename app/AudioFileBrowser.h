@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include "Theme.h"
 #include <functional>
 #include <atomic>
@@ -8,10 +9,10 @@
 #include <set>
 #include <vector>
 
-class AudioFileBrowser : public juce::Component
+class AudioFileBrowser : public juce::Component, private juce::Timer
 {
 public:
-    AudioFileBrowser();
+    explicit AudioFileBrowser (const juce::AudioFormatManager&);
     ~AudioFileBrowser() override;
     std::function<void (const juce::File&)> onPreviewRequested;
     std::function<void()> onPreviewStopRequested;
@@ -31,6 +32,13 @@ private:
         int color = 0;
     };
 
+    struct NavigationState
+    {
+        juce::File directory;
+        juce::String query;
+        bool favorites = false;
+    };
+
     class FileTreeItem;
     class FileTreeView : public juce::TreeView
     {
@@ -45,9 +53,14 @@ private:
     void populate (FileTreeItem&);
     void selectFile (const juce::File&);
     void refreshTree();
-    void deleteFileToTrash (const juce::File&);
+    void recordNavigationState();
+    void navigateHistory (int direction);
+    void updateHistoryButtons();
+    void moveSelectedItemsToDirectory (const juce::File&);
+    void moveItemToTrash (const juce::File&);
+    void createFolderInDirectory (const juce::File&);
     void previewFile (const juce::File&);
-    void showFavoriteMenu (const juce::File&, juce::Point<int> screenPosition);
+    void showFileMenu (const juce::File&, juce::Point<int> screenPosition);
     void setFavorite (const juce::File&, int color);
     void removeFavorite (const juce::File&);
     void loadFavorites();
@@ -57,11 +70,13 @@ private:
     void restoreExpandedItems (juce::TreeViewItem&, const std::set<juce::String>&);
     void restoreExpandedChildren (juce::TreeViewItem&);
     void treeItemOpennessChanged (const juce::String&, bool);
-    static bool isAudioFile (const juce::File&);
+    bool isAudioFile (const juce::File&) const;
+    void timerCallback() override;
     void mouseDown (const juce::MouseEvent&) override;
 
     juce::Label title { {}, "Arquivos de audio" };
     juce::Label status { {}, "Selecione um arquivo de audio para ouvir" };
+    juce::TextButton backButton { "<" }, forwardButton { ">" };
     juce::TextEditor search;
     FileTreeView tree { *this };
     juce::TextButton previewButton { "Ouvir" }, stopButton { "Parar" };
@@ -71,12 +86,15 @@ private:
     juce::File selectedFile;
     juce::File searchDirectory;
     std::vector<juce::File> searchResults;
+    std::vector<NavigationState> navigationHistory;
+    int navigationHistoryIndex = -1;
     std::shared_ptr<std::atomic<std::uint64_t>> searchGeneration {
         std::make_shared<std::atomic<std::uint64_t>> (0)
     };
     juce::ApplicationProperties favoriteProperties;
     juce::PropertiesFile* favoriteSettings = nullptr;
     std::vector<Favorite> favorites;
+    juce::StringArray supportedAudioExtensions;
     std::set<juce::String> expandedFilesystemItems, expandedFavoriteItems;
     bool restoringTreeExpansion = false;
     bool showingFavorites = false;

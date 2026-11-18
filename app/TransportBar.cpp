@@ -43,12 +43,15 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 {
     addAndMakeVisible (playButton);
     addAndMakeVisible (stopButton);
-    addAndMakeVisible (rewindButton);
+    addAndMakeVisible (startButton);
+    addAndMakeVisible (endButton);
     addAndMakeVisible (projectButton);
     addAndMakeVisible (optionsButton);
     addAndMakeVisible (metronomeButton);
     addAndMakeVisible (metronomeVolumeSlider);
-    for (auto* b : std::initializer_list<juce::Component*> { &playButton, &stopButton, &rewindButton }) b->setMouseClickGrabsKeyboardFocus (false);
+    for (auto* b : std::initializer_list<juce::Component*> {
+             &playButton, &stopButton, &startButton, &endButton })
+        b->setMouseClickGrabsKeyboardFocus (false);
     metronomeButton.setMouseClickGrabsKeyboardFocus (false);
     projectButton.setMouseClickGrabsKeyboardFocus (false);
     optionsButton.setMouseClickGrabsKeyboardFocus (false);
@@ -80,7 +83,10 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     favoritesButton.setMouseClickGrabsKeyboardFocus (false);
     pianoRollButton.setMouseClickGrabsKeyboardFocus (false);
     computerKeyboardButton.setMouseClickGrabsKeyboardFocus (false);
-    rewindButton.onClick = [this] { rewind(); };
+    startButton.setTooltip ("Ir para o inicio do projeto");
+    startButton.onClick = [this] { if (onGoToStart) onGoToStart(); };
+    endButton.setTooltip ("Ir para o final do projeto");
+    endButton.onClick = [this] { if (onGoToEnd) onGoToEnd(); };
     addAndMakeVisible (loopButton);
     addAndMakeVisible (browserButton);
     addAndMakeVisible (fileBrowserButton);
@@ -200,8 +206,6 @@ void TransportBar::setLoopEnabled (bool on)
     if (onLoopToggled)
         onLoopToggled (on);
 }
-
-void TransportBar::rewind() { graph.rewind(); }
 
 void TransportBar::stop()
 {
@@ -325,11 +329,13 @@ void TransportBar::resized()
     bpmCaption.setBounds (area.removeFromLeft (34));
     bpmLabel.setBounds (area.removeFromLeft (76));
     area.removeFromLeft (16);
-    rewindButton.setBounds (area.removeFromLeft (40));
+    startButton.setBounds (area.removeFromLeft (40));
     area.removeFromLeft (6);
     playButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (6);
     stopButton.setBounds (area.removeFromLeft (44));
+    area.removeFromLeft (4);
+    endButton.setBounds (area.removeFromLeft (40));
     area.removeFromLeft (12);
     loopButton.setBounds (area.removeFromLeft (56));
     area.removeFromLeft (6);

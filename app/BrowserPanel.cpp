@@ -393,22 +393,29 @@ void BrowserPanel::setProjectFreedomTab (bool showTools)
     resized();
 }
 
-juce::File BrowserPanel::treeStateFile() const
+juce::File BrowserPanel::treeStateFile (Filter stateFilter) const
 {
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                          .getChildFile ("ProjectFreedom");
     directory.createDirectory();
-    return directory.getChildFile ("plugin-tree-state.xml");
+    juce::String filename = "plugin-tree-state";
+    switch (stateFilter)
+    {
+        case Filter::All:         break;
+        case Filter::Instruments: filename += "-instruments"; break;
+        case Filter::Effects:     filename += "-effects"; break;
+        case Filter::Favorites:   filename += "-favorites"; break;
+    }
+    return directory.getChildFile (filename + ".xml");
 }
 
 void BrowserPanel::saveTreeState()
 {
-    if (searchActive || rebuildingTree || renderedFilter == Filter::Favorites
-        || tree == nullptr || tree->getRootItem() == nullptr)
+    if (searchActive || rebuildingTree || tree == nullptr || tree->getRootItem() == nullptr)
         return;
 
     if (auto state = tree->getOpennessState (true))
-        state->writeTo (treeStateFile());
+        state->writeTo (treeStateFile (renderedFilter));
 }
 
 void BrowserPanel::refresh()
@@ -602,7 +609,7 @@ void BrowserPanel::refresh()
 
     tree->setRootItem (root.release());
     tree->setRootItemVisible (true);
-    if (showingFavorites || searching)
+    if (searching)
     {
         rootPointer->setOpen (true);
     }
@@ -611,7 +618,7 @@ void BrowserPanel::refresh()
         tree->restoreOpennessState (*opennessBeforeSearch, false);
         opennessBeforeSearch.reset();
     }
-    else if (auto savedState = juce::XmlDocument::parse (treeStateFile()))
+    else if (auto savedState = juce::XmlDocument::parse (treeStateFile (filter)))
     {
         tree->restoreOpennessState (*savedState, false);
     }

@@ -893,8 +893,11 @@ MainComponent::MainComponent()
     {
         for (const auto& track : project.tracks)
             for (const auto& clip : track->audioClips)
-                if (juce::File (juce::String (clip->filePath)) == file)
+            {
+                const juce::File audioFile (juce::String (clip->filePath));
+                if (audioFile == file || (file.isDirectory() && audioFile.isAChildOf (file)))
                     return false;
+            }
         return true;
     };
     arrangement.onGridChanged = [this] { refreshAudioClipEditor(); };
@@ -944,6 +947,8 @@ MainComponent::MainComponent()
         arrangement.setPlayhead (beats);
         editor.setPlayhead (beats - model.clipStartBeats);
     };
+    transport.onGoToStart = [this] { seekTransport (0.0); };
+    transport.onGoToEnd = [this] { seekTransport (projectEndBeat()); };
     transport.onBeforePlay = [this]
     {
         stopGroovePreview();
@@ -1912,6 +1917,39 @@ void MainComponent::resumeFromPausedPosition()
     transport.resumeFromPosition (pausedPosition);
 }
 
+void MainComponent::seekTransport (double beats)
+{
+    const double position = std::isfinite (beats) ? std::max (0.0, beats) : 0.0;
+    pendingArrangementSeek = false;
+    suppressSongStartOnce = false;
+    transportPaused = false;
+    transportPosition = position;
+    pausedPosition = position;
+    engine.graph().seek (position);
+    arrangement.setPlayhead (position);
+    arrangement.scrollToBeat (position);
+    editor.setPlayhead (position - model.clipStartBeats);
+}
+
+double MainComponent::projectEndBeat() const
+{
+    double endBeat = 0.0;
+    for (const auto& track : project.tracks)
+    {
+        if (track->type == roll::TrackType::Audio)
+        {
+            for (const auto& clip : track->audioClips)
+                endBeat = std::max (endBeat, clip->end());
+        }
+        else
+        {
+            for (const auto& clip : track->clips)
+                endBeat = std::max (endBeat, clip->end());
+        }
+    }
+    return endBeat;
+}
+
 bool MainComponent::handleTransportKeyPress (const juce::KeyPress& key)
 {
     if (audioRenderInProgress)
@@ -2077,7 +2115,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     }
     if (handleTransportKeyPress (k))
         return true;
-    if (k == juce::KeyPress::homeKey)  { transport.rewind(); return true; }
+    if (k == juce::KeyPress::homeKey)  { seekTransport (0.0); return true; }
     if (k == juce::KeyPress (juce::KeyPress::F12Key) || k == juce::KeyPress (juce::KeyPress::tabKey, juce::ModifierKeys::shiftModifier, 0))
     {
         showDetail (! showingDevices);

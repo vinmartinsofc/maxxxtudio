@@ -31,6 +31,7 @@ public:
 private:
     class TreeItem;
     class PluginTree;
+    enum class Filter { All, Instruments, Effects, Favorites };
     class NativeToolCard final : public juce::TextButton
     {
     public:
@@ -66,7 +67,7 @@ private:
     void loadPluginFavorites();
     void savePluginFavorites();
     void saveTreeState();
-    juce::File treeStateFile() const;
+    juce::File treeStateFile (Filter stateFilter) const;
 
     PluginScanner& scanner;
     juce::Label title { {}, "Plugins" };
@@ -78,7 +79,7 @@ private:
     juce::Label projectFreedomDescription { {}, "Ferramentas do Project Freedom" };
     juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" },
                       effectsButton { "Efeitos" }, favoritesButton { "Favoritos" };
-    enum class Filter { All, Instruments, Effects, Favorites } filter = Filter::All;
+    Filter filter = Filter::All;
     void setFilter (Filter f);
     juce::Label status;
     std::unique_ptr<juce::XmlElement> opennessBeforeSearch;
