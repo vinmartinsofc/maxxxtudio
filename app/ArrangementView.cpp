@@ -1548,7 +1548,9 @@ public:
         const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
         const auto key = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (k.getKeyCode()));
         auto* t = project.selectedTrack();
-        if (! ctrl && ! k.getModifiers().isAltDown() && ! k.getModifiers().isShiftDown()
+        if ((! owner.computerMidiKeyboardEnabledProvider
+             || ! owner.computerMidiKeyboardEnabledProvider())
+            && ! ctrl && ! k.getModifiers().isAltDown() && ! k.getModifiers().isShiftDown()
             && key == 'A')
         {
             owner.toggleAutomationModeFromKey();

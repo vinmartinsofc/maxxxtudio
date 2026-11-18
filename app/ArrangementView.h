@@ -30,6 +30,7 @@ public:
     std::function<void (double beats)>  onSeek;
     std::function<float (int trackId)>  meterProvider;
     std::function<bool()> playbackStateProvider;
+    std::function<bool()> computerMidiKeyboardEnabledProvider;
     std::function<void()> onMasterPeakReset;
     std::function<juce::String (int)>   deviceSummary;
     std::function<bool (const juce::String& pluginIdentifier, int trackId)> canAcceptPluginDrop;

@@ -198,7 +198,7 @@ private:
     juce::String lastComputerMidiNote;
     bool computerMidiModeKeyDown = false, computerMidiKeyboardEnabled = false;
     int computerMidiOctaveOffset = 0, computerMidiVelocity = 100;
-    int browserWidth = 300;
+    int browserWidth = 390;
     juce::Rectangle<int> browserSplitterRect;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)

@@ -780,6 +780,10 @@ MainComponent::MainComponent()
         };
     };
     arrangement.playbackStateProvider = [this] { return engine.graph().isPlaying(); };
+    arrangement.computerMidiKeyboardEnabledProvider = [this]
+    {
+        return computerMidiKeyboardEnabled;
+    };
     arrangement.onMasterPeakReset = [this] { engine.resetPeak (AudioEngine::masterTrackId); };
     arrangement.deviceSummary = [this] (int id) { return deviceSummary (id); };
     arrangement.automationParametersProvider = [this] (int trackId)
@@ -1262,7 +1266,7 @@ void MainComponent::resized()
     auto right = area.reduced (8);
     if (browser.isVisible() || audioBrowser.isVisible())
     {
-        const int maxBrowserWidth = std::max (200, std::min (460, right.getWidth() - 760));
+        const int maxBrowserWidth = std::max (390, std::min (460, right.getWidth() - 760));
         browserWidth = std::clamp (browserWidth, 200, maxBrowserWidth);
         const auto bounds = right.removeFromLeft (browserWidth);
         browser.setBounds (browser.isVisible() ? bounds : juce::Rectangle<int>());
@@ -1372,7 +1376,7 @@ void MainComponent::mouseDrag (const juce::MouseEvent& e)
 {
     if (draggingBrowserSplitter)
     {
-        const int maxBrowserWidth = std::max (200, std::min (460, getWidth() - 776));
+        const int maxBrowserWidth = std::max (390, std::min (460, getWidth() - 776));
         browserWidth = std::clamp (e.x - 8, 200, maxBrowserWidth);
         resized();
         repaint();
