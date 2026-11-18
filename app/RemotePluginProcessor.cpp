@@ -14,6 +14,8 @@
 
 namespace
 {
+constexpr std::uint32_t stalledProcessTimeoutMs = 1000;
+
 juce::CriticalSection workerProcessIdsLock;
 std::set<DWORD> workerProcessIds;
 
@@ -26,6 +28,46 @@ juce::String quoteArgument (const juce::String& argument)
 {
     return "\"" + argument.replace ("\"", "\\\"") + "\"";
 }
+
+#if defined(_WIN32)
+struct PluginEditorWindowQuery
+{
+    const std::set<DWORD>& processIds;
+    std::vector<juce::Rectangle<int>> bounds;
+    int deltaX = 0;
+};
+
+BOOL CALLBACK enumeratePluginEditorWindows (HWND window, LPARAM parameter)
+{
+    auto& query = *reinterpret_cast<PluginEditorWindowQuery*> (parameter);
+    DWORD processId = 0;
+    GetWindowThreadProcessId (window, &processId);
+    if (! query.processIds.contains (processId))
+        return TRUE;
+
+    RECT bounds {};
+    if (! GetWindowRect (window, &bounds))
+        return TRUE;
+
+    if (query.deltaX != 0)
+    {
+        SetWindowPos (window, nullptr, bounds.left + query.deltaX, bounds.top, 0, 0,
+                      SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+    else if (IsWindowVisible (window) && ! IsIconic (window))
+    {
+        query.bounds.emplace_back (bounds.left, bounds.top,
+                                   bounds.right - bounds.left, bounds.bottom - bounds.top);
+    }
+    return TRUE;
+}
+
+std::set<DWORD> registeredWorkerProcessIds()
+{
+    const juce::ScopedLock lock (workerProcessIdsLock);
+    return workerProcessIds;
+}
+#endif
 }
 
 bool RemotePluginProcessor::isPluginEditorForeground()
@@ -41,6 +83,31 @@ bool RemotePluginProcessor::isPluginEditorForeground()
 
     const juce::ScopedLock lock (workerProcessIdsLock);
     return workerProcessIds.contains (processId);
+}
+
+std::vector<juce::Rectangle<int>> RemotePluginProcessor::pluginEditorWindowBounds()
+{
+#if defined(_WIN32)
+    auto processIds = registeredWorkerProcessIds();
+    PluginEditorWindowQuery query { processIds, {}, 0 };
+    EnumWindows (enumeratePluginEditorWindows, reinterpret_cast<LPARAM> (&query));
+    return query.bounds;
+#else
+    return {};
+#endif
+}
+
+void RemotePluginProcessor::movePluginEditorWindows (int deltaX)
+{
+#if defined(_WIN32)
+    if (deltaX == 0)
+        return;
+    auto processIds = registeredWorkerProcessIds();
+    PluginEditorWindowQuery query { processIds, {}, deltaX };
+    EnumWindows (enumeratePluginEditorWindows, reinterpret_cast<LPARAM> (&query));
+#else
+    juce::ignoreUnused (deltaX);
+#endif
 }
 
 class RemoteParameter final : public juce::AudioProcessorParameterWithID
@@ -115,9 +182,9 @@ RemotePluginProcessor::RemotePluginProcessor (const juce::PluginDescription& des
 {
 }
 
-bool RemotePluginProcessor::showEditor()
+bool RemotePluginProcessor::showEditor (int x, int y)
 {
-    return hasEditorFlag && sendCommand (pluginworker::Command::showEditor, 1000);
+    return hasEditorFlag && sendCommand (pluginworker::Command::showEditor, 1000, x, y);
 }
 
 std::unique_ptr<RemotePluginProcessor> RemotePluginProcessor::create (
@@ -308,7 +375,8 @@ void RemotePluginProcessor::releaseResources()
 #endif
 }
 
-bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int timeoutMs)
+bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int timeoutMs,
+                                         int editorX, int editorY)
 {
 #if defined(_WIN32)
     if (shared == nullptr || requestEvent == nullptr || responseEvent == nullptr
@@ -322,7 +390,25 @@ bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int time
         return false;
     }
 
+    if (processRequestPending)
+    {
+        if (WaitForSingleObject (responseEvent, static_cast<DWORD> (timeoutMs)) != WAIT_OBJECT_0
+            || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
+        {
+            failWorker();
+            return false;
+        }
+        processRequestPending = false;
+    }
+
     ResetEvent (responseEvent);
+    if (command == pluginworker::Command::showEditor)
+    {
+        InterlockedExchange (&shared->editorX, editorX);
+        InterlockedExchange (&shared->editorY, editorY);
+        InterlockedExchange (&shared->editorPositionValid,
+                             editorX != -1 && editorY != -1 ? 1 : 0);
+    }
     InterlockedExchange (&shared->command, static_cast<LONG> (command));
     SetEvent (requestEvent);
     HANDLE handles[] { responseEvent, workerProcess };
@@ -335,7 +421,7 @@ bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int time
     }
     return true;
 #else
-    juce::ignoreUnused (command, timeoutMs);
+    juce::ignoreUnused (command, timeoutMs, editorX, editorY);
     return false;
 #endif
 }
@@ -403,6 +489,29 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         return;
     }
 
+    if (processRequestPending)
+    {
+        const auto pendingResult = WaitForSingleObject (responseEvent, 0);
+        if (pendingResult == WAIT_TIMEOUT)
+        {
+            if (juce::Time::getMillisecondCounter() - processRequestStartTime
+                >= stalledProcessTimeoutMs)
+                failWorker();
+            if (instrument)
+                buffer.clear();
+            return;
+        }
+        if (pendingResult != WAIT_OBJECT_0
+            || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
+        {
+            failWorker();
+            if (instrument)
+                buffer.clear();
+            return;
+        }
+        processRequestPending = false;
+    }
+
     const int samples = std::min (buffer.getNumSamples(), pluginworker::maxSamples);
     shared->audioSamples = samples;
     if (shared->numInputs == 1)
@@ -444,7 +553,17 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     InterlockedExchange (&shared->command, static_cast<LONG> (pluginworker::Command::process));
     SetEvent (requestEvent);
     HANDLE handles[] { responseEvent, workerProcess };
-    if (WaitForMultipleObjects (2, handles, FALSE, static_cast<DWORD> (timeoutMs)) != WAIT_OBJECT_0
+    const auto processResult = WaitForMultipleObjects (
+        2, handles, FALSE, static_cast<DWORD> (timeoutMs));
+    if (processResult == WAIT_TIMEOUT)
+    {
+        processRequestPending = true;
+        processRequestStartTime = juce::Time::getMillisecondCounter();
+        if (instrument)
+            buffer.clear();
+        return;
+    }
+    if (processResult != WAIT_OBJECT_0
         || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
     {
         failWorker();

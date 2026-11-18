@@ -117,6 +117,10 @@ Rect WindowPlacement::placePluginWindow (const Rect& pluginBounds,
             if (insideDisplay && ! overlapsWindow)
                 return candidate;
         }
+
+        const int rightmost = std::max_element (occupiedWindows.begin(), occupiedWindows.end(),
+            [] (const Rect& a, const Rect& b) { return a.right() < b.right(); })->right();
+        return { rightmost + gap, displayUserArea.y + baseMargin, width, height };
     }
 
     const int slot = ((cascadeIndex % cascadeSlots) + cascadeSlots) % cascadeSlots;

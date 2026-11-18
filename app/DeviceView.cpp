@@ -296,16 +296,35 @@ private:
 DeviceView::DeviceView (TaskRegistry& taskRegistry) : registry (taskRegistry)
 {
     setWantsKeyboardFocus (true);
+    horizontalScrollBar.setAutoHide (false);
+    horizontalScrollBar.setSingleStepSize (96.0);
+    horizontalScrollBar.setColour (juce::ScrollBar::backgroundColourId, theme::panel());
+    horizontalScrollBar.setColour (juce::ScrollBar::trackColourId, theme::border());
+    horizontalScrollBar.setColour (juce::ScrollBar::thumbColourId, theme::accent());
+    horizontalScrollBar.setWantsKeyboardFocus (true);
+    horizontalScrollBar.addListener (this);
+    horizontalScrollBar.addKeyListener (this);
+    horizontalScrollBar.setMouseClickGrabsKeyboardFocus (true);
     registry.addListener (*this);
 }
 
 DeviceView::~DeviceView()
 {
+    horizontalScrollBar.removeListener (this);
+    horizontalScrollBar.removeKeyListener (this);
     registry.removeListener (*this);
 }
 
 bool DeviceView::keyPressed (const juce::KeyPress& key)
 {
+    if (key.isKeyCode (juce::KeyPress::leftKey)
+        || key.isKeyCode (juce::KeyPress::rightKey))
+    {
+        horizontalScrollBar.moveScrollbarInSteps (
+            key.isKeyCode (juce::KeyPress::leftKey) ? -1 : 1, juce::sendNotification);
+        return true;
+    }
+
     const bool ctrl = key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (key.getKeyCode()));
     if (! ctrl || keyCode != 'G')
@@ -322,6 +341,11 @@ bool DeviceView::keyPressed (const juce::KeyPress& key)
         onGroupRequested (trackId, selected);
     }
     return true;
+}
+
+bool DeviceView::keyPressed (const juce::KeyPress& key, juce::Component*)
+{
+    return keyPressed (key);
 }
 
 bool DeviceView::isInterestedInDragSource (const SourceDetails& details)
@@ -422,6 +446,7 @@ void DeviceView::setDevices (int id, const juce::String& name, const std::vector
     {
         selectedDeviceIds.clear();
         collapsedGroupIds.clear();
+        horizontalScrollOffset = 0;
     }
     trackId = id;
     trackName = name;
@@ -456,7 +481,18 @@ void DeviceView::setDevices (int id, const juce::String& name, const std::vector
         boxes.push_back (std::make_unique<Box> (devices[i], *this, canMoveLeft, canMoveRight));
         addAndMakeVisible (*boxes.back());
     }
+    addAndMakeVisible (horizontalScrollBar);
     refreshLoadingIndicators();
+    repaint();
+}
+
+void DeviceView::scrollBarMoved (juce::ScrollBar*, double newRangeStart)
+{
+    const auto newOffset = static_cast<int> (newRangeStart);
+    if (horizontalScrollOffset == newOffset)
+        return;
+    horizontalScrollOffset = newOffset;
+    resized();
     repaint();
 }
 
@@ -640,6 +676,37 @@ void DeviceView::paintOverChildren (juce::Graphics& g)
 
 void DeviceView::resized()
 {
+    int totalWidth = 8;
+    for (std::size_t i = 0; i < boxes.size();)
+    {
+        const int groupId = boxes[i]->groupId();
+        if (groupId == 0)
+        {
+            totalWidth += 196;
+            ++i;
+            continue;
+        }
+
+        std::size_t last = i;
+        while (last + 1 < boxes.size() && boxes[last + 1]->groupId() == groupId)
+            ++last;
+        totalWidth += collapsedGroupIds.contains (groupId)
+            ? 196 : static_cast<int> (last - i + 1) * 196;
+        i = last + 1;
+    }
+    totalWidth += 8;
+
+    const int maximumOffset = std::max (0, totalWidth - getWidth());
+    horizontalScrollOffset = std::clamp (horizontalScrollOffset, 0, maximumOffset);
+    const bool needsScrollbar = maximumOffset > 0;
+    horizontalScrollBar.setVisible (needsScrollbar);
+    horizontalScrollBar.setRangeLimits (0.0, static_cast<double> (std::max (1, totalWidth)),
+                                        juce::dontSendNotification);
+    horizontalScrollBar.setCurrentRange (static_cast<double> (horizontalScrollOffset),
+                                         static_cast<double> (std::max (1, getWidth())),
+                                         juce::dontSendNotification);
+
+    const int cardBottom = needsScrollbar ? getHeight() - 28 : getHeight() - 8;
     int x = 8;
     for (std::size_t i = 0; i < boxes.size();)
     {
@@ -648,7 +715,8 @@ void DeviceView::resized()
         {
             boxes[i]->setRackState (false, false, 0);
             boxes[i]->setVisible (true);
-            boxes[i]->setBounds (x, 8, 190, std::max (1, getHeight() - 16));
+            boxes[i]->setBounds (x - horizontalScrollOffset, 8, 190,
+                                 std::max (1, cardBottom - 8));
             x += 196;
             ++i;
             continue;
@@ -664,7 +732,8 @@ void DeviceView::resized()
         {
             boxes[i]->setRackState (true, true, count);
             boxes[i]->setVisible (true);
-            boxes[i]->setBounds (x, 8, 190, std::max (1, getHeight() - 16));
+            boxes[i]->setBounds (x - horizontalScrollOffset, 8, 190,
+                                 std::max (1, cardBottom - 8));
             for (std::size_t j = i + 1; j <= last; ++j)
             {
                 boxes[j]->setVisible (false);
@@ -678,11 +747,19 @@ void DeviceView::resized()
             {
                 boxes[j]->setRackState (j == i, false, count);
                 boxes[j]->setVisible (true);
-                boxes[j]->setBounds (x, 20, 190, std::max (1, getHeight() - 28));
+                boxes[j]->setBounds (x - horizontalScrollOffset, 20, 190,
+                                     std::max (1, cardBottom - 20));
                 x += 196;
             }
         }
         i = last + 1;
+    }
+
+    if (needsScrollbar)
+    {
+        const int scrollbarWidth = std::min (280, std::max (1, getWidth() - 16));
+        horizontalScrollBar.setBounds (getWidth() - scrollbarWidth - 8,
+                                       getHeight() - 20, scrollbarWidth, 14);
     }
 
     positionLoadingIndicators();
@@ -690,6 +767,7 @@ void DeviceView::resized()
 
 void DeviceView::selectDevice (const DeviceInfo& device, juce::ModifierKeys modifiers)
 {
+    grabKeyboardFocus();
     std::vector<int> targets;
     if (device.groupId > 0)
     {

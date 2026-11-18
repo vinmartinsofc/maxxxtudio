@@ -24,7 +24,7 @@ inline constexpr int pluginNameLength = 128;
 inline constexpr int errorLength = 512;
 inline constexpr int descriptionLength = 16384;
 inline constexpr int statePathLength = 1024;
-inline constexpr LONG protocolVersion = 2;
+inline constexpr LONG protocolVersion = 3;
 
 enum class Command : LONG
 {
@@ -62,6 +62,9 @@ struct SharedData
     LONG audioSamples = 0;
     LONG stateBytes = 0;
     LONG result = 0;
+    LONG editorX = -1;
+    LONG editorY = -1;
+    LONG editorPositionValid = 0;
     double sampleRate = 44100.0;
     int blockSize = 512;
     char pluginName[pluginNameLength] {};

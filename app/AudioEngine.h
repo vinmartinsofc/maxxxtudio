@@ -337,9 +337,11 @@ public:
     std::vector<DeviceInfo> devices (int trackId) const;
     std::vector<PluginState> getPluginStates();
     bool restorePluginState (int trackId, int deviceId, const juce::MemoryBlock&);
-    IsolatedEditorResult showIsolatedDeviceEditor (int trackId, int deviceId);
+    IsolatedEditorResult showIsolatedDeviceEditor (int trackId, int deviceId,
+                                                    int editorX = -1, int editorY = -1);
     IsolatedEditorResult showIsolatedPadEffectEditor (int trackId, int rackDeviceId,
-                                                       int pad, int effectIndex);
+                                                       int pad, int effectIndex,
+                                                       int editorX = -1, int editorY = -1);
     std::unique_ptr<juce::AudioProcessorEditor> createDeviceEditor (int trackId, int deviceId);
     void saveAudioDeviceSettings();
 

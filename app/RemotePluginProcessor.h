@@ -3,7 +3,9 @@
 #include "PluginWorkerProtocol.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <vector>
 
 class RemotePluginProcessor final : public juce::AudioProcessor
 {
@@ -16,7 +18,9 @@ public:
     bool hasFailed() const noexcept { return failed.load (std::memory_order_acquire); }
     bool isInstrument() const noexcept { return instrument; }
     static bool isPluginEditorForeground();
-    bool showEditor();
+    static std::vector<juce::Rectangle<int>> pluginEditorWindowBounds();
+    static void movePluginEditorWindows (int deltaX);
+    bool showEditor (int x = -1, int y = -1);
     void setFailureCallback (std::function<void (const juce::String&)> callback)
     {
         onFailure = std::move (callback);
@@ -47,7 +51,7 @@ private:
 
     RemotePluginProcessor (const juce::PluginDescription&, double, int);
     bool startWorker (const juce::PluginDescription&, juce::String& error);
-    bool sendCommand (pluginworker::Command, int timeoutMs);
+    bool sendCommand (pluginworker::Command, int timeoutMs, int editorX = -1, int editorY = -1);
     void failWorker();
     void updateParameter (int index, float value) noexcept;
     float readParameter (int index) const noexcept;
@@ -63,6 +67,8 @@ private:
     juce::CriticalSection stateLock;
     juce::MemoryBlock cachedState;
     std::function<void (const juce::String&)> onFailure;
+    bool processRequestPending = false;
+    std::uint32_t processRequestStartTime = 0;
     HANDLE mapping = nullptr, requestEvent = nullptr, responseEvent = nullptr, workerProcess = nullptr;
     DWORD workerProcessId = 0;
     pluginworker::SharedData* shared = nullptr;

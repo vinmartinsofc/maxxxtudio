@@ -60,13 +60,18 @@ class PluginWorkerEditorWindow : public juce::DocumentWindow
 public:
     PluginWorkerEditorWindow (const juce::String& name,
                               std::unique_ptr<juce::AudioProcessorEditor> editor,
-                              DWORD parentProcessId)
+                              DWORD parentProcessId, int editorX, int editorY, bool hasPosition)
         : DocumentWindow (name, juce::Colours::black, DocumentWindow::allButtons)
     {
         setUsingNativeTitleBar (true);
         const int editorWidth = std::max (1, editor->getWidth());
         const int editorHeight = std::max (1, editor->getHeight());
-        const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
+        const auto& displays = juce::Desktop::getInstance().getDisplays();
+        const auto* display = hasPosition
+            ? displays.getDisplayForRect ({ editorX, editorY, 1, 1 })
+            : displays.getPrimaryDisplay();
+        if (display == nullptr)
+            display = displays.getPrimaryDisplay();
         const auto displayArea = display != nullptr
             ? display->userBounds.toNearestInt() : juce::Rectangle<int> (0, 0, 1280, 720);
         const bool editorResizable = editor->isResizable();
@@ -91,9 +96,16 @@ public:
             setContentOwned (editor.release(), true);
         }
 
-        setBounds (displayArea.withSizeKeepingCentre (getWidth(), getHeight()));
+        auto bounds = displayArea.withSizeKeepingCentre (getWidth(), getHeight());
+        if (hasPosition)
+        {
+            bounds.setX (editorX);
+            const int minimumY = displayArea.getY();
+            const int maximumY = std::max (minimumY, displayArea.getBottom() - bounds.getHeight());
+            bounds.setY (std::clamp (editorY, minimumY, maximumY));
+        }
+        setBounds (bounds);
         setVisible (true);
-        setAlwaysOnTop (true);
 
         if (const auto parentWindow = findParentWindow (parentProcessId))
             if (const auto* peer = getPeer())
@@ -115,8 +127,9 @@ class PluginWorkerRuntime::EditorWindow final : public PluginWorkerEditorWindow
 {
 public:
     EditorWindow (const juce::String& name, std::unique_ptr<juce::AudioProcessorEditor> editor,
-                  DWORD parentProcessId)
-        : PluginWorkerEditorWindow (name, std::move (editor), parentProcessId) {}
+                  DWORD parentProcessId, int editorX, int editorY, bool hasPosition)
+        : PluginWorkerEditorWindow (name, std::move (editor), parentProcessId,
+                                    editorX, editorY, hasPosition) {}
 };
 
 PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD parentProcessId)
@@ -390,9 +403,15 @@ void PluginWorkerRuntime::processRequest (pluginworker::Command command)
             break;
         }
         case pluginworker::Command::showEditor:
-            juce::MessageManager::callAsync ([this] { openEditor(); });
+        {
+            const int editorX = shared->editorX;
+            const int editorY = shared->editorY;
+            const bool hasPosition = shared->editorPositionValid != 0;
+            juce::MessageManager::callAsync (
+                [this, editorX, editorY, hasPosition] { openEditor (editorX, editorY, hasPosition); });
             InterlockedExchange (&shared->result, 1);
             break;
+        }
         case pluginworker::Command::hideEditor:
             juce::MessageManager::callAsync ([this] { closeEditor(); });
             InterlockedExchange (&shared->result, 1);
@@ -403,7 +422,7 @@ void PluginWorkerRuntime::processRequest (pluginworker::Command command)
     }
 }
 
-void PluginWorkerRuntime::openEditor()
+void PluginWorkerRuntime::openEditor (int editorX, int editorY, bool hasPosition)
 {
     if (editorWindow != nullptr)
     {
@@ -418,7 +437,8 @@ void PluginWorkerRuntime::openEditor()
     if (auto* editor = processor->createEditorAndMakeActive())
     {
         editorWindow = std::make_unique<EditorWindow> (
-            processor->getName(), std::unique_ptr<juce::AudioProcessorEditor> (editor), parentProcessId);
+            processor->getName(), std::unique_ptr<juce::AudioProcessorEditor> (editor),
+            parentProcessId, editorX, editorY, hasPosition);
         editorWindow->setVisible (true);
         editorWindow->toFront (true);
     }

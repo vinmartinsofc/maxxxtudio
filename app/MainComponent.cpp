@@ -1,3 +1,11 @@
+#if defined(_WIN32) && ! defined(NOMINMAX)
+ #define NOMINMAX
+#endif
+
+#if defined(_WIN32)
+ #include <windows.h>
+#endif
+
 #include "MainComponent.h"
 #include "OptionsWindow.h"
 #include "WindowPlacement.h"
@@ -159,6 +167,27 @@ juce::String midiNoteName (int pitch)
         "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
     }};
     return names[static_cast<std::size_t> (pitch % 12)] + juce::String (pitch / 12 - 2);
+}
+
+void setNativeWindowOwner (juce::Component& window, juce::TopLevelWindow* ownerWindow)
+{
+#if defined(_WIN32)
+    if (ownerWindow == nullptr || window.getPeer() == nullptr || ownerWindow->getPeer() == nullptr)
+        return;
+
+    const auto nativeWindow = static_cast<HWND> (window.getPeer()->getNativeHandle());
+    const auto nativeOwner = static_cast<HWND> (ownerWindow->getPeer()->getNativeHandle());
+    if (nativeWindow == nullptr || nativeOwner == nullptr || ! IsWindow (nativeWindow)
+        || ! IsWindow (nativeOwner)
+        || GetWindowLongPtrW (nativeWindow, GWLP_HWNDPARENT) == reinterpret_cast<LONG_PTR> (nativeOwner))
+        return;
+
+    SetWindowLongPtrW (nativeWindow, GWLP_HWNDPARENT, reinterpret_cast<LONG_PTR> (nativeOwner));
+    SetWindowPos (nativeWindow, nullptr, 0, 0, 0, 0,
+                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+#else
+    juce::ignoreUnused (window, ownerWindow);
+#endif
 }
 
 }
@@ -398,13 +427,106 @@ private:
     bool alignToParentTopRight = false;
 };
 
+class MainComponent::PluginWindowNavigator final : public juce::DocumentWindow,
+                                                   private juce::ScrollBar::Listener,
+                                                   private juce::KeyListener
+{
+public:
+    PluginWindowNavigator (juce::TopLevelWindow* ownerWindow, std::function<void (int)> onScroll)
+        : DocumentWindow ("Plugin window navigation", theme::panel(), 0),
+          onScroll (std::move (onScroll))
+    {
+        auto scrollBarComponent = std::make_unique<juce::ScrollBar> (false);
+        scrollBar = scrollBarComponent.get();
+        setUsingNativeTitleBar (false);
+        setTitleBarHeight (0);
+        setResizable (false, false);
+        setBackgroundColour (theme::panel());
+        scrollBar->setAutoHide (false);
+        scrollBar->setSingleStepSize (48.0);
+        scrollBar->setColour (juce::ScrollBar::backgroundColourId, theme::panel());
+        scrollBar->setColour (juce::ScrollBar::trackColourId, theme::border());
+        scrollBar->setColour (juce::ScrollBar::thumbColourId, theme::accent());
+        scrollBar->setWantsKeyboardFocus (true);
+        scrollBar->setMouseClickGrabsKeyboardFocus (true);
+        scrollBar->addListener (this);
+        scrollBar->addKeyListener (this);
+        scrollBar->addMouseListener (this, true);
+        setContentOwned (scrollBarComponent.release(), true);
+        setContentComponentSize (280, 18);
+        setVisible (false);
+        setOwnerWindow (ownerWindow);
+    }
+
+    ~PluginWindowNavigator() override
+    {
+        if (scrollBar != nullptr)
+        {
+            scrollBar->removeListener (this);
+            scrollBar->removeKeyListener (this);
+            scrollBar->removeMouseListener (this);
+        }
+    }
+
+    void setOwnerWindow (juce::TopLevelWindow* ownerWindow)
+    {
+        setNativeWindowOwner (*this, ownerWindow);
+    }
+
+    void updateRange (int maximum, int value, int viewportWidth, bool shouldBeVisible)
+    {
+        if (isVisible() != shouldBeVisible)
+            setVisible (shouldBeVisible);
+
+        const auto visibleWidth = static_cast<double> (std::max (1, viewportWidth));
+        scrollBar->setRangeLimits (0.0, static_cast<double> (std::max (0, maximum)) + visibleWidth,
+                                   juce::dontSendNotification);
+        scrollBar->setCurrentRange (static_cast<double> (std::clamp (value, 0, maximum)),
+                                    visibleWidth, juce::dontSendNotification);
+    }
+
+    void closeButtonPressed() override { setVisible (false); }
+
+private:
+    void mouseDown (const juce::MouseEvent&) override
+    {
+        scrollBar->grabKeyboardFocus();
+    }
+
+    void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override
+    {
+        if (onScroll)
+            onScroll (static_cast<int> (std::lround (newRangeStart)));
+    }
+
+    bool keyPressed (const juce::KeyPress& key, juce::Component*) override
+    {
+        if (key.isKeyCode (juce::KeyPress::leftKey))
+        {
+            scrollBar->moveScrollbarInSteps (-1, juce::sendNotification);
+            return true;
+        }
+        if (key.isKeyCode (juce::KeyPress::rightKey))
+        {
+            scrollBar->moveScrollbarInSteps (1, juce::sendNotification);
+            return true;
+        }
+        return false;
+    }
+
+    juce::ScrollBar* scrollBar = nullptr;
+    std::function<void (int)> onScroll;
+};
+
 // Janela de plugin: mantem o editor visivel e oferece rolagem como fallback.
 class MainComponent::PluginWindow : public juce::DocumentWindow, private juce::KeyListener
 {
 public:
     PluginWindow (const juce::String& name,
                   std::unique_ptr<juce::AudioProcessorEditor> editor,
+                  juce::TopLevelWindow* ownerWindow,
                   const juce::Rectangle<int>& displayUserArea,
+                  int horizontalScrollOffset,
                   int cascadeIndex,
                   const std::vector<roll::Rect>& occupiedWindows,
                   std::function<void()> onActiveWindowStatusChanged,
@@ -447,18 +569,24 @@ public:
         computerMidiIndicator->setVisible (false);
         computerMidiIndicator->alignWithParent();
 
-        const auto placeWindow = [this, &displayUserArea, cascadeIndex, &occupiedWindows]
+        const auto placeWindow = [this, &displayUserArea, horizontalScrollOffset,
+                                  cascadeIndex, &occupiedWindows]
         {
+            const auto virtualDisplayArea = displayUserArea.translated (horizontalScrollOffset, 0);
             return roll::WindowPlacement::placePluginWindow (
                 { 0, 0, getWidth(), getHeight() },
-                { displayUserArea.getX(), displayUserArea.getY(), displayUserArea.getWidth(), displayUserArea.getHeight() },
+                { virtualDisplayArea.getX(), virtualDisplayArea.getY(),
+                  virtualDisplayArea.getWidth(), virtualDisplayArea.getHeight() },
                 cascadeIndex, 64, occupiedWindows);
         };
         auto bounds = placeWindow();
+        bounds.x -= horizontalScrollOffset;
         setBounds (bounds.x, bounds.y, bounds.width, bounds.height);
         setVisible (true);
         bounds = placeWindow();
+        bounds.x -= horizontalScrollOffset;
         setBounds (bounds.x, bounds.y, bounds.width, bounds.height);
+        setOwnerWindow (ownerWindow);
     }
 
     ~PluginWindow() override
@@ -478,6 +606,25 @@ public:
     void hideComputerMidiStatus() { computerMidiIndicator->hide(); }
 
     void closeButtonPressed() override { setVisible (false); }
+
+    void setOwnerWindow (juce::TopLevelWindow* ownerWindow)
+    {
+        setNativeWindowOwner (*this, ownerWindow);
+    }
+
+    void moved() override
+    {
+        juce::DocumentWindow::moved();
+        if (onActiveWindowStatusChanged)
+            onActiveWindowStatusChanged();
+    }
+
+    void resized() override
+    {
+        juce::DocumentWindow::resized();
+        if (onActiveWindowStatusChanged)
+            onActiveWindowStatusChanged();
+    }
 
     void activeWindowStatusChanged() override
     {
@@ -1229,6 +1376,127 @@ void MainComponent::setMainWindow (juce::TopLevelWindow* window)
     updatePluginWindowZOrder();
 }
 
+std::vector<juce::Rectangle<int>> MainComponent::pluginWindowBounds() const
+{
+    std::vector<juce::Rectangle<int>> bounds;
+    bounds.reserve (windows.size() + 4);
+    for (const auto& [deviceId, window] : windows)
+    {
+        juce::ignoreUnused (deviceId);
+        if (window != nullptr && window->isVisible() && ! window->isMinimised())
+            bounds.push_back (window->getScreenBounds());
+    }
+
+    auto workerBounds = RemotePluginProcessor::pluginEditorWindowBounds();
+    bounds.insert (bounds.end(), workerBounds.begin(), workerBounds.end());
+    return bounds;
+}
+
+juce::Point<int> MainComponent::nextPluginWindowPosition() const
+{
+    const auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = displays.getDisplayForRect (getScreenBounds());
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+
+    const auto area = display != nullptr ? display->userBounds.toNearestInt()
+                                        : juce::Rectangle<int> (0, 0, 1280, 720);
+    const roll::Rect virtualDisplay { area.getX() + pluginWindowScrollOffset, area.getY(),
+                                     area.getWidth(), area.getHeight() };
+    std::vector<roll::Rect> occupiedWindows;
+    for (const auto& bounds : pluginWindowBounds())
+        occupiedWindows.push_back ({ bounds.getX() + pluginWindowScrollOffset, bounds.getY(),
+                                     bounds.getWidth(), bounds.getHeight() });
+
+    const auto next = roll::WindowPlacement::placePluginWindow (
+        { 0, 0, 600, 400 }, virtualDisplay, nextPluginCascadeIndex, 64, occupiedWindows);
+    return { next.x - pluginWindowScrollOffset, next.y };
+}
+
+void MainComponent::updatePluginWindowNavigator()
+{
+    if (mainWindow == nullptr)
+        return;
+
+    if (pluginWindowNavigator == nullptr)
+    {
+        const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+        pluginWindowNavigator = std::make_unique<PluginWindowNavigator> (
+            mainWindow, [this, token] (int offset)
+            {
+                const auto alive = token.lock();
+                if (alive != nullptr && alive->load())
+                    scrollPluginWindowsTo (offset);
+            });
+    }
+
+    pluginWindowNavigator->setOwnerWindow (mainWindow);
+    const auto& displays = juce::Desktop::getInstance().getDisplays();
+    const auto* display = displays.getDisplayForRect (getScreenBounds());
+    if (display == nullptr)
+        display = displays.getPrimaryDisplay();
+
+    const auto area = display != nullptr ? display->userBounds.toNearestInt()
+                                        : juce::Rectangle<int> (0, 0, 1280, 720);
+    auto rightmost = area.getRight() + pluginWindowScrollOffset;
+    for (const auto& bounds : pluginWindowBounds())
+        rightmost = std::max (rightmost, bounds.getRight() + pluginWindowScrollOffset);
+
+    const int maximumOffset = std::max (0, rightmost - area.getRight());
+    if (pluginWindowScrollOffset > maximumOffset)
+    {
+        scrollPluginWindowsTo (maximumOffset);
+        return;
+    }
+
+    pluginWindowScrollRange = maximumOffset;
+    const bool appForeground = juce::Process::isForegroundProcess()
+                            || RemotePluginProcessor::isPluginEditorForeground();
+    const int navigatorWidth = std::min (280, area.getWidth());
+    const int navigatorHeight = std::min (28, area.getHeight());
+    const auto navigatorBounds = juce::Rectangle<int> (area.getRight() - navigatorWidth,
+                                                       area.getBottom() - navigatorHeight,
+                                                       navigatorWidth, navigatorHeight);
+    if (pluginWindowNavigator->getBounds() != navigatorBounds)
+        pluginWindowNavigator->setBounds (navigatorBounds);
+    const bool wasVisible = pluginWindowNavigator->isVisible();
+    pluginWindowNavigator->updateRange (pluginWindowScrollRange, pluginWindowScrollOffset,
+                                        area.getWidth(), pluginWindowScrollRange > 0 && appForeground);
+    pluginWindowNavigator->setOwnerWindow (mainWindow);
+#if defined(_WIN32)
+    const auto foreground = reinterpret_cast<std::uintptr_t> (GetForegroundWindow());
+    const bool foregroundChanged = foreground != pluginNavigatorForegroundWindow;
+    pluginNavigatorForegroundWindow = foreground;
+#else
+    const bool foregroundChanged = false;
+#endif
+    if (pluginWindowNavigator->isVisible() && appForeground
+        && (foregroundChanged || ! wasVisible))
+        pluginWindowNavigator->toFront (false);
+}
+
+void MainComponent::scrollPluginWindowsTo (int offset)
+{
+    const int newOffset = std::clamp (offset, 0, pluginWindowScrollRange);
+    const int delta = newOffset - pluginWindowScrollOffset;
+    if (delta == 0)
+        return;
+
+    for (auto& [deviceId, window] : windows)
+    {
+        juce::ignoreUnused (deviceId);
+        if (window == nullptr)
+            continue;
+
+        const auto bounds = window->getScreenBounds();
+        window->setBounds (bounds.translated (-delta, 0));
+    }
+
+    RemotePluginProcessor::movePluginEditorWindows (-delta);
+    pluginWindowScrollOffset = newOffset;
+    updatePluginWindowNavigator();
+}
+
 void MainComponent::updatePluginWindowZOrder()
 {
     juce::Component::SafePointer<MainComponent> safeThis (this);
@@ -1237,30 +1505,23 @@ void MainComponent::updatePluginWindowZOrder()
         if (safeThis == nullptr)
             return;
 
-        auto* activeWindow = juce::TopLevelWindow::getActiveTopLevelWindow();
-        bool appIsActive = activeWindow == safeThis->mainWindow
-                        && safeThis->mainWindow != nullptr;
-        if (! appIsActive)
-            for (const auto& [deviceId, window] : safeThis->windows)
-            {
-                juce::ignoreUnused (deviceId);
-                if (window.get() == activeWindow)
-                {
-                    appIsActive = true;
-                    break;
-                }
-            }
-
         for (auto& [deviceId, window] : safeThis->windows)
         {
             juce::ignoreUnused (deviceId);
             if (window == nullptr)
                 continue;
 
-            const bool shouldStayOnTop = appIsActive && window->isVisible() && ! window->isMinimised();
-            if (window->isAlwaysOnTop() != shouldStayOnTop)
-                window->setAlwaysOnTop (shouldStayOnTop);
+            if (window->isAlwaysOnTop())
+                window->setAlwaysOnTop (false);
+            window->setOwnerWindow (safeThis->mainWindow);
         }
+
+        safeThis->updatePluginWindowNavigator();
+        if (safeThis->pluginWindowNavigator != nullptr
+            && safeThis->pluginWindowNavigator->isVisible()
+            && (juce::Process::isForegroundProcess()
+                || RemotePluginProcessor::isPluginEditorForeground()))
+            safeThis->pluginWindowNavigator->toFront (false);
     });
 }
 
@@ -3338,6 +3599,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* src)
 void MainComponent::timerCallback()
 {
     updateComputerMidiKeyboard();
+    updatePluginWindowNavigator();
 
     const auto now = juce::Time::getMillisecondCounterHiRes();
     if (now >= nextRecoverySaveTime)
@@ -3410,8 +3672,26 @@ void MainComponent::updateComputerMidiKeyboard()
                                   || modifiers.isAltDown() || modifiers.isShiftDown();
     const bool textFocused = isTextEditorFocused();
     const bool hostForeground = juce::Process::isForegroundProcess();
-    const bool appForeground = hostForeground || RemotePluginProcessor::isPluginEditorForeground();
+    const bool workerEditorForeground = RemotePluginProcessor::isPluginEditorForeground();
+    const bool appForeground = hostForeground || workerEditorForeground;
     const bool textInputFocused = hostForeground && textFocused;
+
+#if defined(_WIN32)
+    const bool transportShortcutModifierDown = (GetAsyncKeyState (VK_CONTROL) & 0x8000) != 0
+                                            || (GetAsyncKeyState (VK_MENU) & 0x8000) != 0;
+    const bool workerSpaceDown = workerEditorForeground && ! audioRenderInProgress
+                              && ! transportShortcutModifierDown
+                              && (GetAsyncKeyState (VK_SPACE) & 0x8000) != 0;
+    if (workerSpaceDown && ! remoteTransportSpaceKeyDown)
+    {
+        const auto keyModifiers = (GetAsyncKeyState (VK_SHIFT) & 0x8000) != 0
+            ? juce::ModifierKeys (juce::ModifierKeys::shiftModifier) : juce::ModifierKeys {};
+        handleTransportKeyPress (juce::KeyPress (juce::KeyPress::spaceKey, keyModifiers, ' '));
+    }
+    remoteTransportSpaceKeyDown = workerSpaceDown;
+#else
+    remoteTransportSpaceKeyDown = false;
+#endif
 
     const bool modeKeyDown = appForeground && ! audioRenderInProgress && ! textInputFocused && ! hasShortcutModifier
                           && juce::KeyPress::isKeyCurrentlyDown ('M');
@@ -3838,9 +4118,14 @@ void MainComponent::updateActionIndicator()
 
 void MainComponent::openDeviceEditor (int trackId, int deviceId)
 {
-    const auto isolatedResult = engine.showIsolatedDeviceEditor (trackId, deviceId);
+    const auto editorPosition = nextPluginWindowPosition();
+    const auto isolatedResult = engine.showIsolatedDeviceEditor (
+        trackId, deviceId, editorPosition.x, editorPosition.y);
     if (isolatedResult == AudioEngine::IsolatedEditorResult::opened)
+    {
+        updatePluginWindowNavigator();
         return;
+    }
     if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
     {
         browser.setStatus ("Este plugin nao possui uma interface grafica.");
@@ -3911,10 +4196,14 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 const auto alive = token.lock();
                 if (alive == nullptr || ! alive->load())
                     return;
+                const auto editorPosition = nextPluginWindowPosition();
                 const auto isolatedResult = engine.showIsolatedPadEffectEditor (
-                    trackId, deviceId, pad, effectIndex);
+                    trackId, deviceId, pad, effectIndex, editorPosition.x, editorPosition.y);
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::opened)
+                {
+                    updatePluginWindowNavigator();
                     return;
+                }
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
                 {
                     juce::AlertWindow::showMessageBoxAsync (
@@ -3959,19 +4248,13 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 const auto displayArea = display != nullptr ? display->userBounds.toNearestInt()
                                                             : juce::Rectangle<int> (0, 0, 1280, 720);
                 std::vector<roll::Rect> occupiedWindows;
-                for (const auto& [openId, window] : windows)
-                {
-                    juce::ignoreUnused (openId);
-                    if (window != nullptr && window->isVisible())
-                    {
-                        const auto bounds = window->getScreenBounds();
-                        occupiedWindows.push_back ({ bounds.getX(), bounds.getY(),
-                                                     bounds.getWidth(), bounds.getHeight() });
-                    }
-                }
+                for (const auto& bounds : pluginWindowBounds())
+                    occupiedWindows.push_back ({ bounds.getX() + pluginWindowScrollOffset, bounds.getY(),
+                                                 bounds.getWidth(), bounds.getHeight() });
                 const int effectWindowId = nextPadEffectWindowId--;
                 windows[effectWindowId] = std::make_unique<PluginWindow> (
-                    title, std::move (editor), displayArea, nextPluginCascadeIndex++, occupiedWindows,
+                    title, std::move (editor), mainWindow, displayArea, pluginWindowScrollOffset,
+                    nextPluginCascadeIndex++, occupiedWindows,
                     [this, token]
                     {
                         const auto callbackAlive = token.lock();
@@ -4009,18 +4292,13 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
         const auto displayArea = display != nullptr ? display->userBounds.toNearestInt()
                                                     : juce::Rectangle<int> (0, 0, 1280, 720);
         std::vector<roll::Rect> occupiedWindows;
-        for (const auto& [openDeviceId, window] : windows)
-        {
-            juce::ignoreUnused (openDeviceId);
-            if (window != nullptr && window->isVisible())
-            {
-                const auto bounds = window->getScreenBounds();
-                occupiedWindows.push_back ({ bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight() });
-            }
-        }
+        for (const auto& bounds : pluginWindowBounds())
+            occupiedWindows.push_back ({ bounds.getX() + pluginWindowScrollOffset, bounds.getY(),
+                                         bounds.getWidth(), bounds.getHeight() });
         const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
         auto window = std::make_unique<PluginWindow> (
-            title, std::move (ed), displayArea, nextPluginCascadeIndex++, occupiedWindows,
+            title, std::move (ed), mainWindow, displayArea, pluginWindowScrollOffset,
+            nextPluginCascadeIndex++, occupiedWindows,
             [this, token]
             {
                 const auto alive = token.lock();

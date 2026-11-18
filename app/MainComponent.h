@@ -19,6 +19,7 @@
 #include <map>
 #include <thread>
 #include <tuple>
+#include <vector>
 
 class MainComponent : public juce::Component, public juce::DragAndDropContainer,
                       private juce::ChangeListener, private juce::Timer
@@ -45,6 +46,7 @@ private:
     class ActionIndicator;
     class ComputerMidiIndicator;
     class PluginWindow;
+    class PluginWindowNavigator;
 
     void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
@@ -105,6 +107,10 @@ private:
     void showDetail (bool devices);
     void cycleFocus();
     void updateComputerMidiKeyboard();
+    void updatePluginWindowNavigator();
+    void scrollPluginWindowsTo (int offset);
+    juce::Point<int> nextPluginWindowPosition() const;
+    std::vector<juce::Rectangle<int>> pluginWindowBounds() const;
     void setComputerMidiKeyboardEnabled (bool);
     void showComputerMidiStatus (const juce::String&, const juce::String&, bool noteHeld);
     void hideComputerMidiStatus();
@@ -144,6 +150,7 @@ private:
 
     juce::TopLevelWindow* mainWindow = nullptr;
     std::map<int, std::unique_ptr<PluginWindow>> windows;
+    std::unique_ptr<PluginWindowNavigator> pluginWindowNavigator;
     std::map<std::tuple<int, int, int, int>, int> padEffectWindowIds;
     std::map<int, std::tuple<int, int, int>> padEffectWindowOwners;
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
@@ -166,6 +173,8 @@ private:
     std::jthread taskSimulationThread;
     int nextPluginCascadeIndex = 0;
     int nextPadEffectWindowId = -1;
+    int pluginWindowScrollOffset = 0, pluginWindowScrollRange = 0;
+    std::uintptr_t pluginNavigatorForegroundWindow = 0;
     int previewLoadToken = 0;
     int pendingAudioLoads = 0, pendingPreviewLoads = 0;
     bool scanningPlugins = false;
@@ -199,6 +208,7 @@ private:
     bool groovePreviewAudioActive = false;
     juce::String lastComputerMidiNote;
     bool computerMidiModeKeyDown = false, computerMidiKeyboardEnabled = false;
+    bool remoteTransportSpaceKeyDown = false;
     int computerMidiOctaveOffset = 0, computerMidiVelocity = 100;
     int browserWidth = 390;
     juce::Rectangle<int> browserSplitterRect;

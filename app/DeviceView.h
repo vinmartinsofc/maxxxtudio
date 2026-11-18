@@ -12,7 +12,8 @@
 
 // Cadeia de dispositivos (plugins) da trilha selecionada: instrumento primeiro, efeitos depois.
 class DeviceView : public juce::Component, public juce::DragAndDropTarget,
-                   private TaskRegistry::Listener
+                   public juce::KeyListener, private TaskRegistry::Listener,
+                   private juce::ScrollBar::Listener
 {
 public:
     explicit DeviceView (TaskRegistry&);
@@ -28,6 +29,7 @@ public:
 
     void setDevices (int trackId, const juce::String& trackName, const std::vector<DeviceInfo>& devices);
     bool keyPressed (const juce::KeyPress&) override;
+    bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     bool isInterestedInDragSource (const SourceDetails&) override;
     void itemDragEnter (const SourceDetails&) override;
     void itemDragMove (const SourceDetails&) override;
@@ -53,6 +55,7 @@ private:
     void taskRegistryChanged() override;
     void refreshLoadingIndicators();
     void positionLoadingIndicators();
+    void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
 
     struct LoadingIndicator
     {
@@ -64,6 +67,8 @@ private:
     int trackId = -1;
     juce::String trackName;
     std::vector<std::unique_ptr<Box>> boxes;
+    juce::ScrollBar horizontalScrollBar { false };
+    int horizontalScrollOffset = 0;
     std::map<std::string, LoadingIndicator> loadingIndicators;
     std::set<int> selectedDeviceIds, collapsedGroupIds;
     bool pluginDragOver = false, popupMenuRequested = false;

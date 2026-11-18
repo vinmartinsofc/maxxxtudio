@@ -94,3 +94,15 @@ TEST_CASE ("WindowPlacement keeps plugin windows separate when display space all
                        && next.y < occupied.bottom() && next.bottom() > occupied.y;
     CHECK_FALSE (overlaps);
 }
+
+TEST_CASE ("WindowPlacement continues plugin windows to the right when the display is full")
+{
+    const Rect display { 100, 50, 1600, 900 };
+    const std::vector<Rect> openWindows { display };
+    const auto next = WindowPlacement::placePluginWindow (
+        { 0, 0, 600, 400 }, display, 1, 28, openWindows);
+
+    CHECK (next.x == display.right() + 12);
+    CHECK (next.y == display.y + 60);
+    CHECK (next.right() > display.right());
+}

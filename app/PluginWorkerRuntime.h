@@ -21,7 +21,7 @@ private:
     void run() override;
     void processRequest (pluginworker::Command);
     void publishError (const juce::String&);
-    void openEditor();
+    void openEditor (int editorX = -1, int editorY = -1, bool hasPosition = false);
     void closeEditor();
 
     juce::AudioPluginFormatManager formats;
