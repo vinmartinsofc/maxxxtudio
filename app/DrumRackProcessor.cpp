@@ -1,5 +1,6 @@
 #include "DrumRackProcessor.h"
 #include "DrumRackEditor.h"
+#include "RemotePluginProcessor.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -66,7 +67,6 @@ DrumRackProcessor::DrumRackProcessor()
     : juce::AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
     formats.registerBasicFormats();
-    pluginFormats.addFormat (std::make_unique<juce::VST3PluginFormat>());
     static constexpr std::array<const char*, automatablePadParameterCount> parameterNames {
         "Volume", "Transpose", "Start", "End", "Reverse", "Loop", "Classic"
     };
@@ -686,8 +686,8 @@ bool DrumRackProcessor::restoreStateXml (const juce::XmlElement& xml)
             }
 
             juce::String error;
-            auto instance = pluginFormats.createPluginInstance (description, outputSampleRate,
-                                                                 maximumBlockSize, error);
+            auto instance = RemotePluginProcessor::create (description, outputSampleRate,
+                                                           maximumBlockSize, error);
             if (instance == nullptr)
             {
                 effectsRestored = false;
@@ -702,7 +702,15 @@ bool DrumRackProcessor::restoreStateXml (const juce::XmlElement& xml)
                 continue;
             }
             if (state.getSize() > 0)
+            {
                 instance->setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+                if (auto* remote = dynamic_cast<RemotePluginProcessor*> (instance.get());
+                    remote != nullptr && remote->hasFailed())
+                {
+                    effectsRestored = false;
+                    continue;
+                }
+            }
 
             if (! addPadEffect (pad, description, std::move (instance), error))
             {

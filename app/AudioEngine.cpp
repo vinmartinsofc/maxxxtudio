@@ -1,5 +1,6 @@
 #include "AudioEngine.h"
 #include "DrumRackProcessor.h"
+#include "RemotePluginProcessor.h"
 #include "NativeEffectProcessors.h"
 #include <chrono>
 #include <cmath>
@@ -1568,24 +1569,36 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
         blockSize  = dev->getCurrentBufferSizeSamples();
     }
 
-    formatManager.createPluginInstanceAsync (desc, sampleRate, blockSize,
-        [this, trackId, pluginIdentifier, pendingKey, onDone, insertionIndex]
-        (std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& error)
+    auto instance = std::make_shared<std::unique_ptr<RemotePluginProcessor>>();
+    auto loadError = std::make_shared<juce::String>();
+    audioLoadPool.addJob ([this, desc, sampleRate, blockSize, trackId, pluginIdentifier,
+                           pendingKey, onDone, insertionIndex, instance, loadError]
+    {
+        *instance = RemotePluginProcessor::create (desc, sampleRate, blockSize, *loadError);
+        if (! juce::MessageManager::callAsync (
+            [this, trackId, pluginIdentifier, pendingKey, onDone, insertionIndex, instance, loadError]
         {
             pendingPluginLoads.erase (pendingKey);
             auto* t = find (trackId);
-            if (instance == nullptr || t == nullptr)
+            if (*instance == nullptr || t == nullptr)
             {
-                onDone (error.isNotEmpty() ? error : "Falha ao carregar o plugin.", 0);
+                onDone (loadError->isNotEmpty() ? *loadError : "Falha ao carregar o plugin.", 0);
                 return;
             }
 
             Device d;
             d.id = nextDeviceId++;
-            d.name = instance->getName();
+            d.name = (*instance)->getName();
             d.pluginIdentifier = pluginIdentifier;
-            d.instrument = instance->getPluginDescription().isInstrument;
-            d.node = seqGraph.addNode (std::move (instance));
+            d.instrument = (*instance)->isInstrument();
+            const auto failureCallback = onPluginCrashed;
+            (*instance)->setFailureCallback ([failureCallback, trackId, deviceId = d.id]
+                                             (const juce::String& name)
+            {
+                if (failureCallback)
+                    failureCallback (trackId, deviceId, name);
+            });
+            d.node = seqGraph.addNode (std::move (*instance));
             if (d.node == nullptr)
             {
                 onDone ("Nao foi possivel adicionar o plugin ao grafo de audio.", 0);
@@ -1619,7 +1632,9 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
 
             rewire (*t);
             onDone ({}, d.id);
-        });
+        }))
+            juce::Logger::writeToLog ("AudioEngine: nao foi possivel publicar o resultado do carregamento do plugin.");
+    });
 }
 
 int AudioEngine::addDrumRack (int trackId)
@@ -1704,9 +1719,14 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
         blockSize = device->getCurrentBufferSizeSamples();
     }
 
-    formatManager.createPluginInstanceAsync (description, sampleRate, blockSize,
-        [this, trackId, rackDeviceId, pad, description, onDone]
-        (std::unique_ptr<juce::AudioPluginInstance> instance, const juce::String& error)
+    auto instance = std::make_shared<std::unique_ptr<RemotePluginProcessor>>();
+    auto loadError = std::make_shared<juce::String>();
+    audioLoadPool.addJob ([this, trackId, rackDeviceId, pad, description, onDone,
+                           sampleRate, blockSize, instance, loadError]
+    {
+        *instance = RemotePluginProcessor::create (description, sampleRate, blockSize, *loadError);
+        if (! juce::MessageManager::callAsync (
+            [this, trackId, rackDeviceId, pad, description, onDone, instance, loadError]
         {
             auto* targetTrack = find (trackId);
             DrumRackProcessor* targetRack = nullptr;
@@ -1715,20 +1735,29 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
                     if (device.id == rackDeviceId)
                         targetRack = dynamic_cast<DrumRackProcessor*> (device.node->getProcessor());
 
-            if (instance == nullptr || targetRack == nullptr)
+            if (*instance == nullptr || targetRack == nullptr)
             {
-                onDone (error.isNotEmpty() ? error : "O Drum Rack nao esta mais disponivel.");
+                onDone (loadError->isNotEmpty() ? *loadError : "O Drum Rack nao esta mais disponivel.");
                 return;
             }
 
+            const auto failureCallback = onPluginCrashed;
+            (*instance)->setFailureCallback ([failureCallback, trackId, rackDeviceId]
+                                             (const juce::String& name)
+            {
+                if (failureCallback)
+                    failureCallback (trackId, rackDeviceId, name);
+            });
             juce::String addError;
-            if (! targetRack->addPadEffect (pad, description, std::move (instance), addError))
+            if (! targetRack->addPadEffect (pad, description, std::move (*instance), addError))
             {
                 onDone (addError);
                 return;
             }
             onDone ({});
-        });
+        }))
+            juce::Logger::writeToLog ("AudioEngine: nao foi possivel publicar o resultado do carregamento de efeito.");
+    });
 }
 
 std::unique_ptr<juce::AudioProcessorEditor> AudioEngine::createPadEffectEditor (
@@ -1966,11 +1995,55 @@ bool AudioEngine::restorePluginState (int trackId, int deviceId, const juce::Mem
                 {
                     if (state.getSize() > 0)
                         processor->setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+                    if (auto* remote = dynamic_cast<RemotePluginProcessor*> (processor);
+                        remote != nullptr && remote->hasFailed())
+                        return false;
                     if (auto* rack = dynamic_cast<DrumRackProcessor*> (processor))
                         return rack->stateRestoreSucceeded();
                     return true;
                 }
     return false;
+}
+
+AudioEngine::IsolatedEditorResult AudioEngine::showIsolatedDeviceEditor (int trackId, int deviceId)
+{
+    auto* track = find (trackId);
+    if (track == nullptr)
+        return IsolatedEditorResult::notIsolated;
+
+    for (auto& device : track->devices)
+        if (device.id == deviceId)
+            if (auto* remote = dynamic_cast<RemotePluginProcessor*> (device.node->getProcessor()))
+            {
+                if (! remote->hasEditor())
+                    return IsolatedEditorResult::noEditor;
+                return remote->showEditor() ? IsolatedEditorResult::opened
+                                            : IsolatedEditorResult::failed;
+            }
+
+    return IsolatedEditorResult::notIsolated;
+}
+
+AudioEngine::IsolatedEditorResult AudioEngine::showIsolatedPadEffectEditor (
+    int trackId, int rackDeviceId, int pad, int effectIndex)
+{
+    auto* track = find (trackId);
+    if (track == nullptr)
+        return IsolatedEditorResult::notIsolated;
+
+    for (auto& device : track->devices)
+        if (device.id == rackDeviceId)
+            if (auto* rack = dynamic_cast<DrumRackProcessor*> (device.node->getProcessor()))
+                if (auto processor = rack->padEffectProcessor (pad, effectIndex))
+                    if (auto* remote = dynamic_cast<RemotePluginProcessor*> (processor.get()))
+                    {
+                        if (! remote->hasEditor())
+                            return IsolatedEditorResult::noEditor;
+                        return remote->showEditor() ? IsolatedEditorResult::opened
+                                                    : IsolatedEditorResult::failed;
+                    }
+
+    return IsolatedEditorResult::notIsolated;
 }
 
 std::unique_ptr<juce::AudioProcessorEditor> AudioEngine::createDeviceEditor (int trackId, int deviceId)

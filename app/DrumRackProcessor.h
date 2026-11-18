@@ -159,7 +159,6 @@ private:
                            std::shared_ptr<PadEffect>& result, juce::String& error);
 
     juce::AudioFormatManager formats;
-    juce::AudioPluginFormatManager pluginFormats;
     juce::SpinLock padsLock;
     juce::SpinLock effectsLock;
     std::array<Pad, numPads> pendingPads;

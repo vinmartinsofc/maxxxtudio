@@ -4,6 +4,7 @@
 #include "DrumRackEditor.h"
 #include "DrumRackProcessor.h"
 #include "NativeEffectProcessors.h"
+#include "RemotePluginProcessor.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -515,6 +516,21 @@ private:
 
 MainComponent::MainComponent()
 {
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    engine.onPluginCrashed = [this, token] (int, int, const juce::String& pluginName)
+    {
+        const auto alive = token.lock();
+        if (alive != nullptr && alive->load())
+        {
+            browser.setStatus ("O plugin " + pluginName
+                               + " falhou e foi encerrado; a faixa foi protegida.");
+            juce::AlertWindow::showMessageBoxAsync (
+                juce::MessageBoxIconType::WarningIcon, "Falha de plugin",
+                "O plugin " + pluginName
+                    + " falhou e foi encerrado. A faixa foi protegida e o Project Freedom continua aberto.");
+        }
+    };
+
     createFadesOnClipEdges = loadCreateFadesOnClipEdges();
     arrangementRatio = loadArrangementRatio();
     arrangementHeight = loadArrangementHeight();
@@ -3393,16 +3409,18 @@ void MainComponent::updateComputerMidiKeyboard()
     const bool hasShortcutModifier = modifiers.isCtrlDown() || modifiers.isCommandDown()
                                   || modifiers.isAltDown() || modifiers.isShiftDown();
     const bool textFocused = isTextEditorFocused();
-    const bool appForeground = juce::Process::isForegroundProcess();
+    const bool hostForeground = juce::Process::isForegroundProcess();
+    const bool appForeground = hostForeground || RemotePluginProcessor::isPluginEditorForeground();
+    const bool textInputFocused = hostForeground && textFocused;
 
-    const bool modeKeyDown = appForeground && ! audioRenderInProgress && ! textFocused && ! hasShortcutModifier
+    const bool modeKeyDown = appForeground && ! audioRenderInProgress && ! textInputFocused && ! hasShortcutModifier
                           && juce::KeyPress::isKeyCurrentlyDown ('M');
     if (modeKeyDown && ! computerMidiModeKeyDown)
         setComputerMidiKeyboardEnabled (! computerMidiKeyboardEnabled);
     computerMidiModeKeyDown = modeKeyDown;
 
     const bool acceptKeys = computerMidiKeyboardEnabled && appForeground && ! audioRenderInProgress
-                         && ! textFocused && ! hasShortcutModifier;
+                         && ! textInputFocused && ! hasShortcutModifier;
     // Z/X mudam a oitava e C/V ajustam a velocity em passos de 20.
     const std::array<int, 4> controlKeys { 'Z', 'X', 'C', 'V' };
     bool statusChanged = false;
@@ -3820,6 +3838,20 @@ void MainComponent::updateActionIndicator()
 
 void MainComponent::openDeviceEditor (int trackId, int deviceId)
 {
+    const auto isolatedResult = engine.showIsolatedDeviceEditor (trackId, deviceId);
+    if (isolatedResult == AudioEngine::IsolatedEditorResult::opened)
+        return;
+    if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
+    {
+        browser.setStatus ("Este plugin nao possui uma interface grafica.");
+        return;
+    }
+    if (isolatedResult == AudioEngine::IsolatedEditorResult::failed)
+    {
+        browser.setStatus ("O processo isolado deste plugin foi encerrado.");
+        return;
+    }
+
     auto it = windows.find (deviceId);
     if (it != windows.end())
     {
@@ -3879,6 +3911,25 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 const auto alive = token.lock();
                 if (alive == nullptr || ! alive->load())
                     return;
+                const auto isolatedResult = engine.showIsolatedPadEffectEditor (
+                    trackId, deviceId, pad, effectIndex);
+                if (isolatedResult == AudioEngine::IsolatedEditorResult::opened)
+                    return;
+                if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::InfoIcon, "Efeito do pad",
+                        "Este efeito nao possui uma interface grafica.");
+                    return;
+                }
+                if (isolatedResult == AudioEngine::IsolatedEditorResult::failed)
+                {
+                    juce::AlertWindow::showMessageBoxAsync (
+                        juce::MessageBoxIconType::WarningIcon, "Efeito do pad",
+                        "O processo isolado deste efeito foi encerrado.");
+                    return;
+                }
+
                 const auto key = std::make_tuple (trackId, deviceId, pad, effectIndex);
                 if (const auto existing = padEffectWindowIds.find (key);
                     existing != padEffectWindowIds.end())

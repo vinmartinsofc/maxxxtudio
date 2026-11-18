@@ -265,6 +265,9 @@ private:
 class AudioEngine : private juce::ChangeListener
 {
 public:
+    enum class IsolatedEditorResult { notIsolated, opened, noEditor, failed };
+    std::function<void (int trackId, int deviceId, const juce::String& pluginName)> onPluginCrashed;
+
     static constexpr int masterTrackId = 0;
     static constexpr const char* drumRackPluginIdentifier = "ProjectFreedom.DrumRack";
     static constexpr const char* utilityPluginIdentifier = "ProjectFreedom.Utility";
@@ -334,6 +337,9 @@ public:
     std::vector<DeviceInfo> devices (int trackId) const;
     std::vector<PluginState> getPluginStates();
     bool restorePluginState (int trackId, int deviceId, const juce::MemoryBlock&);
+    IsolatedEditorResult showIsolatedDeviceEditor (int trackId, int deviceId);
+    IsolatedEditorResult showIsolatedPadEffectEditor (int trackId, int rackDeviceId,
+                                                       int pad, int effectIndex);
     std::unique_ptr<juce::AudioProcessorEditor> createDeviceEditor (int trackId, int deviceId);
     void saveAudioDeviceSettings();
 

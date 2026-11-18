@@ -1,11 +1,19 @@
 #include "PluginScanner.h"
+#include "PluginWorkerProtocol.h"
 #include "TaskRegistry.h"
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+
+#ifndef PROJECT_FREEDOM_PLUGIN_WORKER_PATH
+ #define PROJECT_FREEDOM_PLUGIN_WORKER_PATH ""
+#endif
 
 struct PluginScanner::ScanState
 {
     std::atomic<bool> cancelled { false };
+    std::mutex childMutex;
+    juce::ChildProcess* child = nullptr;
 };
 
 juce::File PluginScanner::dataDirectory()
@@ -209,7 +217,12 @@ void PluginScanner::startScan()
         [weakScan]
         {
             if (const auto scan = weakScan.lock())
+            {
                 scan->cancelled.store (true, std::memory_order_release);
+                const std::lock_guard lock (scan->childMutex);
+                if (scan->child != nullptr)
+                    scan->child->kill();
+            }
         });
 
     if (onStarted)
@@ -225,9 +238,13 @@ void PluginScanner::startScan()
 
 void PluginScanner::cancelScan()
 {
-    // O pedido e observado entre arquivos; o JUCE nao oferece interrupcao segura dentro do plugin atual.
     if (activeScan != nullptr)
+    {
         activeScan->cancelled.store (true, std::memory_order_release);
+        const std::lock_guard lock (activeScan->childMutex);
+        if (activeScan->child != nullptr)
+            activeScan->child->kill();
+    }
 }
 
 void PluginScanner::stopScan()
@@ -259,86 +276,120 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
             || (job != nullptr && job->shouldExit());
     };
 
-    const auto deadMans = dataDirectory().getChildFile ("scan-crash-guard.txt");
-    const int formatCount = formatManager.getNumFormats();
-    bool cancelled = false;
-
-    for (int i = 0; i < formatCount && ! shouldCancel(); ++i)
+    const auto sessionId = juce::Uuid().toString().removeCharacters ("{}");
+    const auto prefix = "project-freedom-scan-" + sessionId + "-";
+    const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory);
+    const auto inputFile = temp.getChildFile (prefix + "input.xml");
+    const auto outputFile = temp.getChildFile (prefix + "output.xml");
+    const auto progressFile = temp.getChildFile (prefix + "progress.txt");
+    auto config = std::make_unique<juce::XmlElement> ("PLUGIN_SCAN");
+    if (auto pluginList = knownList.createXml())
+        config->addChildElement (pluginList.release());
+    for (int index = 0; index < formatManager.getNumFormats(); ++index)
     {
-        auto* format = formatManager.getFormat (i);
-        juce::PluginDirectoryScanner directoryScanner (
-            knownList, *format, searchPathsForFormat (*format), true, deadMans, false);
-
-        juce::String name;
-        bool hasMoreFiles = true;
-        while (hasMoreFiles && ! shouldCancel())
+        auto* format = formatManager.getFormat (index);
+        const auto paths = searchPathsForFormat (*format);
+        for (int path = 0; path < paths.getNumPaths(); ++path)
         {
-            name.clear();
-            hasMoreFiles = directoryScanner.scanNextFile (true, name);
-
-            // O JUCE mede progresso por formato; o app combina os formatos habilitados.
-            const auto formatProgress = static_cast<double> (directoryScanner.getProgress());
-            const auto safeProgress = std::isfinite (formatProgress)
-                ? std::clamp (formatProgress, 0.0, 1.0) : 1.0;
-            task->setProgress (formatCount > 0
-                ? (static_cast<double> (i) + safeProgress) / formatCount : 1.0);
-
-            if (name.isNotEmpty()
-                && ! juce::MessageManager::callAsync ([this, flag, name]
-                {
-                    if (flag->load (std::memory_order_acquire) && onProgress)
-                        onProgress (name);
-                }))
-            {
-                juce::Logger::writeToLog ("PluginScanner: nao foi possivel publicar o progresso na message thread.");
-            }
+            auto* pathNode = config->createNewChildElement ("PATH");
+            pathNode->setAttribute ("format", format->getName());
+            pathNode->setAttribute ("directory", paths[path].getFullPathName());
         }
     }
 
-    cancelled = shouldCancel();
-    if (! cancelled)
+    bool success = false;
+    std::shared_ptr<juce::XmlElement> resultXml;
+    juce::ChildProcess child;
+    auto workerExecutable = juce::File (PROJECT_FREEDOM_PLUGIN_WORKER_PATH);
+    if (workerExecutable.existsAsFile() && config->writeTo (inputFile))
     {
-        const auto types = knownList.getTypes();
-        for (const auto& type : types)
+        juce::StringArray arguments;
+        arguments.add (workerExecutable.getFullPathName());
+        arguments.add ("--plugin-scan-worker");
+        arguments.add (sessionId);
+        arguments.add (juce::String (GetCurrentProcessId()));
+        if (child.start (arguments, 0))
         {
-            bool formatFound = false;
-            for (int i = 0; i < formatManager.getNumFormats(); ++i)
             {
-                auto* format = formatManager.getFormat (i);
-                if (type.pluginFormatName == format->getName())
-                {
-                    formatFound = true;
-                    const juce::File pluginFile (type.fileOrIdentifier);
-                    const auto searchPaths = searchPathsForFormat (*format);
-                    bool isInSearchPath = false;
-                    for (int path = 0; path < searchPaths.getNumPaths(); ++path)
-                    {
-                        const auto directory = searchPaths[path];
-                        if (pluginFile == directory || pluginFile.isAChildOf (directory))
-                        {
-                            isInSearchPath = true;
-                            break;
-                        }
-                    }
+                const std::lock_guard lock (scan->childMutex);
+                scan->child = &child;
+            }
 
-                    if (! isInSearchPath || ! format->fileMightContainThisPluginType (type.fileOrIdentifier))
-                        knownList.removeType (type);
+            juce::String lastPluginName;
+            while (! child.waitForProcessToFinish (100))
+            {
+                if (shouldCancel())
+                {
+                    child.kill();
                     break;
                 }
-            }
-            if (! formatFound)
-                knownList.removeType (type);
-        }
 
-        saveList();
-        task->setProgress (1.0);
+                juce::StringArray progressLines;
+                progressLines.addLines (progressFile.loadFileAsString());
+                if (! progressLines.isEmpty())
+                {
+                    const auto progress = progressLines[0].getDoubleValue();
+                    if (std::isfinite (progress))
+                        task->setProgress (std::clamp (progress, 0.0, 1.0));
+                    if (progressLines.size() > 1 && progressLines[1].isNotEmpty()
+                        && progressLines[1] != lastPluginName)
+                    {
+                        lastPluginName = progressLines[1];
+                        if (! juce::MessageManager::callAsync ([this, flag, lastPluginName]
+                        {
+                            if (flag->load (std::memory_order_acquire) && onProgress)
+                                onProgress (lastPluginName);
+                        }))
+                            juce::Logger::writeToLog (
+                                "PluginScanner: nao foi possivel publicar o progresso na message thread.");
+                    }
+                }
+            }
+
+            {
+                const std::lock_guard lock (scan->childMutex);
+                scan->child = nullptr;
+            }
+            if (! shouldCancel() && child.getExitCode() == 0)
+                if (auto xml = juce::XmlDocument::parse (outputFile);
+                    xml != nullptr && xml->hasTagName ("KNOWNPLUGINS"))
+                {
+                    resultXml = std::shared_ptr<juce::XmlElement> (xml.release());
+                    success = true;
+                }
+        }
+        else
+        {
+            juce::Logger::writeToLog ("PluginScanner: nao foi possivel iniciar o scanner isolado.");
+        }
+    }
+    else
+    {
+        juce::Logger::writeToLog ("PluginScanner: arquivo de configuracao ou executavel do scanner indisponivel.");
     }
 
-    if (! juce::MessageManager::callAsync ([this, flag, scan, task, cancelled]
+    inputFile.deleteFile();
+    outputFile.deleteFile();
+    progressFile.deleteFile();
+    const bool cancelled = shouldCancel();
+    if (! success && ! cancelled)
+        juce::Logger::writeToLog ("PluginScanner: o processo isolado nao concluiu o escaneamento.");
+
+    if (! juce::MessageManager::callAsync ([this, flag, scan, task, cancelled, success, resultXml]
     {
         if (! flag->load (std::memory_order_acquire))
             return;
 
+        if (success && resultXml != nullptr)
+        {
+            knownList.recreateFromXml (*resultXml);
+            saveList();
+            task->setProgress (1.0);
+        }
+        else if (! cancelled)
+        {
+            juce::Logger::writeToLog ("PluginScanner: o processo de escaneamento terminou sem resultados validos.");
+        }
         task->end();
         if (activeScan == scan)
             activeScan.reset();

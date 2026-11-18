@@ -16,6 +16,7 @@ target_sources(ProjectFreedom PRIVATE
     ArrangementView.cpp
     DeviceView.cpp
     AudioEngine.cpp
+    RemotePluginProcessor.cpp
     DrumRackProcessor.cpp
     DrumRackEditor.cpp
     NativeEffectProcessors.cpp
@@ -55,6 +56,39 @@ target_link_libraries(ProjectFreedom
     PRIVATE
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+juce_add_gui_app(ProjectFreedomPluginWorker
+    PRODUCT_NAME "Project Freedom Plugin Worker"
+    COMPANY_NAME "rjc"
+    VERSION ${PROJECT_VERSION})
+
+target_sources(ProjectFreedomPluginWorker PRIVATE
+    PluginWorkerMain.cpp
+    PluginWorkerRuntime.cpp
+    PluginScanRuntime.cpp)
+
+target_compile_definitions(ProjectFreedomPluginWorker PRIVATE
+    JUCE_WEB_BROWSER=0
+    JUCE_USE_CURL=0
+    JUCE_PLUGINHOST_VST=0
+    JUCE_PLUGINHOST_VST3=1
+    JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:ProjectFreedomPluginWorker,JUCE_PRODUCT_NAME>"
+    JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:ProjectFreedomPluginWorker,JUCE_VERSION>")
+
+target_link_libraries(ProjectFreedomPluginWorker
+    PRIVATE
+        juce::juce_audio_utils
+        juce::juce_audio_devices
+        juce::juce_audio_processors
+        juce::juce_gui_basics
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_warning_flags)
+
+set_target_properties(ProjectFreedomPluginWorker PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/app/ProjectFreedom_artefacts/$<CONFIG>")
+
+target_compile_definitions(ProjectFreedom PRIVATE
+    PROJECT_FREEDOM_PLUGIN_WORKER_PATH="$<TARGET_FILE:ProjectFreedomPluginWorker>")
 
 if(WIN32)
     target_link_libraries(ProjectFreedom PRIVATE shell32)
@@ -120,6 +154,7 @@ if(ROLL_BUILD_TESTS)
     add_executable(audio_engine_tests
         ../tests/AudioEngineTests.cpp
         AudioEngine.cpp
+        RemotePluginProcessor.cpp
         DrumRackProcessor.cpp
         DrumRackEditor.cpp
         NativeEffectProcessors.cpp)
@@ -129,7 +164,8 @@ if(ROLL_BUILD_TESTS)
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_PLUGINHOST_VST=0
-        JUCE_PLUGINHOST_VST3=1)
+        JUCE_PLUGINHOST_VST3=1
+        PROJECT_FREEDOM_PLUGIN_WORKER_PATH="$<TARGET_FILE:ProjectFreedomPluginWorker>")
     target_link_libraries(audio_engine_tests
         PRIVATE
             roll_core

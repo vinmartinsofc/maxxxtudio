@@ -3,7 +3,9 @@
 #include "DrumRackEditor.h"
 #include "DrumRackProcessor.h"
 #include "NativeEffectProcessors.h"
+#include "RemotePluginProcessor.h"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 
@@ -1000,3 +1002,95 @@ TEST_CASE ("Cancelling an offline WAV export removes the partial file")
     REQUIRE (result.failed());
     REQUIRE_FALSE (output.file.existsAsFile());
 }
+
+#if defined(_WIN32)
+TEST_CASE ("Remote VST3 processing runs outside the host process", "[integration][plugin-worker]")
+{
+    const auto pluginName = juce::SystemStats::getEnvironmentVariable ("PROJECT_FREEDOM_TEST_PLUGIN", {});
+    if (pluginName.isEmpty())
+    {
+        SUCCEED ("Set PROJECT_FREEDOM_TEST_PLUGIN to a cached VST3 name to run this integration test.");
+        return;
+    }
+
+    const auto pluginListFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                    .getChildFile ("ProjectFreedom").getChildFile ("plugins.xml");
+    const auto pluginListXml = juce::XmlDocument::parse (pluginListFile);
+    REQUIRE (pluginListXml != nullptr);
+
+    juce::KnownPluginList knownPlugins;
+    knownPlugins.recreateFromXml (*pluginListXml);
+    const auto descriptions = knownPlugins.getTypes();
+    const auto description = std::find_if (descriptions.begin(), descriptions.end(),
+        [&pluginName] (const auto& candidate) { return candidate.name.equalsIgnoreCase (pluginName); });
+    REQUIRE (description != descriptions.end());
+    REQUIRE (description->pluginFormatName == "VST3");
+
+    juce::String error;
+    auto processor = RemotePluginProcessor::create (*description, 44100.0, 256, error);
+    INFO ("Plugin creation failed: " << error);
+    REQUIRE (processor != nullptr);
+
+    juce::AudioBuffer<float> buffer (2, 256);
+    buffer.clear();
+    juce::MidiBuffer midi;
+    processor->prepareToPlay (44100.0, 256);
+    processor->processBlock (buffer, midi);
+    REQUIRE_FALSE (processor->hasFailed());
+    for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+        for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+            REQUIRE (std::isfinite (buffer.getSample (channel, sample)));
+
+    juce::MemoryBlock state;
+    processor->getStateInformation (state);
+    REQUIRE_FALSE (processor->hasFailed());
+}
+
+TEST_CASE ("Plugin scanning runs in the isolated worker", "[integration][plugin-worker]")
+{
+    const auto sessionId = juce::Uuid().toString().removeCharacters ("{}");
+    const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory);
+    const auto prefix = "project-freedom-scan-" + sessionId + "-";
+    const auto configFile = temp.getChildFile (prefix + "input.xml");
+    const auto outputFile = temp.getChildFile (prefix + "output.xml");
+    const auto progressFile = temp.getChildFile (prefix + "progress.txt");
+    const auto emptyPath = temp.getChildFile ("project-freedom-empty-plugin-scan-" + sessionId);
+    struct Cleanup
+    {
+        juce::File config, output, progress, directory;
+        ~Cleanup()
+        {
+            config.deleteFile();
+            output.deleteFile();
+            progress.deleteFile();
+            directory.deleteRecursively();
+        }
+    } cleanup { configFile, outputFile, progressFile, emptyPath };
+    REQUIRE (emptyPath.createDirectory().wasOk());
+
+    juce::XmlElement config ("PLUGIN_SCAN");
+    juce::KnownPluginList knownPlugins;
+    config.addChildElement (knownPlugins.createXml().release());
+    auto* path = config.createNewChildElement ("PATH");
+    path->setAttribute ("format", "VST3");
+    path->setAttribute ("directory", emptyPath.getFullPathName());
+    REQUIRE (config.writeTo (configFile));
+
+    juce::ChildProcess child;
+    juce::StringArray arguments;
+    arguments.add (PROJECT_FREEDOM_PLUGIN_WORKER_PATH);
+    arguments.add ("--plugin-scan-worker");
+    arguments.add (sessionId);
+    arguments.add (juce::String (GetCurrentProcessId()));
+    REQUIRE (child.start (arguments, 0));
+    const bool finished = child.waitForProcessToFinish (30000);
+    if (! finished)
+        child.kill();
+    REQUIRE (finished);
+    REQUIRE (child.getExitCode() == 0);
+    const auto outputXml = juce::XmlDocument::parse (outputFile);
+    REQUIRE (outputXml != nullptr);
+    REQUIRE (outputXml->hasTagName ("KNOWNPLUGINS"));
+
+}
+#endif
