@@ -13,7 +13,7 @@ class EffectParameter final : public juce::AudioProcessorParameterWithID
 public:
     enum class Kind
     {
-        Decibels, Width, Balance, Percent, Rate, Frequency, Degrees, Toggle, Shape, ChannelMode
+        Decibels, Width, Balance, Percent, Rate, Degrees, Toggle, Shape, ChannelMode
     };
 
     EffectParameter (const juce::String& id, const juce::String& name,
@@ -29,8 +29,6 @@ public:
         newValue = std::clamp (newValue, 0.0f, 1.0f);
         if (kind == Kind::Toggle)
             newValue = newValue >= 0.5f ? 1.0f : 0.0f;
-        else if (kind == Kind::Shape)
-            newValue = std::round (newValue * 4.0f) / 4.0f;
         else if (kind == Kind::ChannelMode)
             newValue = std::round (newValue * 3.0f) / 3.0f;
         value.store (newValue, std::memory_order_relaxed);
@@ -40,22 +38,19 @@ public:
     {
         switch (kind)
         {
-            case Kind::Decibels: return juce::String (normalized * 24.0f - 12.0f, 1) + " dB";
+            case Kind::Decibels: return juce::String (decibelsFromNormalized (normalized), 1) + " dB";
             case Kind::Width: return juce::String (normalized * 200.0f, 0) + "%";
             case Kind::Balance: return juce::String (normalized * 200.0f - 100.0f, 0);
             case Kind::Percent: return juce::String (normalized * 100.0f, 0) + "%";
-            case Kind::Rate: return juce::String (0.05f + normalized * 9.95f, 2) + " Hz";
-            case Kind::Frequency: return juce::String (20.0f + normalized * 480.0f, 0) + " Hz";
+            case Kind::Rate:
+            {
+                const auto rate = UtilityProcessor::rateFromNormalized (normalized);
+                return juce::String (rate, rate >= 10.0f ? 1 : 2) + " Hz";
+            }
             case Kind::Degrees: return juce::String (normalized * 360.0f, 0) + "\u00b0";
             case Kind::Toggle: return normalized >= 0.5f ? "On" : "Off";
             case Kind::Shape:
-            {
-                static constexpr std::array<const char*, 5> names {
-                    "Sine", "Triangle", "Square", "Saw Up", "Saw Down"
-                };
-                return names[static_cast<std::size_t> (std::clamp (static_cast<int> (std::round (normalized * 4.0f)),
-                                                                    0, 4))];
-            }
+                return juce::String (normalized * 100.0f, 0) + "%";
             case Kind::ChannelMode:
             {
                 static constexpr std::array<const char*, 4> names { "Stereo", "Left", "Right", "Swap" };
@@ -71,20 +66,19 @@ public:
         const auto number = text.getFloatValue();
         switch (kind)
         {
-            case Kind::Decibels: return std::clamp ((number + 12.0f) / 24.0f, 0.0f, 1.0f);
+            case Kind::Decibels: return normalizedFromDecibels (number);
             case Kind::Width: return std::clamp (number / 200.0f, 0.0f, 1.0f);
             case Kind::Balance: return std::clamp ((number + 100.0f) / 200.0f, 0.0f, 1.0f);
             case Kind::Percent: return std::clamp (number / 100.0f, 0.0f, 1.0f);
-            case Kind::Rate: return std::clamp ((number - 0.05f) / 9.95f, 0.0f, 1.0f);
-            case Kind::Frequency: return std::clamp ((number - 20.0f) / 480.0f, 0.0f, 1.0f);
+            case Kind::Rate: return UtilityProcessor::normalizedFromRate (number);
             case Kind::Degrees: return std::clamp (number / 360.0f, 0.0f, 1.0f);
             case Kind::Toggle: return text.equalsIgnoreCase ("On") ? 1.0f : 0.0f;
-            case Kind::Shape:
+            case Kind::Shape: return std::clamp (number / 100.0f, 0.0f, 1.0f);
             case Kind::ChannelMode:
-                for (int index = 0; index < (kind == Kind::Shape ? 5 : 4); ++index)
-                    if (getText (static_cast<float> (index) / (kind == Kind::Shape ? 4.0f : 3.0f), 32)
+                for (int index = 0; index < 4; ++index)
+                    if (getText (static_cast<float> (index) / 3.0f, 32)
                             .equalsIgnoreCase (text))
-                        return static_cast<float> (index) / (kind == Kind::Shape ? 4.0f : 3.0f);
+                        return static_cast<float> (index) / 3.0f;
                 return 0.0f;
         }
         jassertfalse;
@@ -92,12 +86,27 @@ public:
     }
 
     Kind getKind() const { return kind; }
+    static float decibelsFromNormalized (float normalized)
+    {
+        return normalized * 84.0f - 60.0f;
+    }
+
+    static float normalizedFromDecibels (float decibels)
+    {
+        return std::clamp ((decibels + 60.0f) / 84.0f, 0.0f, 1.0f);
+    }
 
 private:
     std::atomic<float> value;
     float defaultValue;
     Kind kind;
 };
+
+float autoPanWaveform (float phase, float shape)
+{
+    const float sine = std::sin (phase);
+    return std::copysign (std::pow (std::abs (sine), 1.0f - shape), sine);
+}
 
 class ParameterButton final : public juce::TextButton
 {
@@ -172,11 +181,10 @@ public:
                     };
                     addAndMakeVisible (*control->toggle);
                 }
-                else if (control->definition->getKind() == EffectParameter::Kind::Shape
-                         || control->definition->getKind() == EffectParameter::Kind::ChannelMode)
+                else if (control->definition->getKind() == EffectParameter::Kind::ChannelMode)
                 {
                     control->choice = std::make_unique<ParameterComboBox>();
-                    const int count = control->definition->getKind() == EffectParameter::Kind::Shape ? 5 : 4;
+                    constexpr int count = 4;
                     for (int index = 0; index < count; ++index)
                         control->choice->addItem (
                             parameter->getText (static_cast<float> (index) / static_cast<float> (count - 1), 32),
@@ -199,7 +207,7 @@ public:
                         resetParameter (*parameter);
                         choice->setSelectedId (
                             static_cast<int> (std::round (parameter->getValue()
-                                                          * static_cast<float> (count - 1))) + 1,
+                                                          * 3.0f)) + 1,
                             juce::dontSendNotification);
                     };
                     addAndMakeVisible (*control->choice);
@@ -243,7 +251,7 @@ public:
                 controls.push_back (std::move (control));
             }
         resized();
-        startTimerHz (30);
+        startTimerHz (60);
     }
 
     ~NativeEffectEditor() override
@@ -341,9 +349,8 @@ private:
             }
             if (control->choice != nullptr)
             {
-                const int count = control->definition->getKind() == EffectParameter::Kind::Shape ? 5 : 4;
                 control->choice->setSelectedId (
-                    static_cast<int> (std::round (value * static_cast<float> (count - 1))) + 1,
+                    static_cast<int> (std::round (value * 3.0f)) + 1,
                     juce::dontSendNotification);
             }
         }
@@ -359,25 +366,9 @@ private:
         return 0.0f;
     }
 
-    float lfoValue (float phase) const
-    {
-        const float shape = std::round (parameterValue ("pan_shape") * 4.0f);
-        const float cycle = std::fmod (phase / juce::MathConstants<float>::twoPi, 1.0f);
-        if (shape == 1.0f)
-            return 2.0f / juce::MathConstants<float>::pi
-                 * std::asin (std::sin (phase));
-        if (shape == 2.0f)
-            return std::sin (phase) >= 0.0f ? 1.0f : -1.0f;
-        if (shape == 3.0f)
-            return 2.0f * cycle - 1.0f;
-        if (shape == 4.0f)
-            return 1.0f - 2.0f * cycle;
-        return std::sin (phase);
-    }
-
     void drawPanVisualization (juce::Graphics& g, juce::Rectangle<int> bounds)
     {
-        auto waveform = bounds.removeFromTop (54);
+        auto waveform = bounds.removeFromTop (64);
         waveform.reduce (28, 0);
         const float centreY = static_cast<float> (waveform.getCentreY());
         const float amplitude = std::max (2.0f, static_cast<float> (waveform.getHeight()) * 0.44f);
@@ -386,17 +377,22 @@ private:
                     static_cast<float> (waveform.getRight()), centreY, 1.0f);
 
         juce::Path leftPath, rightPath;
+        const float amount = parameterValue ("pan_amount");
+        const float phaseOffset = parameterValue ("pan_phase")
+                                * juce::MathConstants<float>::twoPi;
+        const float shape = parameterValue ("pan_shape");
         constexpr int points = 180;
         for (int index = 0; index <= points; ++index)
         {
             const float proportion = static_cast<float> (index) / static_cast<float> (points);
-            const float phase = proportion * juce::MathConstants<float>::twoPi * 2.0f
-                              + parameterValue ("pan_phase") * juce::MathConstants<float>::twoPi;
-            const float pan = lfoValue (phase) * parameterValue ("pan_amount");
+            const float phase = proportion * juce::MathConstants<float>::twoPi
+                              + static_cast<float> (utility.modulationPhase());
+            const float leftModulation = autoPanWaveform (phase, shape);
+            const float rightModulation = autoPanWaveform (phase + phaseOffset, shape);
             const auto x = static_cast<float> (waveform.getX())
                          + proportion * static_cast<float> (waveform.getWidth());
-            const auto leftY = centreY - pan * amplitude;
-            const auto rightY = centreY + pan * amplitude;
+            const auto leftY = centreY - leftModulation * amount * amplitude;
+            const auto rightY = centreY - rightModulation * amount * amplitude;
             if (index == 0)
             {
                 leftPath.startNewSubPath (x, leftY);
@@ -413,30 +409,37 @@ private:
         g.setColour (theme::warning());
         g.strokePath (rightPath, juce::PathStrokeType (2.0f));
 
-        const auto phase = static_cast<float> (utility.modulationPhase());
-        const float playheadX = static_cast<float> (waveform.getX())
-            + std::fmod (phase / juce::MathConstants<float>::twoPi, 2.0f) * 0.5f
-                * static_cast<float> (waveform.getWidth());
-        g.setColour (theme::text().withAlpha (0.7f));
-        g.drawLine (playheadX, static_cast<float> (waveform.getY()),
-                    playheadX, static_cast<float> (waveform.getBottom()), 1.0f);
+        const auto directionLabels = bounds.removeFromBottom (20);
+        const auto panField = directionLabels.reduced (26, 0);
+        const auto panCentreY = static_cast<float> (panField.getCentreY());
+        g.setColour (theme::border());
+        g.drawLine (static_cast<float> (panField.getX()), panCentreY,
+                    static_cast<float> (panField.getRight()), panCentreY, 2.0f);
+        g.drawLine (static_cast<float> (panField.getCentreX()), panCentreY - 4.0f,
+                    static_cast<float> (panField.getCentreX()), panCentreY + 4.0f, 1.0f);
 
-        auto panField = bounds.removeFromBottom (20).reduced (28, 0);
-        const float centreX = static_cast<float> (panField.getX())
-            + (parameterValue ("balance") + 0.5f) * static_cast<float> (panField.getWidth())
-            + lfoValue (phase + parameterValue ("pan_phase") * juce::MathConstants<float>::twoPi)
-                * parameterValue ("pan_amount") * static_cast<float> (panField.getWidth()) * 0.5f;
-        g.setColour (theme::textDim());
-        g.drawText ("L", bounds.withWidth (20), juce::Justification::centredLeft);
-        g.drawText ("R", bounds.withX (bounds.getRight() - 20).withWidth (20),
-                    juce::Justification::centredRight);
-        g.drawLine (static_cast<float> (panField.getX()), static_cast<float> (panField.getCentreY()),
-                    static_cast<float> (panField.getRight()), static_cast<float> (panField.getCentreY()), 2.0f);
+        const float balance = parameterValue ("balance") * 2.0f - 1.0f;
+        const float balanceAngle = (balance + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+        const float leftBalanceGain = std::cos (balanceAngle) * juce::MathConstants<float>::sqrt2;
+        const float rightBalanceGain = std::sin (balanceAngle) * juce::MathConstants<float>::sqrt2;
+        const float currentPhase = static_cast<float> (utility.modulationPhase());
+        const float leftModulation = autoPanWaveform (currentPhase, shape);
+        const float rightModulation = autoPanWaveform (currentPhase + phaseOffset, shape);
+        const float leftGain = leftBalanceGain * (1.0f - amount * 0.5f * (1.0f - leftModulation));
+        const float rightGain = rightBalanceGain * (1.0f - amount * 0.5f * (1.0f - rightModulation));
+        const float totalGain = leftGain + rightGain;
+        const float panPosition = totalGain > 0.000001f
+                                ? juce::jlimit (-1.0f, 1.0f, (rightGain - leftGain) / totalGain)
+                                : 0.0f;
+        const float markerX = static_cast<float> (panField.getCentreX())
+                            + panPosition * static_cast<float> (panField.getWidth()) * 0.5f;
         g.setColour (theme::accent());
-        const float markerX = juce::jlimit (static_cast<float> (panField.getX()),
-                                             static_cast<float> (panField.getRight()), centreX);
-        g.fillEllipse (juce::Rectangle<float> (markerX - 5.0f, static_cast<float> (panField.getCentreY()) - 5.0f,
-                                               10.0f, 10.0f));
+        g.fillEllipse (juce::Rectangle<float> (markerX - 4.0f, panCentreY - 4.0f, 8.0f, 8.0f));
+
+        g.setColour (theme::textDim());
+        g.drawText ("L", directionLabels.withWidth (20), juce::Justification::centredLeft);
+        g.drawText ("R", directionLabels.withX (directionLabels.getRight() - 20).withWidth (20),
+                    juce::Justification::centredRight);
     }
 
     juce::String title;
@@ -456,7 +459,7 @@ UtilityProcessor::UtilityProcessor()
         .withInput ("Input", juce::AudioChannelSet::stereo(), true)
         .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
-    addParameter (new EffectParameter ("gain", "Gain", 0.5f, 0.5f,
+    addParameter (new EffectParameter ("gain", "Gain", 5.0f / 7.0f, 5.0f / 7.0f,
                                        EffectParameter::Kind::Decibels));
     addParameter (new EffectParameter ("width", "Width", 0.5f, 0.5f,
                                        EffectParameter::Kind::Width));
@@ -468,18 +471,16 @@ UtilityProcessor::UtilityProcessor()
                                        EffectParameter::Kind::Toggle));
     addParameter (new EffectParameter ("invert_phase", "Invert Phase", 0.0f, 0.0f,
                                        EffectParameter::Kind::Toggle));
-    addParameter (new EffectParameter ("pan_amount", "Pan Amount", 0.0f, 0.0f,
+    addParameter (new EffectParameter ("pan_amount", "Amount", 0.0f, 0.0f,
                                        EffectParameter::Kind::Percent));
-    addParameter (new EffectParameter ("pan_rate", "Pan Rate", 0.0120603f, 0.0120603f,
+    addParameter (new EffectParameter ("pan_rate", "Rate", 0.5f, 0.5f,
                                        EffectParameter::Kind::Rate));
-    addParameter (new EffectParameter ("pan_phase", "LFO Phase", 0.5f, 0.5f,
+    addParameter (new EffectParameter ("pan_phase", "Phase", 0.5f, 0.5f,
                                        EffectParameter::Kind::Degrees));
     addParameter (new EffectParameter ("pan_shape", "Shape", 0.0f, 0.0f,
                                        EffectParameter::Kind::Shape));
     addParameter (new EffectParameter ("bass_mono", "Bass Mono", 0.0f, 0.0f,
                                        EffectParameter::Kind::Toggle));
-    addParameter (new EffectParameter ("bass_mono_frequency", "Bass Freq", 100.0f / 480.0f,
-                                       100.0f / 480.0f, EffectParameter::Kind::Frequency));
     addParameter (new EffectParameter ("mute", "Mute", 0.0f, 0.0f,
                                        EffectParameter::Kind::Toggle));
     addParameter (new EffectParameter ("dc", "DC", 0.0f, 0.0f,
@@ -509,24 +510,27 @@ void UtilityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         return 0.0f;
     };
 
-    const float gain = std::pow (10.0f, (parameterValue ("gain") * 24.0f - 12.0f) / 20.0f);
+    const float gain = std::pow (10.0f, EffectParameter::decibelsFromNormalized (
+                                     parameterValue ("gain")) / 20.0f);
     const float width = parameterValue ("width") * 2.0f;
     const float balance = parameterValue ("balance") * 2.0f - 1.0f;
     const int channelMode = static_cast<int> (std::round (parameterValue ("channel_mode") * 3.0f));
     const bool mono = parameterValue ("mono") >= 0.5f;
     const float phaseSign = parameterValue ("invert_phase") >= 0.5f ? -1.0f : 1.0f;
     const float panAmount = parameterValue ("pan_amount");
-    const float panRate = 0.05f + parameterValue ("pan_rate") * 9.95f;
+    const float panRate = rateFromNormalized (parameterValue ("pan_rate"));
     const float panPhase = parameterValue ("pan_phase") * juce::MathConstants<float>::twoPi;
-    const int panShape = static_cast<int> (std::round (parameterValue ("pan_shape") * 4.0f));
+    const float panShape = parameterValue ("pan_shape");
     const bool bassMonoEnabled = parameterValue ("bass_mono") >= 0.5f;
-    const float bassMonoFrequency = 20.0f + parameterValue ("bass_mono_frequency") * 480.0f;
     const bool muted = parameterValue ("mute") >= 0.5f;
     const bool removeDc = parameterValue ("dc") >= 0.5f;
+    const float balanceAngle = (balance + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+    const float leftBalanceGain = std::cos (balanceAngle) * juce::MathConstants<float>::sqrt2;
+    const float rightBalanceGain = std::sin (balanceAngle) * juce::MathConstants<float>::sqrt2;
     const float dcCoefficient = std::exp (-juce::MathConstants<float>::twoPi * 10.0f
                                           / static_cast<float> (sampleRate));
     const float bassCoefficient = 1.0f - std::exp (-juce::MathConstants<float>::twoPi
-                                                   * bassMonoFrequency / static_cast<float> (sampleRate));
+                                                   * 100.0f / static_cast<float> (sampleRate));
     double phase = currentLfoPhase.load (std::memory_order_relaxed);
     float* left = buffer.getWritePointer (0);
     float* right = buffer.getWritePointer (1);
@@ -570,27 +574,14 @@ void UtilityProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         if (mono)
             l = r = mid;
 
-        const float cycle = static_cast<float> ((phase + static_cast<double> (panPhase))
-                                                / juce::MathConstants<double>::twoPi);
-        const float normalizedCycle = cycle - std::floor (cycle);
-        const float angle = static_cast<float> (phase) + panPhase;
-        float modulation = std::sin (angle);
-        if (panShape == 1)
-            modulation = 2.0f / juce::MathConstants<float>::pi * std::asin (std::sin (angle));
-        else if (panShape == 2)
-            modulation = std::sin (angle) >= 0.0f ? 1.0f : -1.0f;
-        else if (panShape == 3)
-            modulation = 2.0f * normalizedCycle - 1.0f;
-        else if (panShape == 4)
-            modulation = 1.0f - 2.0f * normalizedCycle;
+        const float phaseAtSample = static_cast<float> (phase);
+        const float leftModulation = autoPanWaveform (phaseAtSample, panShape);
+        const float rightModulation = autoPanWaveform (phaseAtSample + panPhase, panShape);
+        const float leftAutoPanGain = 1.0f - panAmount * 0.5f * (1.0f - leftModulation);
+        const float rightAutoPanGain = 1.0f - panAmount * 0.5f * (1.0f - rightModulation);
 
-        const float pan = juce::jlimit (-1.0f, 1.0f, balance + modulation * panAmount);
-        const float panAngle = (pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
-        const float leftGain = std::cos (panAngle) * juce::MathConstants<float>::sqrt2;
-        const float rightGain = std::sin (panAngle) * juce::MathConstants<float>::sqrt2;
-
-        left[sample] = muted ? 0.0f : l * leftGain * gain * phaseSign;
-        right[sample] = muted ? 0.0f : r * rightGain * gain * phaseSign;
+        left[sample] = muted ? 0.0f : l * leftBalanceGain * leftAutoPanGain * gain * phaseSign;
+        right[sample] = muted ? 0.0f : r * rightBalanceGain * rightAutoPanGain * gain * phaseSign;
 
         phase += juce::MathConstants<double>::twoPi * panRate / sampleRate;
         if (phase >= juce::MathConstants<double>::twoPi)
@@ -606,7 +597,7 @@ AutoPanProcessor::AutoPanProcessor()
         .withInput ("Input", juce::AudioChannelSet::stereo(), true)
         .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
-    addParameter (new EffectParameter ("rate", "Rate", 0.25f, 0.25f,
+    addParameter (new EffectParameter ("rate", "Rate", 0.5f, 0.5f,
                                        EffectParameter::Kind::Rate));
     addParameter (new EffectParameter ("depth", "Depth", 0.5f, 0.5f,
                                        EffectParameter::Kind::Percent));
@@ -625,7 +616,7 @@ void AutoPanProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
         if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter))
         {
             if (identified->paramID == "rate")
-                rate = 0.05f + parameter->getValue() * 9.95f;
+                rate = UtilityProcessor::rateFromNormalized (parameter->getValue());
             else if (identified->paramID == "depth")
                 depth = parameter->getValue();
             else if (identified->paramID == "phase")
@@ -653,6 +644,8 @@ namespace
 void storeNativeParameterState (juce::AudioProcessor& processor, juce::MemoryBlock& destination)
 {
     juce::XmlElement xml ("NativeEffect");
+    xml.setAttribute ("gainRangeVersion", 3);
+    xml.setAttribute ("rateRangeVersion", 1);
     for (int index = 0; index < static_cast<int> (processor.getParameters().size()); ++index)
     {
         auto* parameter = processor.getParameters()[static_cast<std::size_t> (index)];
@@ -676,6 +669,7 @@ void restoreNativeParameterState (juce::AudioProcessor& processor, const void* d
     auto xml = juce::XmlDocument::parse (text);
     if (xml == nullptr || ! xml->hasTagName ("NativeEffect"))
         return;
+    const int gainRangeVersion = xml->getIntAttribute ("gainRangeVersion", 0);
     bool containsUnifiedAutoPanParameters = false;
     for (auto* node = xml->getFirstChildElement(); node != nullptr; node = node->getNextElement())
         containsUnifiedAutoPanParameters = containsUnifiedAutoPanParameters
@@ -685,7 +679,21 @@ void restoreNativeParameterState (juce::AudioProcessor& processor, const void* d
     {
         auto id = node->getStringAttribute ("id");
         float value = static_cast<float> (node->getDoubleAttribute ("value", 0.0));
-        if (id == "invert_left" || id == "invert_right")
+        if (id == "gain")
+        {
+            if (gainRangeVersion < 2)
+                value = (2.0f + value) / 3.0f;
+            if (gainRangeVersion < 3)
+                value *= 6.0f / 7.0f;
+        }
+        else if (id == "pan_rate" || id == "rate")
+        {
+            if (xml->getIntAttribute ("rateRangeVersion", 0) < 1)
+                value = UtilityProcessor::migrateLegacyRate (value);
+            if (id == "rate" && dynamic_cast<UtilityProcessor*> (&processor) != nullptr)
+                id = "pan_rate";
+        }
+        else if (id == "invert_left" || id == "invert_right")
         {
             id = "invert_phase";
             for (auto* candidate : processor.getParameters())

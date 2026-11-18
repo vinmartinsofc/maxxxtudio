@@ -801,25 +801,76 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
         }
     }
 
-    std::set<int> legacyUtilityTracks, legacyAutoPanTracks;
-    for (const auto& plugin : loaded.plugins)
+    const auto migrateLegacyGainValue = [] (double value, int version)
+    {
+        if (version < 2)
+            value = (2.0 + value) / 3.0;
+        if (version < 3)
+            value *= 6.0 / 7.0;
+        return value;
+    };
+    std::set<int> legacyUtilityTracks, legacyAutoPanTracks, legacyRateTracks;
+    std::map<int, int> legacyGainTracks;
+    for (auto& plugin : loaded.plugins)
     {
         if (plugin.identifier == AutoPanProcessor::pluginIdentifier)
         {
             legacyAutoPanTracks.insert (plugin.trackId);
+            std::unique_ptr<juce::XmlElement> stateXml;
+            if (plugin.state.getSize() > 0)
+                stateXml = juce::XmlDocument::parse (xmlStringFromBlock (plugin.state));
+            if (stateXml == nullptr || stateXml->getIntAttribute ("rateRangeVersion", 0) < 1)
+                legacyRateTracks.insert (plugin.trackId);
             continue;
         }
-        if (plugin.identifier != UtilityProcessor::pluginIdentifier || plugin.state.getSize() == 0)
+        if (plugin.identifier != UtilityProcessor::pluginIdentifier)
             continue;
 
-        const auto stateXml = juce::XmlDocument::parse (xmlStringFromBlock (plugin.state));
+        const bool hadState = plugin.state.getSize() > 0;
+        auto stateXml = hadState
+            ? juce::XmlDocument::parse (xmlStringFromBlock (plugin.state))
+            : std::make_unique<juce::XmlElement> ("NativeEffect");
         bool hasUnifiedPanParameters = false;
         if (stateXml != nullptr && stateXml->hasTagName ("NativeEffect"))
+        {
+            const int gainRangeVersion = stateXml->getIntAttribute ("gainRangeVersion", 0);
+            const int rateRangeVersion = stateXml->getIntAttribute ("rateRangeVersion", 0);
+            if (gainRangeVersion < 3)
+            {
+                const auto [legacyGain, inserted] =
+                    legacyGainTracks.emplace (plugin.trackId, gainRangeVersion);
+                if (! inserted)
+                    legacyGain->second = std::min (legacyGain->second, gainRangeVersion);
+                for (auto* parameter = stateXml->getFirstChildElement();
+                     parameter != nullptr; parameter = parameter->getNextElement())
+                    if (parameter->getStringAttribute ("id") == "gain")
+                        parameter->setAttribute ("value",
+                            migrateLegacyGainValue (
+                                parameter->getDoubleAttribute ("value", 0.0), gainRangeVersion));
+                stateXml->setAttribute ("gainRangeVersion", 3);
+                storeXmlInBlock (*stateXml, plugin.state);
+            }
+            if (rateRangeVersion < 1)
+            {
+                for (auto* parameter = stateXml->getFirstChildElement();
+                     parameter != nullptr; parameter = parameter->getNextElement())
+                {
+                    const auto id = parameter->getStringAttribute ("id");
+                    if (id == "pan_rate" || id == "rate")
+                        parameter->setAttribute ("value",
+                            UtilityProcessor::migrateLegacyRate (
+                                static_cast<float> (parameter->getDoubleAttribute ("value", 0.0))));
+                }
+                stateXml->setAttribute ("rateRangeVersion", 1);
+                storeXmlInBlock (*stateXml, plugin.state);
+                legacyRateTracks.insert (plugin.trackId);
+            }
             for (auto* parameter = stateXml->getFirstChildElement();
                  parameter != nullptr; parameter = parameter->getNextElement())
                 hasUnifiedPanParameters = hasUnifiedPanParameters
                     || parameter->getStringAttribute ("id") == "pan_rate";
-        if (! hasUnifiedPanParameters)
+        }
+        if (hadState && ! hasUnifiedPanParameters)
             legacyUtilityTracks.insert (plugin.trackId);
     }
 
@@ -837,19 +888,19 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
                 if (target.parameterId == "rate")
                 {
                     target.parameterId = "pan_rate";
-                    target.parameterName = "Pan Rate";
+                    target.parameterName = "Rate";
                     target.parameterIndex = 7;
                 }
                 else if (target.parameterId == "depth")
                 {
                     target.parameterId = "pan_amount";
-                    target.parameterName = "Pan Amount";
+                    target.parameterName = "Amount";
                     target.parameterIndex = 6;
                 }
                 else if (target.parameterId == "phase")
                 {
                     target.parameterId = "pan_phase";
-                    target.parameterName = "LFO Phase";
+                    target.parameterName = "Phase";
                     target.parameterIndex = 8;
                 }
             }
@@ -869,6 +920,26 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
                     target.parameterName = "Invert Phase";
                     target.parameterIndex = 5;
                 }
+            }
+
+            if (const auto legacyGain = legacyGainTracks.find (track.id);
+                legacyGain != legacyGainTracks.end()
+                && target.pluginIdentifier == UtilityProcessor::pluginIdentifier
+                && target.parameterId == "gain")
+            {
+                target.currentValue = migrateLegacyGainValue (target.currentValue, legacyGain->second);
+                for (auto& point : envelope.points)
+                    point.value = migrateLegacyGainValue (point.value, legacyGain->second);
+            }
+
+            if (legacyRateTracks.contains (track.id)
+                && target.pluginIdentifier == UtilityProcessor::pluginIdentifier
+                && target.parameterId == "pan_rate")
+            {
+                target.currentValue = UtilityProcessor::migrateLegacyRate (
+                    static_cast<float> (target.currentValue));
+                for (auto& point : envelope.points)
+                    point.value = UtilityProcessor::migrateLegacyRate (static_cast<float> (point.value));
             }
         }
 

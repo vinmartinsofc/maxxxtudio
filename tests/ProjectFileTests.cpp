@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include "ProjectFile.h"
 #include "DrumRackProcessor.h"
+#include "NativeEffectProcessors.h"
 
 namespace
 {
@@ -132,6 +134,108 @@ TEST_CASE ("Project files preserve mixer and plugin automation envelopes")
     REQUIRE (envelope.target.deviceIndex == 1);
     REQUIRE (envelope.target.currentValue == 0.4);
     REQUIRE (envelope.points == data.project.tracks[0].automation[0].points);
+}
+
+TEST_CASE ("Project files migrate legacy Volume Master gain and rate automation")
+{
+    TemporaryProjectFolder temporary;
+    ProjectFileData data;
+    data.project.master.id = AudioEngine::masterTrackId;
+    roll::Track track;
+    track.id = 1;
+    track.automation.push_back ({
+        { roll::AutomationParameterType::PluginParameter, UtilityProcessor::pluginIdentifier, "gain",
+          "Gain", 0, 0, 0.25 },
+        { { 0.0, 0.25 }, { 4.0, 0.75 } }
+    });
+    track.automation.push_back ({
+        { roll::AutomationParameterType::PluginParameter, UtilityProcessor::pluginIdentifier, "pan_rate",
+          "Rate", 7, 0, 0.1 },
+        { { 0.0, 0.1 }, { 4.0, 0.9 } }
+    });
+    data.project.tracks.push_back (track);
+    roll::Track rangeTwoTrack;
+    rangeTwoTrack.id = 2;
+    rangeTwoTrack.automation.push_back ({
+        { roll::AutomationParameterType::PluginParameter, UtilityProcessor::pluginIdentifier, "gain",
+          "Gain", 0, 0, 0.25 },
+        { { 0.0, 0.25 }, { 4.0, 0.75 } }
+    });
+    data.project.tracks.push_back (rangeTwoTrack);
+
+    juce::XmlElement oldState ("NativeEffect");
+    auto* gain = oldState.createNewChildElement ("Parameter");
+    gain->setAttribute ("id", "gain");
+    gain->setAttribute ("value", 0.25);
+    auto* rate = oldState.createNewChildElement ("Parameter");
+    rate->setAttribute ("id", "pan_rate");
+    rate->setAttribute ("value", 0.1);
+    juce::MemoryOutputStream stateStream;
+    oldState.writeTo (stateStream);
+    PluginState plugin;
+    plugin.trackId = 1;
+    plugin.order = 0;
+    plugin.identifier = UtilityProcessor::pluginIdentifier;
+    plugin.state.replaceAll (stateStream.getData(), stateStream.getDataSize());
+    data.plugins.push_back (std::move (plugin));
+    juce::XmlElement rangeTwoState ("NativeEffect");
+    rangeTwoState.setAttribute ("gainRangeVersion", 2);
+    auto* rangeTwoGain = rangeTwoState.createNewChildElement ("Parameter");
+    rangeTwoGain->setAttribute ("id", "gain");
+    rangeTwoGain->setAttribute ("value", 0.25);
+    juce::MemoryOutputStream rangeTwoStream;
+    rangeTwoState.writeTo (rangeTwoStream);
+    PluginState rangeTwoPlugin;
+    rangeTwoPlugin.trackId = 2;
+    rangeTwoPlugin.order = 0;
+    rangeTwoPlugin.identifier = UtilityProcessor::pluginIdentifier;
+    rangeTwoPlugin.state.replaceAll (rangeTwoStream.getData(), rangeTwoStream.getDataSize());
+    data.plugins.push_back (std::move (rangeTwoPlugin));
+
+    const auto file = temporary.folder.getChildFile ("legacy_gain_automation.pfs");
+    REQUIRE (ProjectFile::save (file, data).wasOk());
+
+    ProjectFileData loaded;
+    REQUIRE (ProjectFile::load (file, loaded).wasOk());
+    REQUIRE (loaded.project.tracks[0].automation.size() == 2);
+    const auto& legacyEnvelope = loaded.project.tracks[0].automation[0];
+    REQUIRE (std::abs (legacyEnvelope.target.currentValue - 9.0 / 14.0) < 0.000001);
+    REQUIRE (legacyEnvelope.points.size() == 2);
+    REQUIRE (std::abs (legacyEnvelope.points[0].value - 9.0 / 14.0) < 0.000001);
+    REQUIRE (std::abs (legacyEnvelope.points[1].value - 11.0 / 14.0) < 0.000001);
+    const auto& rateEnvelope = loaded.project.tracks[0].automation[1];
+    REQUIRE (std::abs (rateEnvelope.target.currentValue - UtilityProcessor::migrateLegacyRate (0.1f))
+             < 0.000001);
+    REQUIRE (std::abs (rateEnvelope.points[1].value - UtilityProcessor::migrateLegacyRate (0.9f))
+             < 0.000001);
+    const auto& rangeTwoEnvelope = loaded.project.tracks[1].automation[0];
+    REQUIRE (std::abs (rangeTwoEnvelope.target.currentValue - 3.0 / 14.0) < 0.000001);
+    REQUIRE (std::abs (rangeTwoEnvelope.points[0].value - 3.0 / 14.0) < 0.000001);
+    REQUIRE (std::abs (rangeTwoEnvelope.points[1].value - 9.0 / 14.0) < 0.000001);
+    auto migratedState = juce::XmlDocument::parse (
+        juce::String::fromUTF8 (static_cast<const char*> (loaded.plugins[0].state.getData()),
+                                static_cast<int> (loaded.plugins[0].state.getSize())));
+    REQUIRE (migratedState != nullptr);
+    REQUIRE (migratedState->getIntAttribute ("gainRangeVersion") == 3);
+    REQUIRE (migratedState->getIntAttribute ("rateRangeVersion") == 1);
+    const auto* migratedGain = migratedState->getChildByName ("Parameter");
+    REQUIRE (migratedGain != nullptr);
+    REQUIRE (std::abs (migratedGain->getDoubleAttribute ("value") - 9.0 / 14.0) < 0.000001);
+    const auto* migratedRate = migratedGain->getNextElement();
+    REQUIRE (migratedRate != nullptr);
+    REQUIRE (std::abs (migratedRate->getDoubleAttribute ("value")
+                       - UtilityProcessor::migrateLegacyRate (0.1f)) < 0.000001);
+
+    const auto migratedFile = temporary.folder.getChildFile ("migrated_gain_automation.pfs");
+    REQUIRE (ProjectFile::save (migratedFile, loaded).wasOk());
+    ProjectFileData reloaded;
+    REQUIRE (ProjectFile::load (migratedFile, reloaded).wasOk());
+    REQUIRE (std::abs (reloaded.project.tracks[0].automation[0].points[0].value
+                       - 9.0 / 14.0) < 0.000001);
+    REQUIRE (std::abs (reloaded.project.tracks[0].automation[0].points[1].value
+                       - 11.0 / 14.0) < 0.000001);
+    REQUIRE (std::abs (reloaded.project.tracks[1].automation[0].points[0].value
+                       - 3.0 / 14.0) < 0.000001);
 }
 
 TEST_CASE ("Project files preserve non-destructive MIDI groove settings")

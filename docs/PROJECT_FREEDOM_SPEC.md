@@ -745,6 +745,8 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.54** | Volume Master: ganho ampliado a +24 dB; Amount/Rate/Phase/Shape contínuos, modulação L/R com fase estéreo e visualização em tempo real |
+| **Doc 1.53** | Volume Master: ganho de -60 a +12 dB com migração de automações antigas; indicador de balanço centralizado; controle Bass Freq removido |
 | **Doc 1.52** | Volume Master unificado com Auto Pan e recursos Utility; Pan Master removido como efeito separado, projetos e automações legados migrados |
 | **Doc 1.51** | Volume Master e Pan Master nativos no navegador/banner; parâmetros editáveis e automatizáveis, estado persistente em projetos e duplicação entre trilhas |
 | **Doc 1.50** | Drum Rack arrastável para canais MIDI, com undo/redo, limpeza individual por Delete, confirmação de limpeza total, feedback visual e transporte com Espaço ao focar o plugin; autoplay padrão no navegador de grooves |

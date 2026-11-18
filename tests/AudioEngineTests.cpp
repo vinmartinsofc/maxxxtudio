@@ -138,7 +138,7 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     UtilityProcessor utility;
     REQUIRE (utility.getName() == "Volume Master");
-    REQUIRE (utility.getParameters().size() == 14);
+    REQUIRE (utility.getParameters().size() == 13);
     REQUIRE (std::any_of (utility.getParameters().begin(), utility.getParameters().end(),
         [] (const auto* parameter)
         {
@@ -153,13 +153,44 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     const auto utilityDevices = engine.devices (1);
     REQUIRE (utilityDevices.size() == 1);
     REQUIRE (utilityDevices.front().name == "Volume Master");
-    REQUIRE (utilityDevices.front().automatableParameters.size() == 14);
+    REQUIRE (utilityDevices.front().automatableParameters.size() == 13);
+    const auto findParameter = [&utility] (const juce::String& id)
+    {
+        for (auto* parameter : utility.getParameters())
+            if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                identified != nullptr && identified->paramID == id)
+                return parameter;
+        return static_cast<juce::AudioProcessorParameter*> (nullptr);
+    };
+    const auto* gain = findParameter ("gain");
+    REQUIRE (gain != nullptr);
+    REQUIRE (gain->getText (0.0f, 16) == "-60.0 dB");
+    REQUIRE (gain->getText (5.0f / 7.0f, 16) == "0.0 dB");
+    REQUIRE (gain->getText (1.0f, 16) == "24.0 dB");
+    REQUIRE (gain->getValueForText ("-60 dB") == 0.0f);
+    REQUIRE (std::abs (gain->getValueForText ("0 dB") - 5.0f / 7.0f) < 0.00001f);
+    REQUIRE (gain->getValueForText ("+24 dB") == 1.0f);
+    auto* rate = findParameter ("pan_rate");
+    REQUIRE (rate != nullptr);
+    REQUIRE (rate->getText (0.0f, 16) == "0.01 Hz");
+    REQUIRE (rate->getText (0.5f, 16) == "1.00 Hz");
+    REQUIRE (rate->getText (1.0f, 16) == "100.0 Hz");
+    REQUIRE (std::abs (rate->getValueForText ("90 Hz")
+                       - UtilityProcessor::normalizedFromRate (90.0f)) < 0.00001f);
+    REQUIRE (findParameter ("pan_phase")->getText (0.5f, 16) == "180\u00b0");
+    auto* shape = findParameter ("pan_shape");
+    REQUIRE (shape != nullptr);
+    REQUIRE (shape->getText (0.57f, 16) == "57%");
+    shape->setValue (shape->getValueForText ("57%"));
+    REQUIRE (std::abs (shape->getValue() - 0.57f) < 0.00001f);
+    REQUIRE (findParameter ("bass_mono_frequency") == nullptr);
+    REQUIRE (findParameter ("bass_mono") != nullptr);
     std::unique_ptr<juce::AudioProcessorEditor> utilityEditor (utility.createEditor());
     REQUIRE (utilityEditor != nullptr);
     REQUIRE (utilityEditor->getWidth() == 700);
     REQUIRE (utilityEditor->getHeight() == 400);
     REQUIRE_FALSE (utilityEditor->isResizable());
-    REQUIRE (utilityEditor->getNumChildComponents() == 28);
+    REQUIRE (utilityEditor->getNumChildComponents() == 26);
     for (int index = 0; index < utilityEditor->getNumChildComponents(); ++index)
     {
         const auto* child = utilityEditor->getChildComponent (index);
@@ -190,6 +221,9 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     REQUIRE (buffer.getNumChannels() == 2);
 
     juce::XmlElement oldPanState ("NativeEffect");
+    auto* oldGain = oldPanState.createNewChildElement ("Parameter");
+    oldGain->setAttribute ("id", "gain");
+    oldGain->setAttribute ("value", 0.25);
     for (const auto& [id, value] : { std::pair<const char*, double> { "rate", 0.1 },
                                      { "depth", 0.75 }, { "phase", 0.4 } })
     {
@@ -208,9 +242,62 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
                 return parameter->getValue();
         return -1.0f;
     };
-    REQUIRE (std::abs (findParameterValue (utility, "pan_rate") - 0.1f) < 0.00001f);
+    REQUIRE (std::abs (findParameterValue (utility, "pan_rate")
+                       - UtilityProcessor::migrateLegacyRate (0.1f)) < 0.00001f);
     REQUIRE (std::abs (findParameterValue (utility, "pan_amount") - 0.75f) < 0.00001f);
     REQUIRE (std::abs (findParameterValue (utility, "pan_phase") - 0.4f) < 0.00001f);
+    REQUIRE (std::abs (findParameterValue (utility, "gain") - 9.0f / 14.0f) < 0.00001f);
+
+    juce::MemoryBlock currentState;
+    utility.getStateInformation (currentState);
+    const auto currentStateXml = juce::XmlDocument::parse (
+        juce::String::fromUTF8 (static_cast<const char*> (currentState.getData()),
+                                static_cast<int> (currentState.getSize())));
+    REQUIRE (currentStateXml != nullptr);
+    REQUIRE (currentStateXml->getIntAttribute ("gainRangeVersion") == 3);
+    REQUIRE (currentStateXml->getIntAttribute ("rateRangeVersion") == 1);
+    UtilityProcessor restoredUtility;
+    restoredUtility.setStateInformation (currentState.getData(), static_cast<int> (currentState.getSize()));
+    REQUIRE (std::abs (findParameterValue (restoredUtility, "gain") - 9.0f / 14.0f) < 0.00001f);
+
+    juce::XmlElement priorRangeState ("NativeEffect");
+    priorRangeState.setAttribute ("gainRangeVersion", 2);
+    auto* priorGain = priorRangeState.createNewChildElement ("Parameter");
+    priorGain->setAttribute ("id", "gain");
+    priorGain->setAttribute ("value", 0.25);
+    juce::MemoryOutputStream priorRangeData;
+    priorRangeState.writeTo (priorRangeData);
+    UtilityProcessor priorRangeUtility;
+    priorRangeUtility.setStateInformation (priorRangeData.getData(),
+                                           static_cast<int> (priorRangeData.getDataSize()));
+    REQUIRE (std::abs (findParameterValue (priorRangeUtility, "gain") - 3.0f / 14.0f) < 0.00001f);
+}
+
+TEST_CASE ("Volume Master Rate reaches the high-frequency range")
+{
+    UtilityProcessor processor;
+    processor.prepareToPlay (1000.0, 10);
+    for (auto* parameter : processor.getParameters())
+    {
+        auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+        if (identified != nullptr && identified->paramID == "pan_rate")
+            parameter->setValue (UtilityProcessor::normalizedFromRate (90.0f));
+        else if (identified != nullptr && identified->paramID == "pan_amount")
+            parameter->setValue (1.0f);
+    }
+
+    juce::AudioBuffer<float> buffer (2, 10);
+    buffer.clear();
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        buffer.setSample (0, sample, 1.0f);
+        buffer.setSample (1, sample, 1.0f);
+    }
+    juce::MidiBuffer midi;
+    processor.processBlock (buffer, midi);
+    REQUIRE (buffer.getSample (0, 1) > 0.7f);
+    REQUIRE (std::abs (processor.modulationPhase()
+                       - juce::MathConstants<double>::pi * 1.8) < 0.001);
 }
 
 TEST_CASE ("Volume Master applies stereo width, shared phase inversion, and pan modulation")
@@ -251,6 +338,44 @@ TEST_CASE ("Volume Master applies stereo width, shared phase inversion, and pan 
     processor.processBlock (buffer, midi);
     REQUIRE (std::abs (buffer.getSample (0, 0)) < 0.0001f);
     REQUIRE (buffer.getSample (1, 0) > 1.4f);
+
+    setParameter ("pan_amount", 0.0f);
+    setParameter ("balance", 0.5f);
+    setParameter ("gain", 0.0f);
+    buffer.clear();
+    buffer.setSample (0, 0, 1.0f);
+    buffer.setSample (1, 0, 1.0f);
+    processor.processBlock (buffer, midi);
+    REQUIRE (std::abs (buffer.getSample (0, 0) - 0.001f) < 0.00001f);
+    REQUIRE (std::abs (buffer.getSample (1, 0) - 0.001f) < 0.00001f);
+
+    processor.prepareToPlay (4.0, 4);
+    setParameter ("gain", 5.0f / 7.0f);
+    setParameter ("pan_amount", 1.0f);
+    setParameter ("pan_phase", 0.0f);
+    setParameter ("pan_shape", 0.0f);
+    setParameter ("balance", 0.5f);
+    buffer.clear();
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        buffer.setSample (0, sample, 1.0f);
+        buffer.setSample (1, sample, 1.0f);
+    }
+    processor.processBlock (buffer, midi);
+    REQUIRE (std::abs (buffer.getSample (0, 1) - 1.0f) < 0.0001f);
+    REQUIRE (std::abs (buffer.getSample (1, 1) - 1.0f) < 0.0001f);
+
+    processor.prepareToPlay (4.0, 4);
+    setParameter ("pan_phase", 0.5f);
+    buffer.clear();
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        buffer.setSample (0, sample, 1.0f);
+        buffer.setSample (1, sample, 1.0f);
+    }
+    processor.processBlock (buffer, midi);
+    REQUIRE (std::abs (buffer.getSample (0, 1) - 1.0f) < 0.0001f);
+    REQUIRE (std::abs (buffer.getSample (1, 1)) < 0.0001f);
 }
 
 TEST_CASE ("Drum Rack exposes stable automatable parameters for every pad")

@@ -1,14 +1,35 @@
 #pragma once
 
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 
 class UtilityProcessor final : public juce::AudioProcessor
 {
 public:
     static constexpr const char* pluginIdentifier = "ProjectFreedom.Utility";
+    static constexpr float minimumRateHz = 0.01f;
+    static constexpr float maximumRateHz = 100.0f;
 
     UtilityProcessor();
+    static float rateFromNormalized (float normalized)
+    {
+        return minimumRateHz * std::pow (maximumRateHz / minimumRateHz,
+                                         std::clamp (normalized, 0.0f, 1.0f));
+    }
+    static float normalizedFromRate (float rate)
+    {
+        const auto clampedRate = std::clamp (rate, minimumRateHz, maximumRateHz);
+        return std::log (clampedRate / minimumRateHz)
+             / std::log (maximumRateHz / minimumRateHz);
+    }
+    static float migrateLegacyRate (float normalized)
+    {
+        const auto oldRate = 0.05f + std::clamp (normalized, 0.0f, 1.0f) * 9.95f;
+        return normalizedFromRate (oldRate);
+    }
+    double modulationPhase() const { return currentLfoPhase.load (std::memory_order_relaxed); }
     const juce::String getName() const override { return "Volume Master"; }
     void prepareToPlay (double, int) override;
     void releaseResources() override {}
@@ -26,7 +47,6 @@ public:
     void changeProgramName (int, const juce::String&) override {}
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
-    double modulationPhase() const { return currentLfoPhase.load (std::memory_order_relaxed); }
 
 private:
     double sampleRate = 44100.0;
