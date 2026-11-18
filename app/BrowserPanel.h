@@ -3,7 +3,10 @@
 #include "PluginScanner.h"
 #include "Theme.h"
 #include <functional>
+#include <map>
 #include <memory>
+#include <set>
+#include <vector>
 
 // Lista de instrumentos detectados. Duplo clique (ou Enter) carrega na trilha.
 class BrowserPanel : public juce::Component,
@@ -48,6 +51,20 @@ private:
     void setProjectFreedomTab (bool);
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
     void load (const juce::PluginDescription&);
+    void showPluginMenu (const juce::PluginDescription&, juce::Point<int>);
+    void showFavoriteSelectionMenu (const std::vector<juce::PluginDescription>&,
+                                    juce::Point<int>);
+    std::vector<juce::PluginDescription> selectedFavoritePlugins() const;
+    bool isPluginFavorite (const juce::PluginDescription&) const;
+    int pluginFavoriteColor (const juce::PluginDescription&) const;
+    void togglePluginFavorite (const juce::PluginDescription&);
+    void setPluginFavorite (const juce::PluginDescription&, int color);
+    void removePluginFavorite (const juce::PluginDescription&);
+    void setPluginFavorites (const std::vector<juce::PluginDescription>&, int color);
+    void removePluginFavorites (const std::vector<juce::PluginDescription>&);
+    void refreshFavoriteTreeAfterChange (int colorToOpen = -1);
+    void loadPluginFavorites();
+    void savePluginFavorites();
     void saveTreeState();
     juce::File treeStateFile() const;
 
@@ -59,11 +76,18 @@ private:
     NativeToolCard drumRackCard;
     NativeToolCard utilityCard;
     juce::Label projectFreedomDescription { {}, "Ferramentas do Project Freedom" };
-    juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" }, effectsButton { "Efeitos" };
-    enum class Filter { All, Instruments, Effects } filter = Filter::All;
+    juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" },
+                      effectsButton { "Efeitos" }, favoritesButton { "Favoritos" };
+    enum class Filter { All, Instruments, Effects, Favorites } filter = Filter::All;
     void setFilter (Filter f);
     juce::Label status;
     std::unique_ptr<juce::XmlElement> opennessBeforeSearch;
     bool searchActive = false, rebuildingTree = false;
     bool showingProjectFreedomTools = false;
+    Filter renderedFilter = Filter::All;
+    juce::ApplicationProperties pluginFavoriteProperties;
+    juce::PropertiesFile* pluginFavoriteSettings = nullptr;
+    std::map<juce::String, int> favoritePluginColors;
+    std::unique_ptr<juce::XmlElement> favoriteTreeStateAfterRefresh;
+    std::set<int> favoriteColorsToOpenAfterRefresh;
 };

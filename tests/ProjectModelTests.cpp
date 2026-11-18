@@ -507,6 +507,36 @@ TEST_CASE ("ProjectModel validates automation and includes it in undo and redo")
     REQUIRE (model.track (trackId)->automation.size() == 1);
 }
 
+TEST_CASE ("ProjectModel stores track colours and includes them in undo and redo")
+{
+    ProjectModel project;
+    const int trackId = project.addTrack()->id;
+    constexpr std::uint32_t blue = 0xff2196f3;
+
+    REQUIRE (project.setTrackColour (trackId, blue));
+    REQUIRE (project.track (trackId)->colour == blue);
+    REQUIRE_FALSE (project.setTrackColour (trackId, blue));
+    REQUIRE_FALSE (project.setTrackColour (-1, blue));
+
+    REQUIRE (project.undo());
+    REQUIRE (project.track (trackId)->colour == 0);
+    REQUIRE (project.redo());
+    REQUIRE (project.track (trackId)->colour == blue);
+}
+
+TEST_CASE ("ProjectModel stores the Master colour and includes it in undo and redo")
+{
+    ProjectModel project;
+    constexpr std::uint32_t purple = 0xff9c27b0;
+
+    REQUIRE (project.setTrackColour (0, purple));
+    REQUIRE (project.masterTrack->colour == purple);
+    REQUIRE (project.undo());
+    REQUIRE (project.masterTrack->colour == 0);
+    REQUIRE (project.redo());
+    REQUIRE (project.masterTrack->colour == purple);
+}
+
 TEST_CASE ("ProjectModel reorders audio and MIDI tracks and supports undo")
 {
     ProjectModel project;
@@ -618,6 +648,8 @@ TEST_CASE ("ProjectModel duplicates a track's mix and clips within its group")
     audio->solo = true;
     audio->outputRouting = roll::TrackOutputRouting::ExtOut;
     const int audioId = audio->id;
+    constexpr std::uint32_t audioColour = 0xff2196f3;
+    REQUIRE (project.setTrackColour (audioId, audioColour));
     const int groupId = project.groupTracks ({ midiId, audioId });
 
     const int duplicateId = project.duplicateTrack (audioId);
@@ -633,6 +665,7 @@ TEST_CASE ("ProjectModel duplicates a track's mix and clips within its group")
     REQUIRE (duplicate->mute);
     REQUIRE (duplicate->solo);
     REQUIRE (duplicate->outputRouting == roll::TrackOutputRouting::ExtOut);
+    REQUIRE (duplicate->colour == audioColour);
     REQUIRE (duplicate->audioClips.size() == 1);
     REQUIRE (duplicate->audioClips.front()->filePath == "C:/audio/kick.wav");
     REQUIRE (duplicate->audioClips.front()->waveform.size() == 1);

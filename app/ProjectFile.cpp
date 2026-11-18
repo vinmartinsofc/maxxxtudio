@@ -161,6 +161,7 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
     node->setAttribute ("type", track.type == roll::TrackType::Audio ? "audio"
                                       : track.type == roll::TrackType::Group ? "group" : "midi");
     node->setAttribute ("parentGroupId", track.parentGroupId);
+    node->setAttribute ("colour", juce::String (static_cast<juce::int64> (track.colour)));
     node->setAttribute ("volume", track.volume);
     node->setAttribute ("pan", track.pan);
     node->setAttribute ("mute", track.mute);
@@ -295,6 +296,8 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
     track.type = type == "audio" ? roll::TrackType::Audio
                : type == "group" ? roll::TrackType::Group : roll::TrackType::Midi;
     track.parentGroupId = node.getIntAttribute ("parentGroupId", 0);
+    track.colour = static_cast<std::uint32_t> (
+        node.getStringAttribute ("colour", "0").getLargeIntValue());
     track.volume = node.getDoubleAttribute ("volume", 1.0);
     track.pan = node.getDoubleAttribute ("pan", 0.0);
     track.mute = node.getBoolAttribute ("mute", false);

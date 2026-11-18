@@ -1,14 +1,19 @@
 #include "BrowserPanel.h"
 #include "DrumRackProcessor.h"
+#include "FavoriteColorPalette.h"
 #include "PluginFolderGrouping.h"
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <vector>
 
 class BrowserPanel::TreeItem : public juce::TreeViewItem
 {
 public:
-    TreeItem (BrowserPanel& p, juce::String label, int itemCount, juce::String key)
+    TreeItem (BrowserPanel& p, juce::String label, int itemCount, juce::String key,
+              int color = -1)
         : owner (p), text (std::move (label)), uniqueKey (std::move (key)),
-          count (itemCount), isFolder (true) {}
+          count (itemCount), favoriteColor (color), isFolder (true) {}
 
     TreeItem (BrowserPanel& p, const juce::PluginDescription& d)
         : owner (p), description (d), text (d.name) {}
@@ -25,7 +30,7 @@ public:
     {
         return isFolder ? text + " (" + juce::String (count) + ")"
                         : description.name + " — " + description.manufacturerName
-                            + " (" + description.pluginFormatName + ")";
+                            + " (" + description.pluginFormatName + "); clique com o botão direito para favoritos";
     }
 
     juce::var getDragSourceDescription() override
@@ -45,25 +50,69 @@ public:
 
         if (isFolder)
         {
-            g.drawText (text + " (" + juce::String (count) + ")", 4, 0, width - 8, height,
+            const int textX = favoriteColor >= 0 ? 22 : 4;
+            if (favoriteColor >= 0)
+            {
+                g.setColour (favoriteColorPalette::colors[static_cast<std::size_t> (favoriteColor)]);
+                g.fillRoundedRectangle (5.0f, static_cast<float> (height / 2 - 5),
+                                        10.0f, 10.0f, 2.0f);
+            }
+            g.drawText (text + " (" + juce::String (count) + ")", textX, 0,
+                        std::max (0, width - textX - 5), height,
                         juce::Justification::centredLeft, true);
             return;
         }
 
-        g.drawText (description.name, 4, 0, std::max (0, width - 150), height,
+        const int pluginColor = owner.pluginFavoriteColor (description);
+        const int nameX = pluginColor >= 0 ? 20 : 4;
+        if (pluginColor >= 0)
+        {
+            g.setColour (favoriteColorPalette::colors[static_cast<std::size_t> (pluginColor)]);
+            g.fillRoundedRectangle (5.0f, static_cast<float> (height / 2 - 5),
+                                    10.0f, 10.0f, 2.0f);
+        }
+        g.setColour (theme::text());
+        g.drawText (description.name, nameX, 0, std::max (0, width - nameX - 150), height,
                     juce::Justification::centredLeft, true);
         g.setColour (theme::textDim());
         g.setFont (juce::FontOptions (12.0f));
         g.drawText (description.manufacturerName, std::max (0, width - 140), 0, 84, height,
                     juce::Justification::centredRight, true);
-        g.drawText (description.pluginFormatName, std::max (0, width - 48), 0, 42, height,
+        g.drawText (description.pluginFormatName, std::max (0, width - 70), 0, 40, height,
                     juce::Justification::centredRight, true);
 
         if (! description.isInstrument)
         {
             g.setColour (juce::Colour (0xff8c7ae6));
-            g.fillRoundedRectangle (static_cast<float> (width - 7), 4.0f, 3.0f,
+            g.fillRoundedRectangle (static_cast<float> (width - 25), 4.0f, 3.0f,
                                     static_cast<float> (height - 8), 1.5f);
+        }
+
+        juce::Path star;
+        const float centreX = static_cast<float> (width - 12);
+        const float centreY = static_cast<float> (height) * 0.5f;
+        for (int point = 0; point < 10; ++point)
+        {
+            const float angle = -juce::MathConstants<float>::halfPi
+                              + static_cast<float> (point) * juce::MathConstants<float>::pi / 5.0f;
+            const float radius = point % 2 == 0 ? 5.5f : 2.5f;
+            const float x = centreX + std::cos (angle) * radius;
+            const float starY = centreY + std::sin (angle) * radius;
+            if (point == 0)
+                star.startNewSubPath (x, starY);
+            else
+                star.lineTo (x, starY);
+        }
+        star.closeSubPath();
+        if (pluginColor >= 0)
+        {
+            g.setColour (favoriteColorPalette::colors[static_cast<std::size_t> (pluginColor)]);
+            g.fillPath (star);
+        }
+        else
+        {
+            g.setColour (theme::textDim());
+            g.strokePath (star, juce::PathStrokeType (1.2f));
         }
     }
 
@@ -73,6 +122,20 @@ public:
             juce::TreeViewItem::itemDoubleClicked (event);
         else
             owner.load (description);
+    }
+
+    void itemClicked (const juce::MouseEvent& event) override
+    {
+        if (isFolder)
+            return;
+        if (event.mods.isPopupMenu())
+        {
+            owner.showPluginMenu (description, event.getScreenPosition());
+            return;
+        }
+
+        if (event.x >= getItemPosition (false).getWidth() - 24)
+            owner.togglePluginFavorite (description);
     }
 
     void itemOpennessChanged (bool) override
@@ -88,7 +151,7 @@ private:
     BrowserPanel& owner;
     juce::PluginDescription description;
     juce::String text, uniqueKey;
-    int count = 0;
+    int count = 0, favoriteColor = -1;
     bool isFolder = false;
 };
 
@@ -195,6 +258,15 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
       utilityCard ("Volume Master", theme::ui ("Volume, estéreo, mono, fase e modulação"),
                    "plugin:" + juce::String ("ProjectFreedom.Utility"))
 {
+    juce::PropertiesFile::Options options;
+    options.applicationName = "ProjectFreedomPluginFavorites";
+    options.filenameSuffix = ".settings";
+    options.folderName = "ProjectFreedom";
+    options.osxLibrarySubFolder = "Application Support";
+    pluginFavoriteProperties.setStorageParameters (options);
+    pluginFavoriteSettings = pluginFavoriteProperties.getUserSettings();
+    loadPluginFavorites();
+
     title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
     addAndMakeVisible (title);
@@ -221,7 +293,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     tree->addKeyListener (this);
     addAndMakeVisible (*tree);
 
-    for (auto* b : { &allButton, &instrumentsButton, &effectsButton })
+    for (auto* b : { &allButton, &instrumentsButton, &effectsButton, &favoritesButton })
     {
         b->setClickingTogglesState (true);
         b->setRadioGroupId (4711);
@@ -231,9 +303,16 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         addAndMakeVisible (b);
     }
     allButton.setToggleState (true, juce::dontSendNotification);
+    allButton.setTooltip ("Todos os plugins");
+    instrumentsButton.setTooltip ("Instrumentos");
+    effectsButton.setTooltip ("Efeitos");
+    favoritesButton.setTooltip (
+        "Ctrl+clique ou Shift+clique para selecionar vários favoritos; "
+        "clique direito para mudar a cor ou remover");
     allButton.onClick         = [this] { setFilter (Filter::All); };
     instrumentsButton.onClick = [this] { setFilter (Filter::Instruments); };
     effectsButton.onClick     = [this] { setFilter (Filter::Effects); };
+    favoritesButton.onClick   = [this] { setFilter (Filter::Favorites); };
 
     status.setFont (juce::FontOptions (12.5f));
     status.setColour (juce::Label::textColourId, theme::textDim());
@@ -289,6 +368,9 @@ bool BrowserPanel::keyPressed (const juce::KeyPress& key, juce::Component*)
 void BrowserPanel::setFilter (Filter f)
 {
     filter = f;
+    tree->setMultiSelectEnabled (f == Filter::Favorites);
+    if (f != Filter::Favorites)
+        tree->clearSelectedItems();
     refresh();
 }
 
@@ -303,6 +385,7 @@ void BrowserPanel::setProjectFreedomTab (bool showTools)
     allButton.setVisible (! showTools);
     instrumentsButton.setVisible (! showTools);
     effectsButton.setVisible (! showTools);
+    favoritesButton.setVisible (! showTools);
     tree->setVisible (! showTools);
     projectFreedomDescription.setVisible (showTools);
     drumRackCard.setVisible (showTools);
@@ -320,7 +403,8 @@ juce::File BrowserPanel::treeStateFile() const
 
 void BrowserPanel::saveTreeState()
 {
-    if (searchActive || rebuildingTree || tree == nullptr || tree->getRootItem() == nullptr)
+    if (searchActive || rebuildingTree || renderedFilter == Filter::Favorites
+        || tree == nullptr || tree->getRootItem() == nullptr)
         return;
 
     if (auto state = tree->getOpennessState (true))
@@ -355,6 +439,7 @@ void BrowserPanel::refresh()
         std::vector<FolderGroup> folders;
     };
     std::vector<FormatGroup> formats;
+    std::array<std::vector<juce::PluginDescription>, favoriteColorPalette::colors.size()> favoritesByColor;
 
     for (const auto& description : scanner.list().getTypes())
     {
@@ -362,12 +447,22 @@ void BrowserPanel::refresh()
             continue;
 
         const bool kindMatches = filter == Filter::All
-                              || (filter == Filter::Instruments) == description.isInstrument;
+                              || (filter == Filter::Instruments && description.isInstrument)
+                              || (filter == Filter::Effects && ! description.isInstrument)
+                              || (filter == Filter::Favorites && isPluginFavorite (description));
         const bool textMatches = query.isEmpty()
                               || description.name.containsIgnoreCase (query)
                               || description.manufacturerName.containsIgnoreCase (query);
         if (! kindMatches || ! textMatches)
             continue;
+
+        if (filter == Filter::Favorites)
+        {
+            const int color = pluginFavoriteColor (description);
+            if (color >= 0)
+                favoritesByColor[static_cast<std::size_t> (color)].push_back (description);
+            continue;
+        }
 
         const auto formatName = description.pluginFormatName;
         const auto displayFormat = formatName;
@@ -424,57 +519,90 @@ void BrowserPanel::refresh()
     {
         return a.name.compareIgnoreCase (b.name) < 0;
     });
+    for (auto& favorites : favoritesByColor)
+        std::sort (favorites.begin(), favorites.end(), byPluginName);
 
+    const bool showingFavorites = filter == Filter::Favorites;
     int totalPluginCount = 0;
-    for (const auto& format : formats)
+    if (showingFavorites)
     {
-        totalPluginCount += static_cast<int> (format.loosePlugins.size());
-        for (const auto& group : format.folders)
-            totalPluginCount += static_cast<int> (group.plugins.size());
+        for (const auto& favorites : favoritesByColor)
+            totalPluginCount += static_cast<int> (favorites.size());
+    }
+    else
+    {
+        for (const auto& format : formats)
+        {
+            totalPluginCount += static_cast<int> (format.loosePlugins.size());
+            for (const auto& group : format.folders)
+                totalPluginCount += static_cast<int> (group.plugins.size());
+        }
     }
 
-    auto root = std::make_unique<TreeItem> (*this, "Plugins", totalPluginCount, "root");
+    auto root = std::make_unique<TreeItem> (
+        *this, showingFavorites ? "Favoritos" : "Plugins", totalPluginCount,
+        showingFavorites ? "favorites" : "root");
     auto* rootPointer = root.get();
-    for (auto& format : formats)
+    if (showingFavorites)
     {
-        std::sort (format.loosePlugins.begin(), format.loosePlugins.end(), byPluginName);
-        int formatPluginCount = static_cast<int> (format.loosePlugins.size());
-        for (auto& group : format.folders)
+        for (std::size_t color = 0; color < favoritesByColor.size(); ++color)
         {
-            std::sort (group.plugins.begin(), group.plugins.end(), byPluginName);
-            formatPluginCount += static_cast<int> (group.plugins.size());
-        }
-        std::sort (format.folders.begin(), format.folders.end(), [] (const auto& a, const auto& b)
-        {
-            return a.name.compareIgnoreCase (b.name) < 0;
-        });
-
-        auto formatItem = std::make_unique<TreeItem> (
-            *this, format.name, formatPluginCount, "format:" + format.name);
-        auto* formatPointer = formatItem.get();
-        for (const auto& description : format.loosePlugins)
-            formatItem->addSubItem (new TreeItem (*this, description));
-
-        for (auto& group : format.folders)
-        {
-            auto folder = std::make_unique<TreeItem> (
-                *this, group.name, static_cast<int> (group.plugins.size()),
-                "folder:" + format.name + ":" + group.name);
-            auto* folderPointer = folder.get();
-            for (const auto& description : group.plugins)
-                folder->addSubItem (new TreeItem (*this, description));
-            formatItem->addSubItem (folder.release());
+            const auto& favorites = favoritesByColor[color];
+            auto category = std::make_unique<TreeItem> (
+                *this, favoriteColorPalette::names[color], static_cast<int> (favorites.size()),
+                "favorite-color-" + juce::String (static_cast<int> (color)),
+                static_cast<int> (color));
+            auto* categoryPointer = category.get();
+            for (const auto& description : favorites)
+                category->addSubItem (new TreeItem (*this, description));
+            root->addSubItem (category.release());
             if (searching)
-                folderPointer->setOpen (true);
+                categoryPointer->setOpen (true);
         }
+    }
+    else
+    {
+        for (auto& format : formats)
+        {
+            std::sort (format.loosePlugins.begin(), format.loosePlugins.end(), byPluginName);
+            int formatPluginCount = static_cast<int> (format.loosePlugins.size());
+            for (auto& group : format.folders)
+            {
+                std::sort (group.plugins.begin(), group.plugins.end(), byPluginName);
+                formatPluginCount += static_cast<int> (group.plugins.size());
+            }
+            std::sort (format.folders.begin(), format.folders.end(), [] (const auto& a, const auto& b)
+            {
+                return a.name.compareIgnoreCase (b.name) < 0;
+            });
 
-        root->addSubItem (formatItem.release());
-        formatPointer->setOpen (true);
+            auto formatItem = std::make_unique<TreeItem> (
+                *this, format.name, formatPluginCount, "format:" + format.name);
+            auto* formatPointer = formatItem.get();
+            for (const auto& description : format.loosePlugins)
+                formatItem->addSubItem (new TreeItem (*this, description));
+
+            for (auto& group : format.folders)
+            {
+                auto folder = std::make_unique<TreeItem> (
+                    *this, group.name, static_cast<int> (group.plugins.size()),
+                    "folder:" + format.name + ":" + group.name);
+                auto* folderPointer = folder.get();
+                for (const auto& description : group.plugins)
+                    folder->addSubItem (new TreeItem (*this, description));
+                formatItem->addSubItem (folder.release());
+                if (searching)
+                    folderPointer->setOpen (true);
+            }
+
+            root->addSubItem (formatItem.release());
+            formatPointer->setOpen (true);
+        }
     }
 
     tree->setRootItem (root.release());
     tree->setRootItemVisible (true);
-    if (searching)
+    if (showingFavorites || searching)
     {
         rootPointer->setOpen (true);
     }
@@ -492,6 +620,20 @@ void BrowserPanel::refresh()
         rootPointer->setOpen (true);
     }
 
+    if (showingFavorites && favoriteTreeStateAfterRefresh != nullptr)
+    {
+        tree->restoreOpennessState (*favoriteTreeStateAfterRefresh, true);
+        favoriteTreeStateAfterRefresh.reset();
+    }
+    if (showingFavorites)
+    {
+        for (const int color : favoriteColorsToOpenAfterRefresh)
+            if (auto* category = rootPointer->getSubItem (color))
+                category->setOpen (true);
+        favoriteColorsToOpenAfterRefresh.clear();
+    }
+
+    renderedFilter = filter;
     rebuildingTree = false;
     tree->repaint();
 }
@@ -509,6 +651,214 @@ void BrowserPanel::load (const juce::PluginDescription& description)
 {
     if (onLoadRequested)
         onLoadRequested (description);
+}
+
+void BrowserPanel::showPluginMenu (const juce::PluginDescription& description,
+                                   juce::Point<int> screenPosition)
+{
+    if (filter == Filter::Favorites)
+    {
+        auto selected = selectedFavoritePlugins();
+        if (selected.size() > 1)
+        {
+            showFavoriteSelectionMenu (selected, screenPosition);
+            return;
+        }
+    }
+
+    const bool favorite = isPluginFavorite (description);
+    const int currentColor = pluginFavoriteColor (description);
+    juce::PopupMenu colors;
+    for (std::size_t color = 0; color < favoriteColorPalette::names.size(); ++color)
+        colors.addItem (static_cast<int> (color + 1),
+                        theme::ui (favoriteColorPalette::names[color]), true,
+                        currentColor == static_cast<int> (color));
+
+    juce::PopupMenu menu;
+    menu.addSubMenu (theme::ui (favorite ? "Alterar cor do favorito" : "Adicionar aos favoritos"),
+                     colors);
+    if (favorite)
+        menu.addItem (20, theme::ui ("Remover dos favoritos"));
+
+    juce::Component::SafePointer<BrowserPanel> safeThis (this);
+    menu.showMenuAsync (
+        juce::PopupMenu::Options().withTargetScreenArea (
+            { screenPosition.x, screenPosition.y, 1, 1 }),
+        [safeThis, description] (int result)
+        {
+            if (safeThis == nullptr)
+                return;
+            if (result >= 1 && result <= static_cast<int> (favoriteColorPalette::names.size()))
+                safeThis->setPluginFavorite (description, result - 1);
+            else if (result == 20)
+                safeThis->removePluginFavorite (description);
+        });
+}
+
+void BrowserPanel::showFavoriteSelectionMenu (
+    const std::vector<juce::PluginDescription>& descriptions,
+    juce::Point<int> screenPosition)
+{
+    const auto count = juce::String (static_cast<int> (descriptions.size()));
+    juce::PopupMenu colors;
+    for (std::size_t color = 0; color < favoriteColorPalette::names.size(); ++color)
+        colors.addItem (static_cast<int> (color + 1),
+                        theme::ui (favoriteColorPalette::names[color]));
+
+    juce::PopupMenu menu;
+    menu.addSubMenu (theme::ui ("Alterar cor de ") + count + theme::ui (" favoritos"), colors);
+    menu.addItem (20, theme::ui ("Remover ") + count + theme::ui (" favoritos"));
+
+    juce::Component::SafePointer<BrowserPanel> safeThis (this);
+    menu.showMenuAsync (
+        juce::PopupMenu::Options().withTargetScreenArea (
+            { screenPosition.x, screenPosition.y, 1, 1 }),
+        [safeThis, descriptions] (int result)
+        {
+            if (safeThis == nullptr)
+                return;
+            if (result >= 1 && result <= static_cast<int> (favoriteColorPalette::names.size()))
+                safeThis->setPluginFavorites (descriptions, result - 1);
+            else if (result == 20)
+                safeThis->removePluginFavorites (descriptions);
+        });
+}
+
+std::vector<juce::PluginDescription> BrowserPanel::selectedFavoritePlugins() const
+{
+    std::vector<juce::PluginDescription> selected;
+    for (int i = 0; i < tree->getNumSelectedItems(); ++i)
+    {
+        auto* item = dynamic_cast<TreeItem*> (tree->getSelectedItem (i));
+        if (item != nullptr && item->isPlugin() && isPluginFavorite (item->plugin()))
+            selected.push_back (item->plugin());
+    }
+    return selected;
+}
+
+bool BrowserPanel::isPluginFavorite (const juce::PluginDescription& description) const
+{
+    return favoritePluginColors.find (description.createIdentifierString()) != favoritePluginColors.end();
+}
+
+int BrowserPanel::pluginFavoriteColor (const juce::PluginDescription& description) const
+{
+    const auto favorite = favoritePluginColors.find (description.createIdentifierString());
+    return favorite != favoritePluginColors.end() ? favorite->second : -1;
+}
+
+void BrowserPanel::togglePluginFavorite (const juce::PluginDescription& description)
+{
+    if (isPluginFavorite (description))
+        removePluginFavorite (description);
+    else
+        setPluginFavorite (description, 4);
+}
+
+void BrowserPanel::setPluginFavorite (const juce::PluginDescription& description, int color)
+{
+    setPluginFavorites ({ description }, color);
+}
+
+void BrowserPanel::removePluginFavorite (const juce::PluginDescription& description)
+{
+    removePluginFavorites ({ description });
+}
+
+void BrowserPanel::setPluginFavorites (
+    const std::vector<juce::PluginDescription>& descriptions, int color)
+{
+    if (color < 0 || color >= static_cast<int> (favoriteColorPalette::colors.size()))
+        return;
+
+    bool changed = false;
+    for (const auto& description : descriptions)
+    {
+        const auto identifier = description.createIdentifierString();
+        const auto current = favoritePluginColors.find (identifier);
+        if (current == favoritePluginColors.end() || current->second != color)
+        {
+            favoritePluginColors[identifier] = color;
+            changed = true;
+        }
+    }
+    if (! changed)
+        return;
+
+    savePluginFavorites();
+    refreshFavoriteTreeAfterChange (color);
+}
+
+void BrowserPanel::removePluginFavorites (
+    const std::vector<juce::PluginDescription>& descriptions)
+{
+    bool changed = false;
+    for (const auto& description : descriptions)
+        changed = favoritePluginColors.erase (description.createIdentifierString()) > 0 || changed;
+    if (! changed)
+        return;
+
+    savePluginFavorites();
+    refreshFavoriteTreeAfterChange();
+}
+
+void BrowserPanel::refreshFavoriteTreeAfterChange (int colorToOpen)
+{
+    if (filter != Filter::Favorites)
+    {
+        tree->repaint();
+        return;
+    }
+
+    favoriteTreeStateAfterRefresh = tree->getOpennessState (true);
+    if (colorToOpen >= 0)
+        favoriteColorsToOpenAfterRefresh.insert (colorToOpen);
+
+    juce::Component::SafePointer<BrowserPanel> safeThis (this);
+    juce::MessageManager::callAsync ([safeThis]
+    {
+        if (safeThis != nullptr && safeThis->filter == Filter::Favorites)
+            safeThis->refresh();
+    });
+}
+
+void BrowserPanel::loadPluginFavorites()
+{
+    favoritePluginColors.clear();
+    if (pluginFavoriteSettings == nullptr)
+        return;
+
+    const auto xml = juce::parseXML (pluginFavoriteSettings->getValue ("pluginFavorites"));
+    if (xml == nullptr || ! xml->hasTagName ("PluginFavorites"))
+        return;
+
+    const auto root = juce::ValueTree::fromXml (*xml);
+    for (int i = 0; i < root.getNumChildren(); ++i)
+    {
+        const auto item = root.getChild (i);
+        const auto identifier = item.getProperty ("identifier").toString();
+        const int color = static_cast<int> (item.getProperty ("color", 4));
+        if (identifier.isNotEmpty()
+            && color >= 0 && color < static_cast<int> (favoriteColorPalette::colors.size()))
+            favoritePluginColors[identifier] = color;
+    }
+}
+
+void BrowserPanel::savePluginFavorites()
+{
+    if (pluginFavoriteSettings == nullptr)
+        return;
+
+    juce::ValueTree root ("PluginFavorites");
+    for (const auto& [identifier, color] : favoritePluginColors)
+    {
+        juce::ValueTree item ("Plugin");
+        item.setProperty ("identifier", identifier, nullptr);
+        item.setProperty ("color", color, nullptr);
+        root.appendChild (item, nullptr);
+    }
+    pluginFavoriteSettings->setValue ("pluginFavorites", root.toXmlString());
+    pluginFavoriteSettings->saveIfNeeded();
 }
 
 void BrowserPanel::paint (juce::Graphics& g)
@@ -544,11 +894,19 @@ void BrowserPanel::resized()
         search.setBounds (area.removeFromTop (26));
         area.removeFromTop (6);
         tabs = area.removeFromTop (24);
-        allButton.setBounds (tabs.removeFromLeft (52));
-        tabs.removeFromLeft (3);
-        instrumentsButton.setBounds (tabs.removeFromLeft (92));
-        tabs.removeFromLeft (3);
-        effectsButton.setBounds (tabs);
+        const bool compactFilters = tabs.getWidth() < 360;
+        instrumentsButton.setButtonText (compactFilters ? "Inst." : "Instrumentos");
+        effectsButton.setButtonText (compactFilters ? "Efe." : "Efeitos");
+        favoritesButton.setButtonText (compactFilters ? "Fav." : "Favoritos");
+        const int gap = 3;
+        const int buttonWidth = (tabs.getWidth() - gap * 3) / 4;
+        allButton.setBounds (tabs.removeFromLeft (buttonWidth));
+        tabs.removeFromLeft (gap);
+        instrumentsButton.setBounds (tabs.removeFromLeft (buttonWidth));
+        tabs.removeFromLeft (gap);
+        effectsButton.setBounds (tabs.removeFromLeft (buttonWidth));
+        tabs.removeFromLeft (gap);
+        favoritesButton.setBounds (tabs);
     }
 
     area.removeFromTop (6);

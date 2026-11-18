@@ -3,6 +3,7 @@
 #include "WaveformDisplay.h"
 #include "ZoomCursor.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
 #include <limits>
@@ -15,12 +16,27 @@ juce::Colour ArrangementView::colourFor (int trackId)
 
 namespace
 {
+constexpr std::array<std::uint32_t, 9> trackColours {
+    0xfff44336, 0xffff9800, 0xffffeb3b, 0xff4caf50, 0xff00bcd4,
+    0xff2196f3, 0xff3f51b5, 0xff9c27b0, 0xff9e9e9e
+};
+constexpr std::array<const char*, trackColours.size()> trackColourNames {
+    "Vermelho", "Laranja", "Amarelo", "Verde", "Ciano",
+    "Azul", "Indigo", "Roxo", "Cinza"
+};
+
 juce::String formatTimelineTime (double seconds)
 {
     const int totalSeconds = std::max (0, juce::roundToInt (seconds));
     return juce::String (totalSeconds / 60).paddedLeft ('0', 2)
          + ":" + juce::String (totalSeconds % 60).paddedLeft ('0', 2);
 }
+}
+
+juce::Colour ArrangementView::colourFor (const roll::Track& track)
+{
+    return track.colour == 0 ? colourFor (track.id)
+                             : juce::Colour (static_cast<juce::uint32> (track.colour));
 }
 
 // ============================================================ Lanes (clips)
@@ -313,7 +329,7 @@ public:
             if (owner.rowHeight (static_cast<int> (i)) <= 0)
                 continue;
 
-            const auto base = colourFor (t.id);
+            const auto base = colourFor (t);
             if (t.type == roll::TrackType::Audio)
             {
                 for (const auto& clip : t.audioClips)
@@ -1806,7 +1822,7 @@ private:
             path.lineTo (x, valueY (points[i].value));
         }
 
-        g.setColour (selected ? theme::accent() : colourFor (track.id).brighter (0.65f).withAlpha (0.58f));
+        g.setColour (selected ? theme::accent() : colourFor (track).brighter (0.65f).withAlpha (0.58f));
         g.strokePath (path, juce::PathStrokeType (selected ? 2.8f : 1.5f));
         g.setColour (selected ? juce::Colours::white : theme::text().withAlpha (0.72f));
         for (const auto& point : points)
@@ -3874,7 +3890,7 @@ public:
         g.setColour (sel ? theme::panelLight().brighter (0.15f)
                          : isGroup ? theme::panelLight().darker (0.12f) : theme::panel());
         g.fillRect (getLocalBounds());
-        g.setColour (colourFor (trackId));
+        g.setColour (track != nullptr ? colourFor (*track) : colourFor (trackId));
         g.fillRect (0, 0, 6, getHeight());
         if (track != nullptr && track->parentGroupId != 0)
         {
@@ -3885,7 +3901,9 @@ public:
                 && project.tracks[static_cast<std::size_t> (index + 1)]->parentGroupId == track->parentGroupId;
             const float connectorX = 42.0f;
             const float middleY = static_cast<float> (getHeight()) * 0.5f;
-            g.setColour (colourFor (track->parentGroupId).brighter (0.25f));
+            const auto* parent = project.track (track->parentGroupId);
+            g.setColour ((parent != nullptr ? colourFor (*parent) : colourFor (track->parentGroupId))
+                         .brighter (0.25f));
             if (hasPreviousSibling)
                 g.drawLine (connectorX, 0.0f, connectorX, middleY, 2.0f);
             if (hasNextSibling)
@@ -4064,6 +4082,14 @@ public:
     void showTrackMenu()
     {
         juce::PopupMenu m;
+        juce::PopupMenu colourMenu;
+        const auto* selected = project.track (trackId);
+        colourMenu.addItem (10, theme::ui ("Automática"), true,
+                            selected != nullptr && selected->colour == 0);
+        for (std::size_t i = 0; i < trackColourNames.size(); ++i)
+            colourMenu.addItem (11 + static_cast<int> (i), theme::ui (trackColourNames[i]), true,
+                selected != nullptr && selected->colour == trackColours[i]);
+        m.addSubMenu (theme::ui ("Cor da trilha"), colourMenu, selected != nullptr);
         m.addItem (1, theme::ui ("Nova trilha MIDI"));
         m.addItem (3, theme::ui ("Nova trilha de audio"));
         const bool canGroup = project.selectedTrackIds.size() >= 2
@@ -4076,7 +4102,6 @@ public:
                 });
         m.addItem (4, theme::ui ("Agrupar faixas selecionadas (Ctrl+G)"), canGroup);
         const int tid = trackId;
-        const auto* selected = project.track (trackId);
         const bool isGroup = selected != nullptr && selected->type == roll::TrackType::Group;
         if (isGroup)
             m.addItem (5, theme::ui ("Desagrupar faixa (Ctrl+Shift+G)"));
@@ -4089,6 +4114,10 @@ public:
         auto* arrangement = &owner;
         m.showMenuAsync ({}, [proj, arrangement, tid] (int r)
         {
+            if (r == 10)
+                proj->setTrackColour (tid, 0);
+            else if (r >= 11 && r < 11 + static_cast<int> (trackColours.size()))
+                proj->setTrackColour (tid, trackColours[static_cast<std::size_t> (r - 11)]);
             if (r == 1) proj->addTrack();
             if (r == 2) proj->removeTrack (tid);
             if (r == 3) proj->addTrack (roll::TrackType::Audio);
@@ -4142,7 +4171,8 @@ public:
         addAndMakeVisible (peakDbLabel);
 
         name.setText ("Master", juce::dontSendNotification);
-        name.setTooltip (theme::ui ("Clique para selecionar. Arraste um efeito para adiciona-lo ao Master."));
+        name.setTooltip (theme::ui ("Clique para selecionar; botao direito escolhe a cor; arraste um efeito para adicionar ao Master."));
+        name.setInterceptsMouseClicks (false, false);
         name.setFont (juce::FontOptions (14.5f, juce::Font::bold));
         name.setColour (juce::Label::textColourId, theme::text());
 
@@ -4270,7 +4300,9 @@ public:
         g.fillRect (getLocalBounds());
 
         // Faixa de cor da trilha Master (ouro/laranja)
-        g.setColour (juce::Colour (0xffe67e22));
+        g.setColour (project.masterTrack != nullptr && project.masterTrack->colour != 0
+                         ? ArrangementView::colourFor (*project.masterTrack)
+                         : juce::Colour (0xffe67e22));
         g.fillRect (0, 0, 6, getHeight());
 
         g.setColour (theme::border());
@@ -4357,6 +4389,14 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (e.mods.isPopupMenu())
+        {
+            project.selectTrack (0);
+            showTrackMenu();
+            owner.grabFocus();
+            return;
+        }
+
         project.selectTrack (0);
         owner.grabFocus();
 
@@ -4373,6 +4413,28 @@ public:
     }
 
 private:
+    void showTrackMenu()
+    {
+        juce::PopupMenu colourMenu;
+        const auto* selected = project.masterTrack.get();
+        colourMenu.addItem (10, theme::ui ("Automática"), true,
+                            selected != nullptr && selected->colour == 0);
+        for (std::size_t i = 0; i < trackColourNames.size(); ++i)
+            colourMenu.addItem (11 + static_cast<int> (i), theme::ui (trackColourNames[i]), true,
+                selected != nullptr && selected->colour == trackColours[i]);
+
+        juce::PopupMenu menu;
+        menu.addSubMenu (theme::ui ("Cor da trilha"), colourMenu, selected != nullptr);
+        auto* proj = &project;
+        menu.showMenuAsync ({}, [proj] (int result)
+        {
+            if (result == 10)
+                proj->setTrackColour (0, 0);
+            else if (result >= 11 && result < 11 + static_cast<int> (trackColours.size()))
+                proj->setTrackColour (0, trackColours[static_cast<std::size_t> (result - 11)]);
+        });
+    }
+
     ProjectModel& project;
     ArrangementView& owner;
     juce::Label name, dbLabel, peakDbLabel;
@@ -4407,7 +4469,7 @@ public:
             const float y = 2.0f + static_cast<float> (i) * rowHeight;
             const float clipHeight = std::max (2.0f, std::min (rowHeight - 1.0f, 5.0f));
             const float clipY = y + std::max (0.0f, (rowHeight - clipHeight) * 0.5f);
-            const auto clipColour = ArrangementView::colourFor (track.id);
+            const auto clipColour = ArrangementView::colourFor (track);
 
             const auto drawClip = [&] (double start, double length)
             {

@@ -106,6 +106,7 @@ private:
     int rowInsertionIndexAt (int y) const;
     void toggleTrackCollapsed (int trackId);
     static juce::Colour colourFor (int trackId);
+    static juce::Colour colourFor (const roll::Track&);
 
     ProjectModel& project;
     double pixelsPerBeat = 22.0;          // pixels por beat

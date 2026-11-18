@@ -710,6 +710,18 @@ void ProjectModel::selectAudioClip (int trackId, int clipId)
     sendChangeMessage();
 }
 
+bool ProjectModel::setTrackColour (int trackId, std::uint32_t colour)
+{
+    auto* t = track (trackId);
+    if (t == nullptr || t->colour == colour)
+        return false;
+
+    recordUndo();
+    t->colour = colour;
+    sendChangeMessage();
+    return true;
+}
+
 void ProjectModel::setTrackRouting (int trackId, roll::TrackOutputRouting routing)
 {
     if (auto* t = track (trackId))

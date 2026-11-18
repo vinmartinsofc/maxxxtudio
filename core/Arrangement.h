@@ -2,6 +2,7 @@
 #include "Clip.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -164,6 +165,7 @@ public:
     TrackType   type = TrackType::Midi;
     double      volume = 1.0;     // ganho linear (0..1.5)
     double      pan = 0.0;        // -1..1
+    std::uint32_t colour = 0;     // zero uses the automatic track colour
     bool        mute = false;
     bool        solo = false;
     bool        collapsed = false;

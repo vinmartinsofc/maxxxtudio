@@ -100,6 +100,7 @@ public:
     int  moveClip (int fromTrack, int clipId, int toTrack, double newStart);
     int  moveAudioClip (int fromTrack, int clipId, int toTrack, double newStart);
     void selectAudioClip (int trackId, int clipId);
+    bool setTrackColour (int trackId, std::uint32_t colour);
     void setTrackRouting (int trackId, roll::TrackOutputRouting routing);
     void notifyTrackNotes (int trackId);
     void notifyMixer()   { if (onMixerChanged) onMixerChanged(); sendChangeMessage(); }

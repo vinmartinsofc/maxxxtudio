@@ -26,6 +26,7 @@ TEST_CASE ("Project files preserve flat group bus membership")
     TemporaryProjectFolder temporary;
     ProjectFileData data;
     data.project.master.id = AudioEngine::masterTrackId;
+    data.project.master.colour = 0xff9c27b0;
 
     roll::Track group;
     group.id = 10;
@@ -39,6 +40,7 @@ TEST_CASE ("Project files preserve flat group bus membership")
     child.type = roll::TrackType::Audio;
     child.parentGroupId = group.id;
     child.collapsed = true;
+    child.colour = 0xff2196f3;
     data.project.tracks.push_back (child);
 
     const auto file = temporary.folder.getChildFile ("group_test.pfs");
@@ -50,6 +52,8 @@ TEST_CASE ("Project files preserve flat group bus membership")
     REQUIRE (loaded.project.tracks[0].type == roll::TrackType::Group);
     REQUIRE (loaded.project.tracks[1].parentGroupId == 10);
     REQUIRE (loaded.project.tracks[1].collapsed);
+    REQUIRE (loaded.project.tracks[1].colour == 0xff2196f3);
+    REQUIRE (loaded.project.master.colour == 0xff9c27b0);
 }
 
 TEST_CASE ("Project files collect Drum Rack samples and restore their paths")

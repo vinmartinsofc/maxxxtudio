@@ -7,7 +7,8 @@ namespace roll
 {
 Track::Track (const Track& other)
     : id (other.id), name (other.name), type (other.type), volume (other.volume),
-      pan (other.pan), mute (other.mute), solo (other.solo), collapsed (other.collapsed),
+      pan (other.pan), colour (other.colour), mute (other.mute), solo (other.solo),
+      collapsed (other.collapsed),
       outputRouting (other.outputRouting), parentGroupId (other.parentGroupId),
       automation (other.automation), nextId (other.nextId)
 {
@@ -27,6 +28,7 @@ Track& Track::operator= (const Track& other)
     type = other.type;
     volume = other.volume;
     pan = other.pan;
+    colour = other.colour;
     mute = other.mute;
     solo = other.solo;
     collapsed = other.collapsed;

@@ -174,9 +174,10 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Área | Funcionalidade | Estado |
 |---|---|---|
 | Plugins | Scan automático VST3 em segundo plano + lista persistida em XML | ✅ (lista) / 🟡 (scan em Windows real) |
-| Plugins | Navegador com busca e filtros Todos/Instrumentos/Efeitos; duplo clique carrega | ✅ UI / 🟡 carregamento |
+| Plugins | Navegador com busca e filtros Todos/Instrumentos/Efeitos/Favoritos; Favoritos agrupa plugins por cor; estrela e menu de contexto gerenciam favoritos persistidos; duplo clique carrega | ✅ UI / 🟡 carregamento e QA manual |
 | Plugins | Cadeia por trilha (1 instrumento + N efeitos), UI do plugin em janela (minimizar+fechar; janelas permanecem à frente enquanto o app está ativo) | 🟡 |
-| Plugins | Favoritos de plugins | ⬜ (favoritos atuais são arquivos/pastas de áudio) |
+| Plugins | Favoritos de plugins | Implementado: estrela/menu de contexto, categorias por cor e persistência por identificador VST3; falta QA manual |
+| Arranjo | Cores customizáveis para trilhas MIDI/áudio e Master | Implementado: paleta nos menus dos cabeçalhos, cor salva no `.pfs`, undo/redo e clips acompanham a trilha; falta QA manual |
 | Plugins | Host e scan VST3 | ✅ |
 | Plugins | Pastas de busca customizadas VST3, persistidas e editáveis pelo navegador | 🟡 |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
@@ -250,8 +251,8 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | 5 | Auto-scroll/expansão do Arrangement enquanto se arrasta além da borda visível | Ao mover/copiar clips ou selecionar intervalo, aproximar o ponteiro das bordas rola a vista; ao alcançar o fim, a linha do tempo cresce em incrementos visíveis. |
 | 6 | Drag/drop de MIDI/áudio sobre conteúdo existente para substituí-lo | Ao mover/copiar clips e soltar arquivos de áudio em trilhas de áudio, só a região sobreposta é substituída e o restante é preservado. Importar arquivos MIDI continua sendo uma feature futura separada. |
 | 7 | Grade sincronizada ao BPM | A grade musical do Arrangement e do editor de áudio já usa beats e o BPM do projeto; falta confirmar se o pedido significa outro comportamento. |
-| 8 | Favoritos de plugins | Pendente; os favoritos atuais cobrem apenas arquivos/pastas de áudio. |
-| 9 | Cores customizáveis para trilhas MIDI/áudio | Pendente; hoje as cores são geradas automaticamente e não podem ser escolhidas. |
+| 8 | Favoritos de plugins | Implementado no navegador VST; falta QA manual com plugins reais. |
+| 9 | Cores customizáveis para trilhas MIDI/áudio e Master | Implementado com paleta nos menus dos cabeçalhos e persistência no `.pfs`; falta QA manual. |
 | 10 | Iniciar reprodução/escuta de trechos específicos pelo Piano Roll | Pendente; clicar na régua reposiciona o playhead, mas não inicia reprodução local. |
 | 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | `A` exibe os parâmetros automatizáveis e seus valores atuais; todas as curvas salvas ficam visíveis, com o parâmetro ativo destacado. Os controles de volume, pan e mute do mixer acompanham os valores automatizados; o AudioEngine aplica parâmetros VST3 durante a reprodução, restaura o valor manual ao parar e protege bindings ao remover/reordenar plugins. Persistido no `.pfs`; falta QA manual com plugins reais. |
 | 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp on/off existem; playback é atualmente Re-Pitch, sem modos de time-stretch nem transpose independente. |
@@ -259,7 +260,7 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | Nova | Ferramentas de sampler e efeitos nativos | Drum Rack limitado às 15 notas do teclado do computador. Volume Master reúne ganho, largura/balanço, modos de canal, mono, inversão de fase, Auto Pan, Bass Mono, mute e DC; controles expostos à automação. |
 | Futuro | Gravação de áudio em tempo real e importação/exportação MIDI | Pendente; exportação MIDI também aparece no §14. |
 
-**Próxima tarefa sugerida:** validar `Volume Master` visual e auditivamente com áudio real, incluindo automação e abertura de projetos legados.
+**Próxima tarefa sugerida:** iniciar o editor de áudio para alcançar o MVP; não alterar o Piano Roll nesta etapa.
 
 ---
 
@@ -563,6 +564,11 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 
 > Esta seção preserva o roadmap técnico antigo. A ordem atual de trabalho e o status das solicitações do usuário estão em §4.3; use aquela fila em caso de conflito.
 
+### Concluído na fila atual do usuário
+
+- [x] Favoritos de plugins VST, com filtro e persistência nas configurações do usuário.
+- [x] Cores customizáveis para trilhas MIDI/áudio e Master, com persistência no `.pfs` e inclusão em undo/redo.
+
 ### Trilha paralela V — Identidade visual e ícones (independente dos marcos de funcionalidade)
 
 > Pode ser feita a qualquer momento (inclusive por outro modelo, em paralelo), pois quase não toca no `core/` nem no áudio.
@@ -702,6 +708,10 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 **Plugins**
 - [ ] A lista mostra todos os plugins encontrados (compare `N plugins encontrados` com o número visível em **Todos**).
 - [ ] Filtros Instrumentos/Efeitos separam corretamente; busca por nome e por fabricante funciona.
+- [ ] Favoritos mostra somente plugins favoritados, agrupados pelas categorias coloridas, sem hierarquia VST/fabricante; cores e favoritos persistem após reiniciar.
+- [ ] Em Favoritos, Ctrl/Shift+clique seleciona vários plugins; o menu de contexto altera ou remove todos sem retrair as categorias abertas.
+- [ ] A árvore Favoritos agrupa plugins nas sete categorias coloridas, e mover um favorito para outra cor atualiza a categoria.
+- [ ] bx_oberhausen e bx_meter abrem com a interface completa, sem cortes.
 - [ ] Rescan não duplica entradas; abrir de novo mostra a lista instantaneamente (cache XML).
 
 **Cadeia e áudio**
@@ -710,6 +720,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 - [ ] Instrumento novo na mesma trilha **substitui** o anterior (e a janela antiga fecha).
 - [ ] Efeito adicionado **altera** o som da trilha; remover o efeito restaura.
 - [ ] Mute/Solo/Volume por trilha funcionam; medidor reage.
+- [ ] Escolher e redefinir a cor de trilhas MIDI/áudio e Master atualiza seus indicadores e persiste após salvar/reabrir; undo/redo restaura a cor.
 
 **Transporte**
 - [ ] Espaço toca/pausa **sem notas presas**; Home/botão voltam ao início; Stop volta ao início.
@@ -745,6 +756,10 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.59** | Seleção múltipla de favoritos para aplicar cores/remover em lote; restauração da expansão e seleção da árvore após alterações |
+| **Doc 1.58** | Favoritos de plugins usam a mesma paleta e árvore de categorias coloridas do navegador de arquivos |
+| **Doc 1.56** | Favoritos de plugins exibidos em lista plana; canal Master agora permite escolher e salvar uma cor |
+| **Doc 1.55** | Favoritos VST com filtro/persistência; paleta de cores por trilha salva em `.pfs`, aplicada aos clips e integrada a undo/redo |
 | **Doc 1.54** | Volume Master: ganho ampliado a +24 dB; Amount/Rate/Phase/Shape contínuos, modulação L/R com fase estéreo e visualização em tempo real |
 | **Doc 1.53** | Volume Master: ganho de -60 a +12 dB com migração de automações antigas; indicador de balanço centralizado; controle Bass Freq removido |
 | **Doc 1.52** | Volume Master unificado com Auto Pan e recursos Utility; Pan Master removido como efeito separado, projetos e automações legados migrados |

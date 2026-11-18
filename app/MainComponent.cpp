@@ -422,7 +422,7 @@ public:
 
         setResizable (! fixedNativeEditor, false);
         const int horizontalMargin = std::min (16, std::max (0, (displayUserArea.getWidth() - 1) / 2));
-        const int verticalMargin = std::min (60, std::max (0, (displayUserArea.getHeight() - 1) / 2));
+        const int verticalMargin = std::min (16, std::max (0, (displayUserArea.getHeight() - 1) / 2));
         const auto available = displayUserArea.reduced (horizontalMargin, verticalMargin);
 
         const bool needsViewport = ! editorResizable
