@@ -1,5 +1,6 @@
 #include "AudioFileBrowser.h"
 #include "FavoriteColorPalette.h"
+#include "FreedomModalDialog.h"
 #include <algorithm>
 #include <array>
 #include <filesystem>
@@ -875,19 +876,17 @@ void AudioFileBrowser::createFolderInDirectory (const juce::File& directory)
         return;
     }
 
-    auto* alert = new juce::AlertWindow ("Criar pasta", "Digite o nome da nova pasta:",
-                                         juce::AlertWindow::NoIcon);
-    alert->addTextEditor ("name", {}, "Nome");
-    alert->addButton ("Criar", 1);
-    alert->addButton ("Cancelar", 0);
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
-    alert->enterModalState (true,
-        juce::ModalCallbackFunction::create ([safeThis, alert, directory] (int result)
+    FreedomModalDialog::showInput (
+        *this, "Criar pasta", "Digite o nome da nova pasta:", {}, "Nome",
+        { { "Criar", 1, FreedomModalDialog::ButtonStyle::Primary },
+          { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+        [safeThis, directory] (int result, juce::String input)
         {
             if (safeThis == nullptr || result != 1)
                 return;
 
-            const auto name = alert->getTextEditorContents ("name").trim();
+            const auto name = input.trim();
             if (name.isEmpty() || name == "." || name == ".."
                 || name.containsChar ('/') || name.containsChar ('\\'))
             {
@@ -910,7 +909,7 @@ void AudioFileBrowser::createFolderInDirectory (const juce::File& directory)
 
             safeThis->refreshTree();
             safeThis->setStatus ("Pasta criada: " + name);
-        }), true);
+        });
 }
 
 void AudioFileBrowser::moveItemToTrash (const juce::File& file)
@@ -936,11 +935,11 @@ void AudioFileBrowser::moveItemToTrash (const juce::File& file)
         ? "A pasta \"" + file.getFileName() + "\" e todo o seu conteudo serao movidos para a Lixeira do sistema."
         : "O arquivo \"" + file.getFileName() + "\" sera movido para a Lixeira do sistema.";
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
-    juce::AlertWindow::showOkCancelBox (juce::AlertWindow::WarningIcon,
-        "Mover para a Lixeira?",
-        itemDescription,
-        "Mover para a Lixeira", "Cancelar", this,
-        juce::ModalCallbackFunction::create ([safeThis, file] (int result)
+    FreedomModalDialog::show (
+        *this, "Mover para a Lixeira?", itemDescription, FreedomModalDialog::Icon::Warning,
+        { { "Mover para a Lixeira", 1, FreedomModalDialog::ButtonStyle::Primary },
+          { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+        [safeThis, file] (int result)
         {
             if (safeThis == nullptr || result == 0)
                 return;
@@ -979,7 +978,7 @@ void AudioFileBrowser::moveItemToTrash (const juce::File& file)
             safeThis->selectFile ({});
             safeThis->refreshTree();
             safeThis->setStatus (file.getFileName() + " movido para a Lixeira.");
-        }));
+        });
 }
 
 void AudioFileBrowser::setFavorite (const juce::File& file, int color)

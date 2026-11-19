@@ -166,7 +166,7 @@ public:
                     control->toggle->setColour (juce::TextButton::buttonColourId, theme::control());
                     control->toggle->setColour (juce::TextButton::buttonOnColourId, theme::accent());
                     control->toggle->setColour (juce::TextButton::textColourOffId, theme::text());
-                    control->toggle->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+                    control->toggle->setColour (juce::TextButton::textColourOnId, theme::text());
                     control->toggle->onClick = [parameter, button = control->toggle.get()]
                     {
                         parameter->beginChangeGesture();

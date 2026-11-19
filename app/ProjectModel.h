@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_events/juce_events.h>
 #include "Arrangement.h"
+#include "PluginState.h"
 #include <functional>
 #include <memory>
 #include <string>
@@ -11,6 +12,31 @@ struct ArrangementLocator
     int id = 0;
     double beat = 0.0;
     std::string name, info;
+};
+
+enum class MidiMappingTarget : int
+{
+    TrackVolume = 0,
+    TrackPan = 1,
+    TrackMute = 2,
+    TrackSolo = 3,
+    MasterVolume = 4,
+    MasterPan = 5
+};
+
+enum class MidiMappingMessageType : int
+{
+    ControlChange = 0,
+    Note = 1
+};
+
+struct MidiMapping
+{
+    int trackId = 0;
+    MidiMappingTarget target = MidiMappingTarget::TrackVolume;
+    MidiMappingMessageType messageType = MidiMappingMessageType::ControlChange;
+    int channel = 1;
+    int number = 0;
 };
 
 // Estado do projeto: trilhas, clips, selecao e regiao de loop. Vive na thread principal.
@@ -26,6 +52,7 @@ public:
         int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
         double loopStart = 0.0, loopEnd = 16.0, totalBeats = 256.0;
         std::vector<ArrangementLocator> locators;
+        std::vector<MidiMapping> midiMappings;
         int selectedLocatorId = -1, songStartLocatorId = -1;
     };
 
@@ -39,6 +66,7 @@ public:
     double loopStart = 0.0, loopEnd = 16.0;
     double totalBeats = 256.0;                       // 64 compassos visiveis (cresce com os clips)
     std::vector<ArrangementLocator> locators;
+    std::vector<MidiMapping> midiMappings;
     int selectedLocatorId = -1, songStartLocatorId = -1;
 
     std::function<void (int trackId)> onTrackAdded, onTrackRemoved;   // removed: antes de apagar
@@ -47,6 +75,8 @@ public:
     std::function<void()> onMixerChanged;
     std::function<void()> onSelectionChanged;                         // trilha/clip selecionados mudaram
     std::function<void()> onLoopChanged;
+    std::function<std::vector<PluginState>()> capturePluginHistoryState;
+    std::function<void (const std::vector<PluginState>&)> restorePluginHistoryState;
 
     roll::Track*     track (int id) const;
     roll::Track*     selectedTrack() const { return track (selectedTrackId); }
@@ -116,9 +146,13 @@ public:
     const ArrangementLocator* locator (int id) const;
     void growTo (double beats);
     void beginEdit();
+    void beginExternalEdit();
     void endEdit();
+    void cancelEdit();
     bool undo();
     bool redo();
+    bool canUndo() const noexcept { return ! undoStack.empty(); }
+    bool canRedo() const noexcept { return ! redoStack.empty(); }
     bool retainsAudioFile (const std::string& path) const;
     State createState() const;
     void replaceState (State);
@@ -133,16 +167,20 @@ private:
         int nextTrackId = 1;
         double loopStart = 0.0, loopEnd = 16.0, totalBeats = 256.0;
         std::vector<ArrangementLocator> locators;
+        std::vector<MidiMapping> midiMappings;
         int selectedLocatorId = -1, songStartLocatorId = -1;
         int nextLocatorId = 1;
+        std::vector<PluginState> plugins;
+        bool includesPluginState = false;
     };
 
-    Snapshot makeSnapshot() const;
+    Snapshot makeSnapshot (bool includePluginState = false) const;
     void restoreSnapshot (Snapshot&&);
     void recordUndo();
 
     int nextTrackId = 1;
     int nextLocatorId = 1;
     std::vector<Snapshot> undoStack, redoStack;
+    std::vector<Snapshot> redoStackBeforeEdit;
     bool editInProgress = false;
 };

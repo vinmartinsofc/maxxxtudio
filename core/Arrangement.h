@@ -28,6 +28,7 @@ struct AutomationTarget
         if (type != AutomationParameterType::PluginParameter)
             return true;
         return pluginIdentifier == other.pluginIdentifier
+            && (deviceIndex < 0 || other.deviceIndex < 0 || deviceIndex == other.deviceIndex)
             && (parameterId.empty() ? parameterIndex == other.parameterIndex
                                     : parameterId == other.parameterId);
     }

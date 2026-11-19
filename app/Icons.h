@@ -32,8 +32,21 @@ enum class Icon
     Waveform,
     FadeIn,
     FadeOut,
-    Resize
+    Resize,
+    ComputerKeyboard,
+    PianoRoll,
+    OpenWindow,
+    Power,
+    Close,
+    Folder,
+    Settings,
+    AudioFile,
+    Favorites,
+    Plugins,
+    Vst,
+    Cpu
 };
 
 const juce::Drawable* get (Icon icon, juce::Colour colour, int size = 24);
+juce::Image appIcon();
 }

@@ -58,7 +58,18 @@ juce::String RollModel::gridLabel() const
     return text;
 }
 
-void RollModel::beginEdit() { history.record (clip().notes()); }
+void RollModel::beginEdit()
+{
+    history.record (clip().notes());
+    if (onEditStarted)
+        onEditStarted();
+}
+
+void RollModel::endEdit()
+{
+    if (onEditFinished)
+        onEditFinished();
+}
 
 void RollModel::notify (bool rebuildRowLayout)
 {
@@ -111,6 +122,7 @@ void RollModel::deleteSelected()
     for (int id : selection) clip().removeNote (id);
     selection.clear();
     notify (true);
+    endEdit();
 }
 
 void RollModel::duplicateSelected()
@@ -142,6 +154,7 @@ void RollModel::duplicateSelected()
     selection = newSelection;
     resolveOverlaps (selection);
     notify (true);
+    endEdit();
 }
 
 void RollModel::nudgeSelected (double dBeats, int dPitch)
@@ -160,6 +173,7 @@ void RollModel::nudgeSelected (double dBeats, int dPitch)
         if (auto* n = clip().find (id)) { n->startBeats += dBeats; n->pitch += dPitch; }
     resolveOverlaps (selection);
     notify (true);
+    endEdit();
 }
 
 void RollModel::quantizeSelected()
@@ -169,6 +183,7 @@ void RollModel::quantizeSelected()
     for (int id : selection)
         if (auto* n = clip().find (id)) n->startBeats = std::max (0.0, roll::snapToGrid (n->startBeats, gridBeats));
     notify (false);
+    endEdit();
 }
 
 void RollModel::toggleMuteSelected()
@@ -180,6 +195,7 @@ void RollModel::toggleMuteSelected()
     beginEdit();
     for (int id : selection) if (auto* n = clip().find (id)) n->muted = anyActive;
     notify (false);
+    endEdit();
 }
 
 void RollModel::updateGrid()     { gridBeats = baseGrid * (triplet ? 2.0 / 3.0 : 1.0); }
@@ -212,6 +228,7 @@ void RollModel::resizeSelected (double dBeats)
         if (auto* n = clip().find (id)) n->lengthBeats = std::max (minLength(), n->lengthBeats + dBeats);
     resolveOverlaps (selection);
     notify (false);
+    endEdit();
 }
 
 void RollModel::resolveOverlaps (const std::set<int>& ids)
@@ -249,6 +266,7 @@ void RollModel::paste()
     selection = pasted;
     resolveOverlaps (selection);
     notify (true);
+    endEdit();
 }
 
 void RollModel::setInsertMarker (double beats)

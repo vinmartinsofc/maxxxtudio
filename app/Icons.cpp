@@ -12,13 +12,15 @@ namespace icons
 {
 namespace
 {
-constexpr std::array<const char*, 27> resourceNames
+constexpr std::array<const char*, 39> resourceNames
 {
     "play_svg", "pause_svg", "stop_svg", "record_svg", "rewind_svg", "fastforward_svg",
     "loop_svg", "metronome_svg", "pointer_svg", "pencil_svg", "eraser_svg", "cut_svg",
     "copy_svg", "move_svg", "selectregion_svg", "split_svg", "mixer_svg", "volume_svg",
     "mute_svg", "pan_svg", "levelmeter_svg", "automation_svg", "keyboard_svg", "waveform_svg",
-    "fadein_svg", "fadeout_svg", "resize_svg"
+    "fadein_svg", "fadeout_svg", "resize_svg", "computerkeyboard_svg", "pianoroll_svg",
+    "openwindow_svg", "power_svg", "close_svg", "folder_svg", "settings_svg",
+    "audiofile_svg", "favorites_svg", "plugins_svg", "vst_svg", "cpu_svg"
 };
 
 using CacheKey = std::tuple<Icon, std::uint32_t, int>;
@@ -57,7 +59,7 @@ const juce::Drawable* get (Icon icon, juce::Colour colour, int size)
     if (data == nullptr || dataSize <= 0)
         return nullptr;
     std::string svg (data, static_cast<std::size_t> (dataSize));
-    replaceAll (svg, "currentColor", colour.toDisplayString (false).toStdString());
+    replaceAll (svg, "currentColor", "#" + colour.toDisplayString (false).toStdString());
     auto drawable = juce::Drawable::createFromImageData (svg.data(), svg.size());
     if (drawable == nullptr)
         return nullptr;
@@ -65,5 +67,15 @@ const juce::Drawable* get (Icon icon, juce::Colour colour, int size)
     const auto* result = drawable.get();
     drawables.emplace (key, std::move (drawable));
     return result;
+}
+
+juce::Image appIcon()
+{
+    int dataSize = 0;
+    const auto* data = BinaryData::getNamedResource ("projectfreedom_png", dataSize);
+    if (data == nullptr || dataSize <= 0)
+        return {};
+
+    return juce::ImageFileFormat::loadFrom (data, static_cast<std::size_t> (dataSize));
 }
 }

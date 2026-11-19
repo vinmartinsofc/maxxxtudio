@@ -70,8 +70,8 @@ void NoteGrid::showContextMenu (juce::Point<int> screenPosition)
     const bool hasSelection = ! model.selection.empty();
     const bool canSelectNotes = ! model.clip().notes().empty();
     juce::PopupMenu editMenu, noteMenu, gridMenu, viewMenu, spellingMenu, menu;
-    editMenu.addItem (1, "Desfazer", model.history.canUndo());
-    editMenu.addItem (2, "Refazer", model.history.canRedo());
+    editMenu.addItem (1, "Desfazer", model.canGlobalUndo ? model.canGlobalUndo() : model.history.canUndo());
+    editMenu.addItem (2, "Refazer", model.canGlobalRedo ? model.canGlobalRedo() : model.history.canRedo());
     editMenu.addSeparator();
     editMenu.addItem (3, "Recortar", hasSelection);
     editMenu.addItem (4, "Copiar", hasSelection);
@@ -142,8 +142,14 @@ void NoteGrid::showContextMenu (juce::Point<int> screenPosition)
             auto& m = safeThis->model;
             switch (result)
             {
-                case 1: m.undo(); break;
-                case 2: m.redo(); break;
+                case 1:
+                    if (m.onGlobalUndoRedo) m.onGlobalUndoRedo (false);
+                    else m.undo();
+                    break;
+                case 2:
+                    if (m.onGlobalUndoRedo) m.onGlobalUndoRedo (true);
+                    else m.redo();
+                    break;
                 case 3: m.copySelected (true); break;
                 case 4: m.copySelected (false); break;
                 case 5: m.paste(); break;
@@ -242,7 +248,7 @@ void NoteGrid::paint (juce::Graphics& g)
         const float vel = static_cast<float> (n.velocity) / 127.0f;
         juce::Colour c = sel ? theme::noteSelected() : theme::noteFill();
         c = c.withMultipliedBrightness (0.55f + 0.45f * vel);
-        if (n.muted) c = juce::Colour (0xff5b6169);
+        if (n.muted) c = theme::textDim();
 
         g.setColour (c);
         g.fillRoundedRectangle (r, 2.0f);
@@ -544,6 +550,7 @@ void NoteGrid::mouseUp (const juce::MouseEvent& e)
     {
         model.resolveOverlaps (model.selection);
         model.notify (true);
+        model.endEdit();
     }
     drag = Drag::None;
     editBegun = false;
@@ -566,6 +573,7 @@ void NoteGrid::mouseDoubleClick (const juce::MouseEvent& e)
         model.clip().removeNote (id);
         model.selection.erase (id);
         model.notify (true);
+        model.endEdit();
         return;
     }
 
@@ -583,6 +591,7 @@ void NoteGrid::mouseDoubleClick (const juce::MouseEvent& e)
     const int newId = model.clip().addNote (n);
     model.selection = { newId };
     model.notify (true);
+    model.endEdit();
     flashPreview (pitch);
 }
 
@@ -616,8 +625,18 @@ bool NoteGrid::keyPressed (const juce::KeyPress& k)
     if (ctrl && isLetter (k, 'X')) { model.copySelected (true);  return true; }
     if (ctrl && isLetter (k, 'V')) { model.paste(); return true; }
     if (ctrl && isLetter (k, 'U')) { model.quantizeSelected(); return true; }
-    if (ctrl && isLetter (k, 'Z') && ! shift) { model.undo(); return true; }
-    if (ctrl && (isLetter (k, 'Y') || (isLetter (k, 'Z') && shift))) { model.redo(); return true; }
+    if (ctrl && isLetter (k, 'Z') && ! shift)
+    {
+        if (model.onGlobalUndoRedo) model.onGlobalUndoRedo (false);
+        else model.undo();
+        return true;
+    }
+    if (ctrl && (isLetter (k, 'Y') || (isLetter (k, 'Z') && shift)))
+    {
+        if (model.onGlobalUndoRedo) model.onGlobalUndoRedo (true);
+        else model.redo();
+        return true;
+    }
 
     if (ctrl && code == '1') { model.narrowGrid();    return true; }
     if (ctrl && code == '2') { model.widenGrid();     return true; }
@@ -692,7 +711,8 @@ void KeyColumn::paint (juce::Graphics& g)
         const bool black = isBlackKey (pitch);
 
         const bool lit = model.isKeyLit (pitch);
-        g.setColour (lit ? theme::accent() : black ? juce::Colour (0xff15171a) : juce::Colour (0xffdfe3e8));
+        g.setColour (lit ? theme::accent()
+                         : black ? juce::Colours::black : juce::Colours::white);
         g.fillRect (0, y, getWidth(), model.rowHeight - 1);
 
         if (model.scaleOn && model.highlight && model.scale.contains (pitch))
@@ -702,8 +722,7 @@ void KeyColumn::paint (juce::Graphics& g)
         }
 
         const float fontSize = std::min (11.0f, std::max (7.0f, static_cast<float> (model.rowHeight - 1)));
-        g.setColour (lit ? juce::Colours::black
-                         : black ? theme::textDim() : juce::Colour (0xff4a5058));
+        g.setColour (lit ? theme::text() : black ? theme::textDim() : juce::Colours::black);
         g.setFont (juce::FontOptions (fontSize, pitch % 12 == 0 ? juce::Font::bold : juce::Font::plain));
         g.drawFittedText (pitchName (pitch, model.noteSpelling, model.scale.root(), model.scaleOn),
                           juce::Rectangle<int> (4, y, getWidth() - zoomStripWidth - 10, model.rowHeight),
@@ -837,7 +856,7 @@ void RulerBar::paint (juce::Graphics& g)
 
         const float x = static_cast<float> (localBeat * ppb);
         const auto colour = locators[index].first == selectedLocatorId
-            ? juce::Colour (0xffff8585) : juce::Colour (0xffe64b4b);
+            ? theme::recording().brighter (0.25f) : theme::recording();
         g.setColour (colour);
         g.drawVerticalLine (static_cast<int> (x), 0.0f, static_cast<float> (getHeight()));
         juce::Path flag;
@@ -855,7 +874,7 @@ void RulerBar::paint (juce::Graphics& g)
                     juce::Justification::centred, true);
     }
 
-    if (hovered && getWidth() > 0)
+    if (hovered && ! hoveringLocator && getWidth() > 0)
     {
         const float centreX = std::clamp (hoveredX, 10.0f, static_cast<float> (getWidth()) - 10.0f);
         const float centreY = static_cast<float> (getHeight()) * 0.67f;
@@ -911,6 +930,7 @@ void RulerBar::mouseDown (const juce::MouseEvent& e)
 {
     hovered = true;
     hoveredX = e.position.x;
+    hoveringLocator = locatorAt (e.position.x) >= 0;
     repaint();
     last = e.getEventRelativeTo (getParentComponent()).position;
     dragging = false;
@@ -926,6 +946,7 @@ void RulerBar::mouseDown (const juce::MouseEvent& e)
             [locatorId] (const auto& item) { return item.first == locatorId; });
         if (marker != locators.end())
         {
+            hoveringLocator = true;
             locatorDragPending = true;
             draggedLocatorId = locatorId;
             locatorGrabOffset = e.position.x / model.pixelsPerBeat - marker->second;
@@ -939,14 +960,17 @@ void RulerBar::mouseMove (const juce::MouseEvent& e)
 {
     hovered = true;
     hoveredX = e.position.x;
+    hoveringLocator = locatorAt (e.position.x) >= 0;
     repaint();
-    setMouseCursor (isResizeHandle (e.position) ? juce::MouseCursor::LeftRightResizeCursor
-                                                : juce::MouseCursor::NormalCursor);
+    setMouseCursor (locatorAt (e.position.x) >= 0 ? juce::MouseCursor::DraggingHandCursor
+                       : isResizeHandle (e.position) ? juce::MouseCursor::LeftRightResizeCursor
+                                                     : juce::MouseCursor::NormalCursor);
 }
 
 void RulerBar::mouseExit (const juce::MouseEvent&)
 {
     hovered = false;
+    hoveringLocator = false;
     repaint();
     setMouseCursor (juce::MouseCursor::NormalCursor);
 }
@@ -954,6 +978,7 @@ void RulerBar::mouseExit (const juce::MouseEvent&)
 void RulerBar::mouseDrag (const juce::MouseEvent& e)
 {
     hoveredX = e.position.x;
+    hoveringLocator = locatorDragPending || locatorAt (e.position.x) >= 0;
     repaint();
     if (locatorDragPending)
     {
@@ -1076,7 +1101,7 @@ void PianoRollOverview::paint (juce::Graphics& g)
             const float height = std::max (1.0f, pitchHeight);
             auto colour = model.isSelected (note.id) ? theme::noteSelected() : theme::noteFill();
             if (note.muted)
-                colour = juce::Colour (0xff5b6169);
+                colour = theme::textDim();
             g.setColour (colour);
             g.fillRect (x, y, width, height);
         }
@@ -1239,7 +1264,7 @@ void VelocityLane::paint (juce::Graphics& g)
 
         const float h = static_cast<float> (getHeight() - 6) * static_cast<float> (n.velocity) / 127.0f;
         juce::Colour c = model.isSelected (n.id) ? theme::noteSelected() : theme::noteFill();
-        if (n.muted) c = juce::Colour (0xff5b6169);
+        if (n.muted) c = theme::textDim();
         g.setColour (c);
         g.fillRect (static_cast<float> (x), static_cast<float> (getHeight()) - 3.0f - h, 3.0f, h);
         g.fillEllipse (static_cast<float> (x) - 2.0f, static_cast<float> (getHeight()) - 3.0f - h - 2.0f, 7.0f, 7.0f);
@@ -1284,7 +1309,14 @@ void VelocityLane::mouseDrag (const juce::MouseEvent& e)
     model.notify (false);
 }
 
-void VelocityLane::mouseUp (const juce::MouseEvent&) { primaryId = -1; editBegun = false; originalVel.clear(); }
+void VelocityLane::mouseUp (const juce::MouseEvent&)
+{
+    if (editBegun)
+        model.endEdit();
+    primaryId = -1;
+    editBegun = false;
+    originalVel.clear();
+}
 
 // ============================================================ PianoRollEditor
 

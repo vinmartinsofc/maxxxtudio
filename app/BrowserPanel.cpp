@@ -29,8 +29,8 @@ public:
     juce::String getTooltip() override
     {
         return isFolder ? text + " (" + juce::String (count) + ")"
-                        : description.name + " — " + description.manufacturerName
-                            + " (" + description.pluginFormatName + "); clique com o botão direito para favoritos";
+                        : description.name + " - " + description.manufacturerName
+                            + " (" + description.pluginFormatName + "); clique com o botao direito para favoritos";
     }
 
     juce::var getDragSourceDescription() override
@@ -83,7 +83,7 @@ public:
 
         if (! description.isInstrument)
         {
-            g.setColour (juce::Colour (0xff8c7ae6));
+            g.setColour (theme::accentHover());
             g.fillRoundedRectangle (static_cast<float> (width - 25), 4.0f, 3.0f,
                                     static_cast<float> (height - 8), 1.5f);
         }
@@ -237,7 +237,9 @@ void BrowserPanel::NativeToolCard::paintButton (juce::Graphics& graphics,
 
     if (isMouseOverButton)
     {
-        graphics.setColour (juce::Colours::white.withAlpha (0.08f));
+        graphics.setColour (theme::isLight()
+                                ? juce::Colours::black.withAlpha (0.055f)
+                                : juce::Colours::white.withAlpha (0.08f));
         graphics.fillRoundedRectangle (bounds, 4.0f);
     }
 
@@ -255,7 +257,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     : scanner (s), tree (std::make_unique<PluginTree> (*this)),
       drumRackCard ("Drum Rack", "Arraste para o canal MIDI desejado",
                     "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier)),
-      utilityCard ("Volume Master", theme::ui ("Volume, estéreo, mono, fase e modulação"),
+      utilityCard ("Volume Master", theme::ui ("Volume, estereo, mono, fase e modulacao"),
                    "plugin:" + juce::String ("ProjectFreedom.Utility"))
 {
     juce::PropertiesFile::Options options;
@@ -269,6 +271,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
 
     title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
+    title.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (title);
 
     for (auto* tab : { &vstTab, &projectFreedomTab })
@@ -276,7 +279,9 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         tab->setClickingTogglesState (true);
         tab->setRadioGroupId (4710);
         tab->setColour (juce::TextButton::buttonOnColourId, theme::accent());
-        tab->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        tab->setColour (juce::TextButton::textColourOnId, theme::text());
+        tab->setColour (juce::TextButton::buttonColourId, theme::control());
+        tab->setColour (juce::TextButton::textColourOffId, theme::text());
         addAndMakeVisible (tab);
     }
     vstTab.setToggleState (true, juce::dontSendNotification);
@@ -284,6 +289,9 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     projectFreedomTab.onClick = [this] { setProjectFreedomTab (true); };
 
     search.setTextToShowWhenEmpty ("Buscar (nome ou fabricante)", theme::textDim());
+    search.setColour (juce::TextEditor::backgroundColourId, theme::control());
+    search.setColour (juce::TextEditor::textColourId, theme::text());
+    search.setColour (juce::TextEditor::outlineColourId, theme::border());
     search.onTextChange = [this] { refresh(); };
     search.addKeyListener (this);
     addAndMakeVisible (search);
@@ -299,7 +307,9 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         b->setRadioGroupId (4711);
         b->setMouseClickGrabsKeyboardFocus (false);
         b->setColour (juce::TextButton::buttonOnColourId, theme::accent());
-        b->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b->setColour (juce::TextButton::textColourOnId, theme::text());
+        b->setColour (juce::TextButton::buttonColourId, theme::control());
+        b->setColour (juce::TextButton::textColourOffId, theme::text());
         addAndMakeVisible (b);
     }
     allButton.setToggleState (true, juce::dontSendNotification);
@@ -307,7 +317,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     instrumentsButton.setTooltip ("Instrumentos");
     effectsButton.setTooltip ("Efeitos");
     favoritesButton.setTooltip (
-        "Ctrl+clique ou Shift+clique para selecionar vários favoritos; "
+        "Ctrl+clique ou Shift+clique para selecionar varios favoritos; "
         "clique direito para mudar a cor ou remover");
     allButton.onClick         = [this] { setFilter (Filter::All); };
     instrumentsButton.onClick = [this] { setFilter (Filter::Instruments); };

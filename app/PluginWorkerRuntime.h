@@ -27,6 +27,7 @@ private:
     juce::AudioPluginFormatManager formats;
     std::unique_ptr<juce::AudioPluginInstance> processor;
     std::unique_ptr<EditorWindow> editorWindow;
+    std::unique_ptr<juce::AudioProcessorParameter::Listener> parameterGestureListener;
     juce::AudioBuffer<float> audioBuffer;
     HANDLE mapping = nullptr, requestEvent = nullptr, responseEvent = nullptr, parentProcess = nullptr;
     pluginworker::SharedData* shared = nullptr;

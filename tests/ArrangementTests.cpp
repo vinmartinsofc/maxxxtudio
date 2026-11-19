@@ -28,9 +28,13 @@ TEST_CASE("Automation envelopes interpolate validated breakpoint values")
     firstEffect.deviceIndex = 0;
     auto secondEffect = firstEffect;
     secondEffect.deviceIndex = 1;
-    REQUIRE (firstEffect == secondEffect);
+    REQUIRE_FALSE (firstEffect == secondEffect);
     secondEffect.parameterId = "resonance";
     REQUIRE_FALSE (firstEffect == secondEffect);
+
+    auto legacyEffect = secondEffect;
+    legacyEffect.deviceIndex = -1;
+    REQUIRE (legacyEffect == secondEffect);
 }
 
 TEST_CASE("Adaptive arrangement grid keeps snap spacing usable while zooming")

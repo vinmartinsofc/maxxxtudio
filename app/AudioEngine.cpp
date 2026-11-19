@@ -382,7 +382,9 @@ public:
             const auto device = std::find_if (devices.begin(), devices.end(),
                 [&envelope] (const auto& item)
                 {
-                    return std::get<0> (item) == juce::String (envelope.target.pluginIdentifier);
+                    return std::get<0> (item) == juce::String (envelope.target.pluginIdentifier)
+                        && (envelope.target.deviceIndex < 0
+                            || std::get<2> (item) == envelope.target.deviceIndex);
                 });
             if (device == devices.end() || std::get<1> (*device) == nullptr)
                 continue;
@@ -424,7 +426,8 @@ public:
                     manualValue = current->manualValue;
                     manualValueCaptured = current->manualValueCaptured;
                 }
-                bindings.push_back ({ processor, match, envelope, manualValue, manualValueCaptured });
+                bindings.push_back ({ processor, match, envelope, std::get<2> (*device),
+                                      manualValue, manualValueCaptured });
             }
         }
 
@@ -443,6 +446,18 @@ public:
         localVersion = pendingVersion;
         wasPlaying = false;
         needsRestore = false;
+    }
+
+    void setManualOverride (int deviceIndex, int parameterIndex, bool enabled)
+    {
+        const auto key = overrideKey (deviceIndex, parameterIndex);
+        if (enabled)
+            manualOverride.store (key, std::memory_order_release);
+        else
+        {
+            auto expected = key;
+            manualOverride.compare_exchange_strong (expected, 0, std::memory_order_acq_rel);
+        }
     }
 
     const juce::String getName() const override { return "Track Automation"; }
@@ -469,6 +484,11 @@ public:
                 bool restored = true;
                 for (const auto& binding : localBindings)
                 {
+                    if (isManuallyOverridden (binding))
+                    {
+                        restored = false;
+                        continue;
+                    }
                     const juce::CriticalSection::ScopedTryLockType processorLock (
                         binding.processor->getCallbackLock());
                     if (processorLock.isLocked())
@@ -486,9 +506,10 @@ public:
 
         wasPlaying = true;
         needsRestore = false;
-        const double beat = shared.plan.seg[0].a;
         for (auto& binding : localBindings)
         {
+            if (isManuallyOverridden (binding))
+                continue;
             const juce::CriticalSection::ScopedTryLockType processorLock (
                 binding.processor->getCallbackLock());
             if (processorLock.isLocked())
@@ -498,8 +519,17 @@ public:
                     binding.manualValue = binding.parameter->getValue();
                     binding.manualValueCaptured = true;
                 }
-                binding.parameter->setValue (static_cast<float> (
-                    roll::automationValueAt (binding.envelope, beat, binding.envelope.target.currentValue)));
+                for (int segmentIndex = 0; segmentIndex < shared.plan.count; ++segmentIndex)
+                {
+                    const auto& segment = shared.plan.seg[segmentIndex];
+                    if (segment.samples <= 0)
+                        continue;
+                    const double beat = segment.a;
+                    binding.parameter->setValue (static_cast<float> (
+                        roll::automationValueAt (
+                            binding.envelope, beat, binding.envelope.target.currentValue)));
+                    break;
+                }
             }
         }
     }
@@ -523,14 +553,28 @@ private:
         juce::AudioProcessor* processor = nullptr;
         juce::AudioProcessorParameter* parameter = nullptr;
         roll::AutomationEnvelope envelope;
+        int deviceIndex = -1;
         float manualValue = 0.0f;
         bool manualValueCaptured = false;
     };
+
+    static std::uint64_t overrideKey (int deviceIndex, int parameterIndex)
+    {
+        return (static_cast<std::uint64_t> (static_cast<std::uint32_t> (deviceIndex + 1)) << 32)
+             | static_cast<std::uint32_t> (parameterIndex + 1);
+    }
+
+    bool isManuallyOverridden (const Binding& binding) const
+    {
+        return manualOverride.load (std::memory_order_acquire)
+            == overrideKey (binding.deviceIndex, binding.envelope.target.parameterIndex);
+    }
 
     const BlockShared& shared;
     juce::SpinLock bindingLock;
     std::vector<Binding> pendingBindings, localBindings;
     std::uint64_t pendingVersion = 0, localVersion = 0;
+    std::atomic<std::uint64_t> manualOverride { 0 };
     bool wasPlaying = false, needsRestore = false;
 };
 
@@ -586,6 +630,9 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     const bool hasMixerAutomation = shared.playing && shared.plan.count > 0
         && (volumeEnvelope != nullptr || panEnvelope != nullptr || muteEnvelope != nullptr);
     float peakNow = 0.0f;
+    float peakLeftNow = 0.0f, peakRightNow = 0.0f;
+    double sumSquares = 0.0;
+    std::size_t sampleCount = 0;
 
     if (hasMixerAutomation)
     {
@@ -628,7 +675,14 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
                 const float side = channel == 0 ? left : right;
                 auto* samples = buffer.getWritePointer (channel);
                 samples[i] *= gain * side;
-                peakNow = std::max (peakNow, std::abs (samples[i]));
+                const float level = std::abs (samples[i]);
+                peakNow = std::max (peakNow, level);
+                if (channel == 0)
+                    peakLeftNow = std::max (peakLeftNow, level);
+                else if (channel == 1)
+                    peakRightNow = std::max (peakRightNow, level);
+                sumSquares += static_cast<double> (samples[i]) * samples[i];
+                ++sampleCount;
             }
         }
         liveGainValue.store (liveGain, std::memory_order_relaxed);
@@ -636,6 +690,13 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         liveMuteValue.store (liveMute, std::memory_order_relaxed);
         currentGain = target;
         peakLevel = std::max (peakNow, peakLevel.load() * 0.92f);
+        if (buffer.getNumChannels() == 1)
+            peakRightNow = peakLeftNow;
+        peakLeftLevel = std::max (peakLeftNow, peakLeftLevel.load() * 0.92f);
+        peakRightLevel = std::max (peakRightNow, peakRightLevel.load() * 0.92f);
+        const float rmsNow = sampleCount > 0
+            ? static_cast<float> (std::sqrt (sumSquares / static_cast<double> (sampleCount))) : 0.0f;
+        rmsLevel = std::max (rmsNow, rmsLevel.load() * 0.92f);
         return;
     }
 
@@ -653,7 +714,14 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
         {
             g += step;
             data[i] *= g * side;
-            peakNow = std::max (peakNow, std::abs (data[i]));
+            const float level = std::abs (data[i]);
+            peakNow = std::max (peakNow, level);
+            if (ch == 0)
+                peakLeftNow = std::max (peakLeftNow, level);
+            else if (ch == 1)
+                peakRightNow = std::max (peakRightNow, level);
+            sumSquares += static_cast<double> (data[i]) * data[i];
+            ++sampleCount;
         }
     }
     currentGain = target;
@@ -661,11 +729,21 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     livePanValue.store (pan, std::memory_order_relaxed);
     liveMuteValue.store (controlMute.load(), std::memory_order_relaxed);
     peakLevel = std::max (peakNow, peakLevel.load() * 0.92f);       // queda suave para o medidor
+    if (buffer.getNumChannels() == 1)
+        peakRightNow = peakLeftNow;
+    peakLeftLevel = std::max (peakLeftNow, peakLeftLevel.load() * 0.92f);
+    peakRightLevel = std::max (peakRightNow, peakRightLevel.load() * 0.92f);
+    const float rmsNow = sampleCount > 0
+        ? static_cast<float> (std::sqrt (sumSquares / static_cast<double> (sampleCount))) : 0.0f;
+    rmsLevel = std::max (rmsNow, rmsLevel.load() * 0.92f);
 }
 
 void TrackMixer::resetPeak()
 {
     peakLevel.store (0.0f, std::memory_order_relaxed);
+    peakLeftLevel.store (0.0f, std::memory_order_relaxed);
+    peakRightLevel.store (0.0f, std::memory_order_relaxed);
+    rmsLevel.store (0.0f, std::memory_order_relaxed);
 }
 
 // ======================================================= SequencerGraph
@@ -1183,6 +1261,22 @@ void AudioEngine::setTrackAutomation (int trackId,
         ->setAutomation (automation, devices);
 }
 
+void AudioEngine::setPluginAutomationOverride (
+    int trackId, int deviceId, int parameterIndex, bool enabled)
+{
+    auto* track = find (trackId);
+    if (track == nullptr || track->automationProcessor == nullptr || parameterIndex < 0)
+        return;
+
+    for (std::size_t deviceIndex = 0; deviceIndex < track->devices.size(); ++deviceIndex)
+        if (track->devices[deviceIndex].id == deviceId)
+        {
+            static_cast<TrackAutomationProcessor*> (track->automationProcessor)
+                ->setManualOverride (static_cast<int> (deviceIndex), parameterIndex, enabled);
+            return;
+        }
+}
+
 void AudioEngine::previewNote (int trackId, int pitch, bool on, float velocity)
 {
     if (auto* t = find (trackId)) t->sourcePtr->preview (pitch, on, velocity);
@@ -1219,9 +1313,23 @@ float AudioEngine::peak (int trackId) const
     return t != nullptr ? t->mixerPtr->peak() : 0.0f;
 }
 
+float AudioEngine::rms (int trackId) const
+{
+    auto* t = find (trackId);
+    return t != nullptr ? t->mixerPtr->rms() : 0.0f;
+}
+
 float AudioEngine::masterPeak() const
 {
     return peak (masterTrackId);
+}
+
+std::pair<float, float> AudioEngine::masterPeakStereo() const
+{
+    const auto* master = find (masterTrackId);
+    if (master == nullptr || master->mixerPtr == nullptr)
+        return { 0.0f, 0.0f };
+    return { master->mixerPtr->peakLeft(), master->mixerPtr->peakRight() };
 }
 
 void AudioEngine::setTrackRouting (int trackId, roll::TrackOutputRouting routing, int parentGroupId)
@@ -1964,6 +2072,69 @@ std::vector<DeviceInfo> AudioEngine::devices (int trackId) const
             out.push_back (std::move (info));
         }
     return out;
+}
+
+juce::String AudioEngine::pluginParameterValueText (
+    int trackId, const roll::AutomationTarget& target, double normalizedValue) const
+{
+    const auto* track = find (trackId);
+    if (track == nullptr || target.type != roll::AutomationParameterType::PluginParameter)
+        return {};
+
+    int deviceIndex = 0;
+    for (const auto& device : track->devices)
+    {
+        const bool matchesDevice = device.pluginIdentifier
+                == juce::String::fromUTF8 (target.pluginIdentifier.c_str())
+            && (target.deviceIndex < 0 || target.deviceIndex == deviceIndex);
+        ++deviceIndex;
+        if (! matchesDevice || device.node == nullptr)
+            continue;
+
+        auto* processor = device.node->getProcessor();
+        if (processor == nullptr)
+            return {};
+        int parameterIndex = 0;
+        for (auto* parameter : processor->getParameters())
+        {
+            if (parameter == nullptr || ! parameter->isAutomatable())
+            {
+                ++parameterIndex;
+                continue;
+            }
+            const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (parameter);
+            const auto* parameterWithId =
+                dynamic_cast<const juce::AudioProcessorParameterWithID*> (parameter);
+            const auto parameterId = hosted != nullptr ? hosted->getParameterID()
+                : parameterWithId != nullptr ? parameterWithId->paramID : juce::String();
+            const bool matchesParameter = ! target.parameterId.empty()
+                ? parameterId == juce::String::fromUTF8 (target.parameterId.c_str())
+                : parameterIndex == target.parameterIndex;
+            if (matchesParameter)
+                return parameter->getText (static_cast<float> (
+                    std::clamp (normalizedValue, 0.0, 1.0)), 48);
+            ++parameterIndex;
+        }
+    }
+    return {};
+}
+
+std::vector<PluginParameterGesture> AudioEngine::consumePluginParameterGestures()
+{
+    std::vector<PluginParameterGesture> gestures;
+    for (auto& [trackId, track] : tracks)
+        for (auto& device : track.devices)
+            if (device.node != nullptr)
+                if (auto* remote = dynamic_cast<RemotePluginProcessor*> (device.node->getProcessor()))
+                {
+                    if (const int parameterIndex = remote->consumeParameterGestureStarted();
+                        parameterIndex >= 0)
+                        gestures.push_back ({ trackId, device.id, parameterIndex, true });
+                    if (const int parameterIndex = remote->consumeParameterGestureEnded();
+                        parameterIndex >= 0)
+                        gestures.push_back ({ trackId, device.id, parameterIndex, false });
+                }
+    return gestures;
 }
 
 std::vector<PluginState> AudioEngine::getPluginStates()

@@ -19,6 +19,20 @@ private:
     icons::Icon icon;
 };
 
+class IconToggleButton : public juce::Button
+{
+public:
+    IconToggleButton (icons::Icon i, const juce::String& name) : juce::Button (name), icon (i)
+    {
+        setTooltip (name);
+    }
+
+    void paintButton (juce::Graphics&, bool over, bool down) override;
+
+private:
+    icons::Icon icon;
+};
+
 // Barra de transporte: play/pause, stop, loop, BPM e posicao (compasso.beat.16avo).
 class TransportBar : public juce::Component, private juce::Timer
 {
@@ -55,22 +69,34 @@ public:
     std::function<void()> onOptionsMenu;
 
 private:
+    class CpuTooltipButton final : public juce::TextButton
+    {
+    public:
+        CpuTooltipButton () : juce::TextButton ("") {}
+        void paintButton (juce::Graphics&, bool, bool) override {}
+    };
+
     void timerCallback() override;
     void updateButtons();
 
     SequencerGraph& graph;
     IconButton playButton { icons::Icon::Play, "Reproduzir" };
     IconButton stopButton { icons::Icon::Stop, "Parar" };
-    juce::TextButton startButton { "|<" }, endButton { ">|" };
-    juce::TextButton projectButton { "Projeto" };
-    juce::TextButton optionsButton { "Opcoes" };
-    juce::TextButton metronomeButton { "Metronomo" };
+    IconButton startButton { icons::Icon::Rewind, "Ir para o inicio" };
+    IconButton endButton { icons::Icon::FastForward, "Ir para o final" };
+    IconButton projectButton { icons::Icon::Folder, "Projeto" };
+    IconButton optionsButton { icons::Icon::Settings, "Opcoes" };
+    IconToggleButton metronomeButton { icons::Icon::Metronome, "Metronomo" };
     juce::Slider metronomeVolumeSlider;
-    juce::TextButton loopButton { "Loop" }, browserButton { "Plugins" }, fileBrowserButton { "Audio" },
-                     favoritesButton { "Favoritos" },
-                     pianoRollButton { "Piano Roll" }, computerKeyboardButton { "MIDI" };
+    IconToggleButton loopButton { icons::Icon::Loop, "Loop" };
+    IconToggleButton browserButton { icons::Icon::Vst, "Plugins VST" };
+    IconToggleButton fileBrowserButton { icons::Icon::AudioFile, "Audio" };
+    IconToggleButton favoritesButton { icons::Icon::Favorites, "Favoritos" };
+    IconToggleButton pianoRollButton { icons::Icon::PianoRoll, "Piano Roll" },
+                     computerKeyboardButton { icons::Icon::ComputerKeyboard, "Teclado MIDI do computador" };
     juce::Label bpmLabel, positionLabel, bpmCaption { {}, "BPM" };
     juce::Rectangle<int> cpuMeterBounds;
-    double displayedCpuCurrent = 0.0, displayedCpuAverage = 0.0;
+    CpuTooltipButton cpuTooltipArea;
+    double displayedCpuAverage = 0.0;
     double lastPosition = -1.0;
 };

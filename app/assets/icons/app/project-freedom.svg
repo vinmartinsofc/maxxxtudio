@@ -1,11 +1,31 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <rect x="8" y="8" width="240" height="240" rx="54" fill="#292B2D"/>
-  <rect x="8" y="8" width="240" height="240" rx="54" fill="none" stroke="#66A3FF" stroke-width="8"/>
-  <g fill="none" stroke="#E6E6E6" stroke-linecap="square" stroke-linejoin="miter">
-    <path d="M128 27v202M27 128h202" stroke="#66A3FF" stroke-width="6"/>
-    <path d="M60 56h45M60 56v58M60 83h34" stroke-width="10"/>
-    <path d="M157 114V56h29c28 0 28 34 0 34h-29m27 0 31 24" stroke-width="10"/>
-    <path d="M105 145H60v58h45M60 174h34" stroke-width="10"/>
-    <path d="M196 145h-39v58h39m-39-29h31" stroke-width="10"/>
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#56575E"/>
+      <stop offset="0.5" stop-color="#34353B"/>
+      <stop offset="1" stop-color="#24252A"/>
+    </linearGradient>
+    <linearGradient id="face" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#171719"/>
+      <stop offset="1" stop-color="#09090A"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="248" height="248" rx="48" fill="url(#frame)"/>
+  <rect x="12" y="12" width="232" height="232" rx="40" fill="url(#face)"
+        stroke="#292A2F" stroke-width="2"/>
+
+  <g stroke="#FF6B00" stroke-linecap="round">
+    <path d="M128 30v22M128 204v22M31 128h78M147 128h78" stroke-width="5"/>
+    <path d="M119 98l11-25M122 146l12-29M122 191l12-29" stroke-width="5"/>
+    <path d="M22 66h20M22 86h13M22 170h13M22 190h20" stroke-width="4"/>
+    <path d="M214 66h20M221 86h13M221 170h13M214 190h20" stroke-width="4"/>
+  </g>
+
+  <g fill="#F2F2F3" font-family="Arial, Helvetica, sans-serif" font-size="80" font-weight="600"
+     text-anchor="middle" dominant-baseline="central">
+    <text x="84" y="79">F</text>
+    <text x="172" y="79">R</text>
+    <text x="84" y="177">E</text>
+    <text x="172" y="177">E</text>
   </g>
 </svg>

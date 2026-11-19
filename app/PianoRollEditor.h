@@ -123,7 +123,7 @@ private:
     std::vector<std::pair<int, double>> locators;
     int selectedLocatorId = -1;
     float hoveredX = 0.0f;
-    bool hovered = false;
+    bool hovered = false, hoveringLocator = false;
     bool dragging = false, resizing = false;
     bool locatorDragPending = false, locatorDragging = false;
     int draggedLocatorId = -1;

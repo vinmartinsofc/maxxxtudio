@@ -233,6 +233,8 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
 
     std::memset (shared, 0, sizeof (*shared));
     shared->version = pluginworker::protocolVersion;
+    shared->parameterGestureStarted = -1;
+    shared->parameterGestureEnded = -1;
     shared->sampleRate = sampleRate;
     shared->blockSize = sampleBlockSize;
     const auto stateFile = juce::File::getSpecialLocation (juce::File::tempDirectory)
@@ -571,6 +573,13 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
             buffer.clear();
         return;
     }
+
+    const int touchedParameter = InterlockedExchange (&shared->parameterGestureStarted, -1);
+    if (touchedParameter >= 0 && touchedParameter < getParameters().size())
+        lastParameterGestureStarted.store (touchedParameter, std::memory_order_release);
+    const int releasedParameter = InterlockedExchange (&shared->parameterGestureEnded, -1);
+    if (releasedParameter >= 0 && releasedParameter < getParameters().size())
+        lastParameterGestureEnded.store (releasedParameter, std::memory_order_release);
 
     const int outputChannels = std::min (static_cast<int> (shared->numOutputs),
                                          pluginworker::maxChannels);

@@ -100,6 +100,10 @@ std::size_t xmlWorkUnits (const juce::XmlElement& xml)
         for (auto* node = locators->getFirstChildElement(); node != nullptr; node = node->getNextElement())
             if (node->hasTagName ("Locator"))
                 ++count;
+    if (const auto* mappings = xml.getChildByName ("MidiMappings"))
+        for (auto* node = mappings->getFirstChildElement(); node != nullptr; node = node->getNextElement())
+            if (node->hasTagName ("Mapping"))
+                ++count;
     if (const auto* plugins = xml.getChildByName ("Plugins"))
         for (auto* node = plugins->getFirstChildElement(); node != nullptr; node = node->getNextElement())
             if (node->hasTagName ("Plugin"))
@@ -508,6 +512,7 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
         std::size_t totalWork = 1 + trackWorkUnits (state.master) + state.locators.size();
         for (const auto& track : state.tracks)
             totalWork += trackWorkUnits (track);
+        totalWork += state.midiMappings.size();
         totalWork += data.plugins.size();
         ProgressReporter progress (std::move (onProgress), totalWork);
 
@@ -542,6 +547,18 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
             node->setAttribute ("beat", marker.beat);
             node->setAttribute ("name", stringFromUtf8 (marker.name));
             node->setAttribute ("info", stringFromUtf8 (marker.info));
+            progress.completeUnit();
+        }
+
+        auto* midiMappingsNode = xml->createNewChildElement ("MidiMappings");
+        for (const auto& mapping : state.midiMappings)
+        {
+            auto* node = midiMappingsNode->createNewChildElement ("Mapping");
+            node->setAttribute ("trackId", mapping.trackId);
+            node->setAttribute ("target", static_cast<int> (mapping.target));
+            node->setAttribute ("messageType", static_cast<int> (mapping.messageType));
+            node->setAttribute ("channel", mapping.channel);
+            node->setAttribute ("number", mapping.number);
             progress.completeUnit();
         }
 
@@ -737,6 +754,46 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
                 [&track] (const auto& candidate) { return candidate.id == track.parentGroupId; });
             if (group == loaded.project.tracks.end() || group->type != roll::TrackType::Group)
                 return juce::Result::fail ("A track references a missing group.");
+        }
+    }
+
+    std::set<std::pair<int, int>> mappingTargets;
+    if (auto* mappingsNode = xml->getChildByName ("MidiMappings"))
+    {
+        for (auto* node = mappingsNode->getFirstChildElement(); node != nullptr; node = node->getNextElement())
+        {
+            if (! node->hasTagName ("Mapping"))
+                continue;
+
+            MidiMapping mapping;
+            mapping.trackId = node->getIntAttribute ("trackId", -1);
+            const int target = node->getIntAttribute ("target", -1);
+            const int messageType = node->getIntAttribute ("messageType", -1);
+            mapping.channel = node->getIntAttribute ("channel", -1);
+            mapping.number = node->getIntAttribute ("number", -1);
+            if (target < static_cast<int> (MidiMappingTarget::TrackVolume)
+                || target > static_cast<int> (MidiMappingTarget::MasterPan)
+                || messageType < static_cast<int> (MidiMappingMessageType::ControlChange)
+                || messageType > static_cast<int> (MidiMappingMessageType::Note)
+                || mapping.channel < 1 || mapping.channel > 16
+                || mapping.number < 0 || mapping.number > 127)
+                return juce::Result::fail ("A MIDI mapping contains invalid data.");
+
+            mapping.target = static_cast<MidiMappingTarget> (target);
+            mapping.messageType = static_cast<MidiMappingMessageType> (messageType);
+            const bool masterTarget = mapping.target == MidiMappingTarget::MasterVolume
+                                   || mapping.target == MidiMappingTarget::MasterPan;
+            const bool buttonTarget = mapping.target == MidiMappingTarget::TrackMute
+                                   || mapping.target == MidiMappingTarget::TrackSolo;
+            if ((masterTarget && mapping.trackId != AudioEngine::masterTrackId)
+                || (! masterTarget && (mapping.trackId <= AudioEngine::masterTrackId
+                                       || ! trackIds.contains (mapping.trackId)))
+                || (mapping.messageType == MidiMappingMessageType::Note && ! buttonTarget)
+                || ! mappingTargets.emplace (mapping.trackId, target).second)
+                return juce::Result::fail ("A MIDI mapping references an invalid or duplicate control.");
+
+            loaded.project.midiMappings.push_back (mapping);
+            progress.completeUnit();
         }
     }
 

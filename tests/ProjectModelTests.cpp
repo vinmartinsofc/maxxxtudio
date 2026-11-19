@@ -26,6 +26,53 @@ TEST_CASE ("ProjectModel copies MIDI clips from a clipboard snapshot")
     REQUIRE (original->start == 0.0);
 }
 
+TEST_CASE ("ProjectModel undo restores mixer and loop edits")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Midi);
+    REQUIRE (track != nullptr);
+    const int trackId = track->id;
+
+    project.setTrackSolo (trackId, true, false);
+    REQUIRE (project.track (trackId)->solo);
+    REQUIRE (project.undo());
+    REQUIRE_FALSE (project.track (trackId)->solo);
+
+    project.setTrackRouting (trackId, roll::TrackOutputRouting::ExtOut);
+    REQUIRE (project.track (trackId)->outputRouting == roll::TrackOutputRouting::ExtOut);
+    REQUIRE (project.undo());
+    REQUIRE (project.track (trackId)->outputRouting == roll::TrackOutputRouting::Master);
+
+    project.setLoop (4.0, 12.0);
+    REQUIRE (project.loopStart == 4.0);
+    REQUIRE (project.loopEnd == 12.0);
+    REQUIRE (project.undo());
+    REQUIRE (project.loopStart == 0.0);
+    REQUIRE (project.loopEnd == 16.0);
+}
+
+TEST_CASE ("ProjectModel undo and redo preserve MIDI mapping edits")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Midi);
+    REQUIRE (track != nullptr);
+    const int trackId = track->id;
+
+    project.beginEdit();
+    project.midiMappings.push_back ({
+        trackId, MidiMappingTarget::TrackVolume, MidiMappingMessageType::ControlChange, 1, 7
+    });
+    project.endEdit();
+
+    REQUIRE (project.midiMappings.size() == 1);
+    REQUIRE (project.undo());
+    CHECK (project.midiMappings.empty());
+    REQUIRE (project.redo());
+    REQUIRE (project.midiMappings.size() == 1);
+    CHECK (project.midiMappings.front().target == MidiMappingTarget::TrackVolume);
+    CHECK (project.midiMappings.front().number == 7);
+}
+
 TEST_CASE ("ProjectModel copies audio clips from a clipboard snapshot")
 {
     ProjectModel project;

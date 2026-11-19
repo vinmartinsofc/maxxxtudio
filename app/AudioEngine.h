@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "Arrangement.h"
+#include "PluginState.h"
 #include "Sequencer.h"
 #include <algorithm>
 #include <atomic>
@@ -72,6 +73,9 @@ public:
     float livePan() const { return livePanValue.load (std::memory_order_relaxed); }
     bool liveMute() const { return liveMuteValue.load (std::memory_order_relaxed); }
     float peak() const { return peakLevel; }
+    float peakLeft() const { return peakLeftLevel.load (std::memory_order_relaxed); }
+    float peakRight() const { return peakRightLevel.load (std::memory_order_relaxed); }
+    float rms() const { return rmsLevel.load (std::memory_order_relaxed); }
     void resetPeak();
 
     const juce::String getName() const override { return "Track Mixer"; }
@@ -94,7 +98,8 @@ public:
 
 private:
     const BlockShared& shared;
-    std::atomic<float> targetGain { 1.0f }, targetPan { 0.0f }, peakLevel { 0.0f };
+    std::atomic<float> targetGain { 1.0f }, targetPan { 0.0f }, peakLevel { 0.0f },
+                        peakLeftLevel { 0.0f }, peakRightLevel { 0.0f }, rmsLevel { 0.0f };
     std::atomic<bool> mute { false }, controlMute { false };
     juce::SpinLock automationLock;
     std::vector<roll::AutomationEnvelope> pendingAutomation, localAutomation;
@@ -164,14 +169,12 @@ struct DeviceInfo
     std::vector<Parameter> automatableParameters;
 };
 
-struct PluginState
+struct PluginParameterGesture
 {
     int trackId = 0;
-    int order = 0;
-    juce::String identifier;
-    bool bypassed = false;
-    int groupId = 0;
-    juce::MemoryBlock state;
+    int deviceId = 0;
+    int parameterIndex = -1;
+    bool gestureIsStarting = false;
 };
 
 struct AudioFileData
@@ -289,6 +292,7 @@ public:
     void setMixer (int trackId, float gain, float pan, bool muted);
     void setMixer (int trackId, float gain, float pan, bool muted, bool controlMuted);
     void setTrackAutomation (int trackId, const std::vector<roll::AutomationEnvelope>&);
+    void setPluginAutomationOverride (int trackId, int deviceId, int parameterIndex, bool enabled);
     void setTrackRouting (int trackId, roll::TrackOutputRouting routing, int parentGroupId = 0);
     void setMasterMixer (float gain, float pan, bool muted = false);
     void resetPeak (int trackId);
@@ -298,7 +302,9 @@ public:
     float mixerPan (int trackId) const;
     bool mixerMuted (int trackId) const;
     float peak (int trackId) const;
+    float rms (int trackId) const;
     float masterPeak() const;
+    std::pair<float, float> masterPeakStereo() const;
 
     // dispositivos (plugins) da trilha: o instrumento vem sempre primeiro, efeitos em seguida
     void addDevice (int trackId, const juce::PluginDescription&,
@@ -335,6 +341,9 @@ public:
     bool ungroupDevices (int trackId, const std::vector<int>& deviceIds);
     void setDeviceBypassed (int trackId, int deviceId, bool bypassed);
     std::vector<DeviceInfo> devices (int trackId) const;
+    juce::String pluginParameterValueText (int trackId, const roll::AutomationTarget&,
+                                           double normalizedValue) const;
+    std::vector<PluginParameterGesture> consumePluginParameterGestures();
     std::vector<PluginState> getPluginStates();
     bool restorePluginState (int trackId, int deviceId, const juce::MemoryBlock&);
     IsolatedEditorResult showIsolatedDeviceEditor (int trackId, int deviceId,

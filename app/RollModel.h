@@ -57,6 +57,9 @@ public:
     std::function<void()>          onLengthChanged;  // loop do transporte
     std::function<void (int, bool)> onPreview;       // pitch, ligar/desligar
     std::function<void (double)>   onInsertMarker;   // marcador de insercao mudou
+    std::function<void()> onEditStarted, onEditFinished;
+    std::function<void (bool redo)> onGlobalUndoRedo;
+    std::function<bool()> canGlobalUndo, canGlobalRedo;
 
     // --- layout vertical (linhas visiveis, da mais aguda para a mais grave) ---
     const std::vector<int>& rows() const { return rowPitches; }
@@ -72,6 +75,7 @@ public:
 
     // --- edicao (cada uma registra desfazer e notifica engine + views) ---
     void beginEdit();                         // snapshot para desfazer
+    void endEdit();
     void notify (bool rebuildRowLayout);      // publica notas + atualiza views
     void undo();
     void redo();

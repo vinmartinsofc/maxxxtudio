@@ -5,6 +5,7 @@
 #include "Theme.h"
 #include <functional>
 #include <memory>
+#include <utility>
 #include <vector>
 
 // Vista de arranjo: cabecalhos de trilha, regua com o loop, e os clips na linha do tempo.
@@ -32,6 +33,7 @@ public:
     std::function<bool()> playbackStateProvider;
     std::function<bool()> computerMidiKeyboardEnabledProvider;
     std::function<void()> onMasterPeakReset;
+    std::function<std::pair<float, float>()> masterStereoPeakProvider;
     std::function<juce::String (int)>   deviceSummary;
     std::function<bool (const juce::String& pluginIdentifier, int trackId)> canAcceptPluginDrop;
     std::function<void (const juce::String& pluginIdentifier, int trackId, double beats)> onPluginDropped;
@@ -41,7 +43,11 @@ public:
     std::function<void (int trackId, int clipId)> onAudioClipDoubleClicked;
     std::function<void (int trackId)> onTrackDuplicateRequested;
     std::function<LiveMixerValues (int trackId)> liveMixerProvider;
+    std::function<void (int trackId, MidiMappingTarget)> onMidiLearnRequested;
+    std::function<void (int trackId, MidiMappingTarget)> onMidiMappingClearRequested;
     std::function<std::vector<AutomationParameterChoice> (int trackId)> automationParametersProvider;
+    std::function<juce::String (int trackId, const roll::AutomationTarget&, double normalizedValue)>
+        automationParameterValueTextProvider;
     std::function<void (double startBeat, double endBeat, int firstTrack, int lastTrack)> onConsolidateRequested;
     std::function<void()> onGridChanged;
     std::function<void (bool)> onLoopToggleRequested;
@@ -58,9 +64,11 @@ public:
     bool hasSelectionToDuplicate() const;
     void duplicateSelection();
     void refresh();                       // recria os cabecalhos
+    void refreshMidiMappingInfo();
     void grabFocus();
     void toggleAutomationMode();
     void toggleAutomationModeFromKey();
+    void selectPluginAutomationParameter (int trackId, const roll::AutomationTarget&);
     void zoom (double factor);
     double gridBeats() const { return gridBeat; }
     double snapBeat (double beat) const;
@@ -94,10 +102,12 @@ private:
     void syncPositions();
     void updateSizes();
     void updateLocatorControls();
+    void showLocatorAutomationMenu();
     void zoomAt (double factor, double anchorBeat, int anchorScreenX);
     void updateAdaptiveGrid();
     void updateGridSelection();
     void setAutomationMode (bool enabled);
+    void selectMixerAutomationParameter (int trackId, roll::AutomationParameterType);
     void updateAutomationStatus();
     void showAutomationTargetMenu();
     void updateAutomationTargetButton();
@@ -130,13 +140,14 @@ private:
     juce::Label timeReadout;
     juce::TextButton addTrackButton { "+ MIDI" }, addAudioTrackButton { "+ Audio" };
     juce::TextButton locatorPreviousButton { "<" }, locatorSetButton { "+" }, locatorNextButton { ">" },
-                     locatorDeleteButton { "Del" };
+                     locatorDeleteButton { "Del" }, locatorOverflowButton { "..." };
     juce::ComboBox gridBox;
     juce::TextButton automationModeButton { "A" }, automationTargetButton { "Volume" };
     juce::Label automationStatusLabel;
     roll::AutomationTarget automationTarget;
     bool automationMode = false;
     bool automationModeKeyDown = false;
+    int automationTargetTrackId = -1, lastSelectedTrackId = -1;
     int trackReorderSourceId = -1;
     int trackReorderDropIndex = -1;
     int trackSelectionAnchorId = -1;

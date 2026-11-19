@@ -8,7 +8,7 @@ class AudioPreferencesPage final : public juce::Component
 {
 public:
     explicit AudioPreferencesPage (juce::AudioDeviceManager& manager)
-        : selector (manager, 0, 2, 1, 2, false, false, false, false)
+        : selector (manager, 0, 2, 1, 2, true, false, false, false)
     {
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::centredLeft);
@@ -25,7 +25,7 @@ public:
     }
 
 private:
-    juce::Label description { {}, "Configure dispositivo de entrada/saida, canais, taxa de amostragem e buffer." };
+    juce::Label description { {}, "Configure audio e habilite as entradas MIDI usadas pelo MIDI Learn." };
     juce::AudioDeviceSelectorComponent selector;
 };
 
@@ -219,12 +219,64 @@ private:
     juce::Label title, description;
     juce::ToggleButton edgeFades;
 };
+
+class AppearancePreferencesPage final : public juce::Component
+{
+public:
+    explicit AppearancePreferencesPage (std::function<void (theme::Palette)> onChanged)
+        : changed (std::move (onChanged))
+    {
+        title.setText ("Tema da interface", juce::dontSendNotification);
+        title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        title.setColour (juce::Label::textColourId, theme::text());
+        addAndMakeVisible (title);
+
+        description.setText (
+            "Escolha o contraste da interface. Preto + laranja e cinza grafite + laranja possuem texto claro; branco + laranja possui texto escuro.",
+            juce::dontSendNotification);
+        description.setColour (juce::Label::textColourId, theme::textDim());
+        description.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (description);
+
+        themeBox.addItem ("Cinza grafite + laranja", 1);
+        themeBox.addItem ("Preto + laranja", 2);
+        themeBox.addItem ("Branco + laranja", 3);
+        themeBox.setSelectedId (theme::current() == theme::Palette::GraphiteOrange ? 1
+                               : theme::current() == theme::Palette::BlackOrange ? 2 : 3,
+                               juce::dontSendNotification);
+        themeBox.onChange = [this]
+        {
+            const theme::Palette palette =
+                themeBox.getSelectedId() == 1 ? theme::Palette::GraphiteOrange
+                : themeBox.getSelectedId() == 2 ? theme::Palette::BlackOrange
+                                                : theme::Palette::WhiteOrange;
+            if (changed)
+                changed (palette);
+        };
+        addAndMakeVisible (themeBox);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (18);
+        title.setBounds (area.removeFromTop (28));
+        description.setBounds (area.removeFromTop (58));
+        area.removeFromTop (12);
+        themeBox.setBounds (area.removeFromTop (34).withWidth (260));
+    }
+
+private:
+    std::function<void (theme::Palette)> changed;
+    juce::Label title, description;
+    juce::ComboBox themeBox;
+};
 }
 
 OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
                               PluginScanner& scanner,
                               bool createEdgeFades,
-                              std::function<void (bool)> onCreateEdgeFadesChanged)
+                              std::function<void (bool)> onCreateEdgeFadesChanged,
+                              std::function<void (theme::Palette)> onThemeChanged)
     : juce::DocumentWindow (theme::ui ("Preferencias"), theme::panel(),
                             juce::DocumentWindow::closeButton)
 {
@@ -233,6 +285,8 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
     tabs->addTab (theme::ui ("Plugins"), theme::panel(), new PluginPreferencesPage (scanner), true);
     tabs->addTab (theme::ui ("Record/Warp/Launch"), theme::panel(),
                   new FadePreferencesPage (createEdgeFades, std::move (onCreateEdgeFadesChanged)), true);
+    tabs->addTab (theme::ui ("Aparencia"), theme::panel(),
+                  new AppearancePreferencesPage (std::move (onThemeChanged)), true);
 
     setUsingNativeTitleBar (true);
     setResizable (true, true);

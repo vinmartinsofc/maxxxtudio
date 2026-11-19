@@ -56,6 +56,39 @@ TEST_CASE ("Project files preserve flat group bus membership")
     REQUIRE (loaded.project.master.colour == 0xff9c27b0);
 }
 
+TEST_CASE ("Project files preserve mixer MIDI mappings")
+{
+    TemporaryProjectFolder temporary;
+    ProjectFileData data;
+    data.project.master.id = AudioEngine::masterTrackId;
+    roll::Track track;
+    track.id = 1;
+    data.project.tracks.push_back (track);
+    data.project.midiMappings = {
+        { 1, MidiMappingTarget::TrackVolume, MidiMappingMessageType::ControlChange, 2, 7 },
+        { 1, MidiMappingTarget::TrackMute, MidiMappingMessageType::Note, 10, 36 },
+        { AudioEngine::masterTrackId, MidiMappingTarget::MasterPan,
+          MidiMappingMessageType::ControlChange, 1, 16 }
+    };
+
+    const auto file = temporary.folder.getChildFile ("midi_mappings.pfs");
+    REQUIRE (ProjectFile::save (file, data).wasOk());
+
+    ProjectFileData loaded;
+    REQUIRE (ProjectFile::load (file, loaded).wasOk());
+    REQUIRE (loaded.project.midiMappings.size() == data.project.midiMappings.size());
+    CHECK (loaded.project.midiMappings[0].trackId == 1);
+    CHECK (loaded.project.midiMappings[0].target == MidiMappingTarget::TrackVolume);
+    CHECK (loaded.project.midiMappings[0].messageType == MidiMappingMessageType::ControlChange);
+    CHECK (loaded.project.midiMappings[0].channel == 2);
+    CHECK (loaded.project.midiMappings[0].number == 7);
+    CHECK (loaded.project.midiMappings[1].target == MidiMappingTarget::TrackMute);
+    CHECK (loaded.project.midiMappings[1].messageType == MidiMappingMessageType::Note);
+    CHECK (loaded.project.midiMappings[1].number == 36);
+    CHECK (loaded.project.midiMappings[2].trackId == AudioEngine::masterTrackId);
+    CHECK (loaded.project.midiMappings[2].target == MidiMappingTarget::MasterPan);
+}
+
 TEST_CASE ("Project files collect Drum Rack samples and restore their paths")
 {
     TemporaryProjectFolder temporary;

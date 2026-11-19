@@ -24,6 +24,9 @@ public:
     std::function<void (int trackId, int deviceId, int direction)> onMove;
     std::function<void (int trackId, int deviceId, int targetDeviceId, bool afterTarget)> onReorder;
     std::function<void (int trackId, const std::vector<int>& deviceIds)> onGroupRequested, onUngroupRequested;
+    std::function<void (int trackId, const std::vector<int>& deviceIds)> onCopyDevices;
+    std::function<void (int trackId)> onPasteDevices;
+    std::function<bool()> canPasteDevices;
     std::function<bool (int trackId, const juce::String& pluginIdentifier)> canAcceptPluginDrop;
     std::function<void (int trackId, const juce::String& pluginIdentifier, int insertionIndex)> onPluginDropped;
 

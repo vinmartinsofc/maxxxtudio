@@ -9,7 +9,9 @@ void IconButton::setIcon (icons::Icon i)
     icon = i;
     const auto name = icon == icons::Icon::Pause ? "Pausar" : "Reproduzir";
     setName (name);
-    setTooltip (name);
+    setTooltip (icon == icons::Icon::Pause
+        ? "Pausar a reproducao na posicao atual"
+        : "Reproduzir a partir da posicao atual");
     repaint();
 }
 
@@ -17,26 +19,41 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     auto r = getLocalBounds().toFloat().reduced (1.0f);
     const bool active = icon == icons::Icon::Pause;
-    g.setColour (down ? theme::pressed() : over ? theme::hover() : theme::control());
+    const auto fill = active ? (over ? theme::accentHover() : theme::accent())
+                             : down ? theme::pressed() : over ? theme::hover() : theme::control();
+    g.setColour (fill);
     g.fillRoundedRectangle (r, 4.0f);
-
-    if (active)
-    {
-        g.setColour (theme::accent());
-        g.drawRoundedRectangle (r, 4.0f, 1.0f);
-    }
+    g.setColour (active ? theme::accentHover() : theme::controlBorder());
+    g.drawRoundedRectangle (r, 4.0f, 1.0f);
 
     const auto iconColour = ! isEnabled() ? theme::textDim().withAlpha (0.4f)
-                                         : active ? theme::accent()
+                                         : active ? theme::text()
                                                   : over ? juce::Colours::white : theme::text();
-    if (const auto* drawable = icons::get (icon, iconColour, 24))
-        drawable->drawWithin (g, r.reduced (8.0f, 6.0f), juce::RectanglePlacement::centred, 1.0f);
+    if (const auto* drawable = icons::get (icon, iconColour, 20))
+        drawable->drawWithin (g, r.reduced (9.0f, 7.0f), juce::RectanglePlacement::centred, 1.0f);
     else
     {
         g.setColour (iconColour);
         g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
         g.drawText ("?", r, juce::Justification::centred);
     }
+}
+
+void IconToggleButton::paintButton (juce::Graphics& g, bool over, bool down)
+{
+    const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+    const bool active = getToggleState();
+    const auto fill = down ? theme::pressed() : over ? theme::hover() : theme::control();
+    g.setColour (fill);
+    g.fillRoundedRectangle (bounds, 4.0f);
+    g.setColour (active ? theme::accent().withAlpha (0.7f) : theme::controlBorder());
+    g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
+
+    const auto iconColour = isEnabled() ? (active ? theme::accent() : theme::textDim())
+                                        : theme::textDim().withAlpha (0.4f);
+    if (const auto* drawable = icons::get (icon, iconColour, 18))
+        drawable->drawWithin (g, bounds.reduced (8.0f, 7.0f),
+                              juce::RectanglePlacement::centred, 1.0f);
 }
 
 TransportBar::TransportBar (SequencerGraph& g) : graph (g)
@@ -55,15 +72,15 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     metronomeButton.setMouseClickGrabsKeyboardFocus (false);
     projectButton.setMouseClickGrabsKeyboardFocus (false);
     optionsButton.setMouseClickGrabsKeyboardFocus (false);
-    projectButton.setTooltip ("Abrir, salvar ou criar um projeto");
+    projectButton.setTooltip ("Projeto: abrir, criar, salvar ou exportar a sessao");
     projectButton.onClick = [this] { if (onProjectMenu) onProjectMenu(); };
-    optionsButton.setTooltip ("Preferencias de audio, plugins e fades (Ctrl+,)");
+    optionsButton.setTooltip ("Preferencias: audio, plugins, temas e outros ajustes (Ctrl+,)");
     optionsButton.onClick = [this] { if (onOptionsMenu) onOptionsMenu(); };
-    metronomeButton.setTooltip ("Ativar ou desativar o metronomo");
+    metronomeButton.setTooltip ("Metronomo: ativar, desativar e ajustar o volume de clique");
     metronomeButton.setClickingTogglesState (true);
     metronomeButton.setToggleState (graph.isMetronomeEnabled(), juce::dontSendNotification);
     metronomeButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-    metronomeButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+    metronomeButton.setColour (juce::TextButton::textColourOnId, theme::text());
     metronomeButton.onClick = [this] { graph.setMetronomeEnabled (metronomeButton.getToggleState()); };
     metronomeVolumeSlider.setName ("Volume do metronomo");
     metronomeVolumeSlider.setTooltip ("Volume do metronomo");
@@ -77,15 +94,17 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     {
         graph.setMetronomeGain (static_cast<float> (metronomeVolumeSlider.getValue()));
     };
+    cpuTooltipArea.setTooltip ("Uso medio da CPU: processo de audio do projeto");
+    addAndMakeVisible (cpuTooltipArea);
     loopButton.setMouseClickGrabsKeyboardFocus (false);
     browserButton.setMouseClickGrabsKeyboardFocus (false);
     fileBrowserButton.setMouseClickGrabsKeyboardFocus (false);
     favoritesButton.setMouseClickGrabsKeyboardFocus (false);
     pianoRollButton.setMouseClickGrabsKeyboardFocus (false);
     computerKeyboardButton.setMouseClickGrabsKeyboardFocus (false);
-    startButton.setTooltip ("Ir para o inicio do projeto");
+    startButton.setTooltip ("Voltar ao inicio da timeline");
     startButton.onClick = [this] { if (onGoToStart) onGoToStart(); };
-    endButton.setTooltip ("Ir para o final do projeto");
+    endButton.setTooltip ("Ir para o fim da timeline");
     endButton.onClick = [this] { if (onGoToEnd) onGoToEnd(); };
     addAndMakeVisible (loopButton);
     addAndMakeVisible (browserButton);
@@ -99,62 +118,50 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 
     playButton.onClick = [this] { togglePlay(); };
     stopButton.onClick = [this] { stop(); };
-    loopButton.setTooltip ("Ativar ou desativar o loop");
+    loopButton.setTooltip ("Loop: alternar a repeticao da regiao marcada");
 
     loopButton.setClickingTogglesState (true);
     loopButton.setToggleState (graph.isLoop(), juce::dontSendNotification);
-    loopButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-    loopButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     loopButton.onClick = [this] { setLoopEnabled (loopButton.getToggleState()); };
 
-    browserButton.setTooltip ("Mostrar ou ocultar o navegador de plugins (Ctrl+B)");
+    browserButton.setTooltip ("VSTs e instrumentos: mostrar ou ocultar o navegador de plugins (Ctrl+B)");
     browserButton.setClickingTogglesState (true);
     browserButton.setToggleState (true, juce::dontSendNotification);
-    browserButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-    browserButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     browserButton.onClick = [this]
     {
         if (onBrowserToggled)
             onBrowserToggled (browserButton.getToggleState());
     };
 
-    fileBrowserButton.setTooltip ("Mostrar ou ocultar o navegador de arquivos de audio");
+    fileBrowserButton.setTooltip ("Arquivos de audio: buscar, pre-ouvir e arrastar samples");
     fileBrowserButton.setClickingTogglesState (true);
     fileBrowserButton.setToggleState (false, juce::dontSendNotification);
-    fileBrowserButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-    fileBrowserButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     fileBrowserButton.onClick = [this]
     {
         if (onFileBrowserToggled)
             onFileBrowserToggled (fileBrowserButton.getToggleState());
     };
 
-    favoritesButton.setTooltip ("Mostrar colecoes de favoritos por cor");
+    favoritesButton.setTooltip ("Favoritos: colecoes por cor de plugins e arquivos");
     favoritesButton.setClickingTogglesState (true);
     favoritesButton.setToggleState (false, juce::dontSendNotification);
-    favoritesButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-    favoritesButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     favoritesButton.onClick = [this]
     {
         if (onFavoritesToggled)
             onFavoritesToggled (favoritesButton.getToggleState());
     };
 
-    pianoRollButton.setTooltip ("Mostrar ou ocultar o painel inferior do piano roll e dispositivos");
+    pianoRollButton.setTooltip ("Piano Roll e dispositivos: mostrar ou ocultar o painel inferior");
     pianoRollButton.setClickingTogglesState (true);
     pianoRollButton.setToggleState (true, juce::dontSendNotification);
-    pianoRollButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-    pianoRollButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     pianoRollButton.onClick = [this]
     {
         if (onPianoRollToggled)
             onPianoRollToggled (pianoRollButton.getToggleState());
     };
 
-    computerKeyboardButton.setTooltip ("Teclado MIDI do computador (M; Z/X oitava; C/V velocidade)");
+    computerKeyboardButton.setTooltip ("Teclado MIDI: tocar notas pelo computador (M; Z/X mudam a oitava)");
     computerKeyboardButton.setClickingTogglesState (true);
-    computerKeyboardButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-    computerKeyboardButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
     computerKeyboardButton.onClick = [this]
     {
         if (onComputerMidiKeyboardToggled)
@@ -273,7 +280,6 @@ void TransportBar::updateButtons()
 void TransportBar::timerCallback()
 {
     updateButtons();
-    displayedCpuCurrent = graph.audioCpuCurrent();
     displayedCpuAverage = graph.audioCpuAverage();
     repaint (cpuMeterBounds);
 
@@ -297,21 +303,29 @@ void TransportBar::paint (juce::Graphics& g)
         const auto meter = cpuMeterBounds.toFloat().reduced (1.0f);
         const auto bar = meter.withTrimmedLeft (3.0f).withTrimmedRight (3.0f)
                              .withY (meter.getBottom() - 5.0f).withHeight (3.0f);
-        const auto loadColour = displayedCpuCurrent >= 1.0 ? juce::Colour (0xffe34b4b)
-                               : displayedCpuCurrent >= 0.75 ? juce::Colour (0xffe6a845)
+        const auto loadColour = displayedCpuAverage >= 1.0 ? theme::recording()
+                               : displayedCpuAverage >= 0.75 ? theme::warning()
                                                              : theme::accent();
 
         g.setColour (theme::control());
         g.fillRoundedRectangle (meter, 4.0f);
+        if (const auto* cpuIcon = icons::get (icons::Icon::Cpu, theme::textDim(), 15))
+        {
+            const auto iconBounds = juce::Rectangle<float> (meter.getX() + 5.0f,
+                                                             meter.getY() + 4.0f, 15.0f, 15.0f);
+            cpuIcon->drawWithin (g, iconBounds, juce::RectanglePlacement::centred, 1.0f);
+        }
         g.setColour (theme::text());
         g.setFont (juce::FontOptions (11.5f));
-        g.drawText ("CPU " + juce::String (static_cast<int> (std::lround (displayedCpuCurrent * 100.0)))
-                    + "%  med " + juce::String (static_cast<int> (std::lround (displayedCpuAverage * 100.0))) + "%",
-                    meter.toNearestInt().withTrimmedBottom (5), juce::Justification::centred, true);
+        const auto cpuText = juce::String (
+            static_cast<int> (std::lround (displayedCpuAverage * 100.0))) + "%";
+        g.drawText (cpuText,
+                    meter.toNearestInt().withTrimmedLeft (18).withTrimmedBottom (5),
+                    juce::Justification::centred, true);
         g.setColour (theme::border());
         g.fillRoundedRectangle (bar, 1.5f);
         g.setColour (loadColour);
-        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * static_cast<float> (std::min (displayedCpuCurrent, 1.0))),
+        g.fillRoundedRectangle (bar.withWidth (bar.getWidth() * static_cast<float> (std::min (displayedCpuAverage, 1.0))),
                                 1.5f);
     }
     g.setColour (theme::border());
@@ -345,23 +359,28 @@ void TransportBar::resized()
     area.removeFromLeft (12);
     positionLabel.setBounds (area.removeFromLeft (120));
     area.removeFromLeft (12);
-    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - (compact ? 424 : 438)));
-    if (cpuWidth >= 100)
+    const int rightControlsWidth = compact ? 312 : 360;
+    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - rightControlsWidth - 12));
+    if (cpuWidth >= 72)
     {
         cpuMeterBounds = area.removeFromLeft (cpuWidth);
+        cpuTooltipArea.setBounds (cpuMeterBounds);
+        cpuTooltipArea.setVisible (true);
         area.removeFromLeft (12);
     }
     else
     {
         cpuMeterBounds = {};
+        cpuTooltipArea.setBounds ({});
+        cpuTooltipArea.setVisible (false);
     }
-    browserButton.setBounds (area.removeFromRight (compact ? 74 : 88));
+    browserButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
-    fileBrowserButton.setBounds (area.removeFromRight (compact ? 58 : 72));
+    fileBrowserButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
-    favoritesButton.setBounds (area.removeFromRight (compact ? 88 : 100));
+    favoritesButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
-    pianoRollButton.setBounds (area.removeFromRight (compact ? 94 : 104));
+    pianoRollButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
-    computerKeyboardButton.setBounds (area.removeFromRight (38));
+    computerKeyboardButton.setBounds (area.removeFromRight (40));
 }

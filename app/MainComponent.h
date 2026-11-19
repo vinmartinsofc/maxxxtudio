@@ -17,11 +17,13 @@
 #include "TransportBar.h"
 #include <array>
 #include <map>
+#include <optional>
 #include <thread>
 #include <tuple>
 #include <vector>
 
 class MainComponent : public juce::Component, public juce::DragAndDropContainer,
+                      public juce::KeyListener, public juce::MidiInputCallback,
                       private juce::ChangeListener, private juce::Timer
 {
 public:
@@ -31,6 +33,7 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
+    bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     bool keyStateChanged (bool isKeyDown) override;
     void setMainWindow (juce::TopLevelWindow*);
     void updatePluginWindowZOrder();
@@ -47,6 +50,8 @@ private:
     class ComputerMidiIndicator;
     class PluginWindow;
     class PluginWindowNavigator;
+    struct PluginHistoryRestore;
+    struct PluginCopyOperation;
 
     void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
@@ -107,6 +112,15 @@ private:
     void showDetail (bool devices);
     void cycleFocus();
     void updateComputerMidiKeyboard();
+    void restorePluginHistoryState (const std::vector<PluginState>&);
+    void restoreNextPluginHistoryState();
+    void finishPluginHistoryRestore();
+    void copyDevicesToClipboard (int trackId, const std::vector<int>& deviceIds);
+    void pasteDevicesToTrack (int trackId);
+    void pasteNextDevice();
+    void finishDeviceCopy();
+    void addKeyListenerRecursively (juce::Component&);
+    void removeKeyListenerRecursively (juce::Component&);
     void updatePluginWindowNavigator();
     void scrollPluginWindowsTo (int offset);
     juce::Point<int> nextPluginWindowPosition() const;
@@ -115,6 +129,14 @@ private:
     void showComputerMidiStatus (const juce::String&, const juce::String&, bool noteHeld);
     void hideComputerMidiStatus();
     void releaseComputerMidiNotes();
+    void requestMidiLearn (int trackId, MidiMappingTarget);
+    void clearMidiMapping (int trackId, MidiMappingTarget);
+    void handlePluginParameterGesture (int trackId, int deviceId, int parameterIndex,
+                                       bool gestureIsStarting);
+    void handleMidiMessageOnMessageThread (int channel, MidiMappingMessageType,
+                                           int number, int value, bool noteOn);
+    void applyMidiMapping (const MidiMapping&, int value, bool noteOn);
+    void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     juce::String deviceSummary (int trackId) const;
@@ -145,12 +167,23 @@ private:
                      zoomHMinus { "H -" }, zoomHPlus { "H +" }, zoomVMinus { "V -" }, zoomVPlus { "V +" };
     juce::TextButton pianoLocatorPreviousButton { "<" }, pianoLocatorAddButton { "+" },
                      pianoLocatorNextButton { ">" }, pianoLocatorDeleteButton { "Del" };
+    std::unique_ptr<juce::TooltipWindow> tooltipWindow;
     juce::Label gridLabel;
     std::vector<juce::Component*> clipControls;
 
     juce::TopLevelWindow* mainWindow = nullptr;
     std::map<int, std::unique_ptr<PluginWindow>> windows;
+    struct PendingMidiLearn
+    {
+        int trackId = 0;
+        MidiMappingTarget target = MidiMappingTarget::TrackVolume;
+    };
+    std::optional<PendingMidiLearn> pendingMidiLearn;
+    std::map<std::pair<int, int>, int> lastMidiButtonValues;
     std::unique_ptr<PluginWindowNavigator> pluginWindowNavigator;
+    std::shared_ptr<PluginHistoryRestore> pluginHistoryRestore;
+    std::shared_ptr<PluginCopyOperation> pluginCopyOperation;
+    std::vector<PluginState> copiedPluginStates;
     std::map<std::tuple<int, int, int, int>, int> padEffectWindowIds;
     std::map<int, std::tuple<int, int, int>> padEffectWindowOwners;
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
@@ -181,6 +214,8 @@ private:
     bool projectFileOperationInProgress = false;
     bool recoverySaveInProgress = false;
     bool trackDuplicationInProgress = false;
+    bool pluginHistoryRestoreInProgress = false;
+    bool pluginCopyInProgress = false;
     bool audioRenderInProgress = false;
     size_t projectLoadWorkTotal = 0, projectLoadWorkDone = 0;
     juce::String scanMessage;

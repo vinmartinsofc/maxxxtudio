@@ -135,6 +135,23 @@ public:
 };
 }
 
+TEST_CASE ("Track mixer keeps separate left and right peak levels")
+{
+    BlockShared shared;
+    TrackMixer mixer (shared);
+    mixer.set (1.0f, 0.0f, false, false);
+
+    juce::AudioBuffer<float> buffer (2, 4);
+    buffer.clear();
+    buffer.setSample (0, 0, 0.25f);
+    buffer.setSample (1, 0, 0.75f);
+    juce::MidiBuffer midi;
+    mixer.processBlock (buffer, midi);
+
+    REQUIRE (std::abs (mixer.peakLeft() - 0.25f) < 0.001f);
+    REQUIRE (std::abs (mixer.peakRight() - 0.75f) < 0.001f);
+}
+
 TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;

@@ -4,6 +4,7 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "Icons.h"
 #include "MainComponent.h"
 #include "Theme.h"
 #include "WindowPlacement.h"
@@ -65,6 +66,7 @@ public:
 
     void initialise (const juce::String& commandLine) override
     {
+        theme::load();
 #if defined(_WIN32)
         const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
         const bool pfsRegistered = registerProjectFileAssociation (
@@ -79,25 +81,33 @@ public:
 
         if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
         {
-            laf->setColourScheme (juce::LookAndFeel_V4::getMidnightColourScheme());
+            laf->setColourScheme ({ theme::background(), theme::panel(), theme::panel(),
+                                    theme::border(), theme::text(), theme::control(),
+                                    juce::Colours::black, theme::accent(), theme::text() });
             laf->setColour (juce::ResizableWindow::backgroundColourId, theme::background());
             laf->setColour (juce::TextButton::buttonColourId, theme::control());
             laf->setColour (juce::TextButton::buttonOnColourId, theme::accent());
             laf->setColour (juce::TextButton::textColourOffId, theme::text());
             laf->setColour (juce::TextButton::textColourOnId, theme::text());
+            laf->setColour (juce::TooltipWindow::textColourId, theme::text());
+            laf->setColour (juce::AlertWindow::backgroundColourId, theme::panel());
+            laf->setColour (juce::AlertWindow::textColourId, theme::text());
+            laf->setColour (juce::AlertWindow::outlineColourId, theme::accent());
             laf->setColour (juce::ComboBox::backgroundColourId, theme::control());
             laf->setColour (juce::ComboBox::textColourId, theme::text());
-            laf->setColour (juce::ComboBox::outlineColourId, theme::border());
+            laf->setColour (juce::ComboBox::outlineColourId, theme::controlBorder());
             laf->setColour (juce::TextEditor::backgroundColourId, theme::control());
             laf->setColour (juce::TextEditor::textColourId, theme::text());
-            laf->setColour (juce::TextEditor::outlineColourId, theme::border());
+            laf->setColour (juce::TextEditor::outlineColourId, theme::controlBorder());
             laf->setColour (juce::TextEditor::focusedOutlineColourId, theme::accent());
+            laf->setColour (juce::TextEditor::highlightColourId, theme::accent().withAlpha (0.35f));
             laf->setColour (juce::PopupMenu::backgroundColourId, theme::panel());
             laf->setColour (juce::PopupMenu::textColourId, theme::text());
-            laf->setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::accent().withAlpha (0.25f));
+            laf->setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::accent());
             laf->setColour (juce::PopupMenu::highlightedTextColourId, theme::text());
             laf->setColour (juce::Slider::thumbColourId, theme::text());
             laf->setColour (juce::Slider::trackColourId, theme::accent());
+            laf->setColour (juce::Slider::rotarySliderOutlineColourId, theme::controlBorder());
         }
         window = std::make_unique<MainWindow> (getApplicationName());
         window->offerRecoveryBeforeOpening ([this, commandLine]
@@ -152,6 +162,7 @@ private:
 
             setUsingNativeTitleBar (true);
             setResizable (true, true);
+            setIcon (icons::appIcon());
             mainComponent = new MainComponent();
             setContentOwned (mainComponent, true);
             mainComponent->setMainWindow (this);

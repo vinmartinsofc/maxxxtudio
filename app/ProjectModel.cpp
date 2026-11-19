@@ -125,6 +125,7 @@ ProjectModel::State ProjectModel::createState() const
     state.loopEnd = loopEnd;
     state.totalBeats = totalBeats;
     state.locators = locators;
+    state.midiMappings = midiMappings;
     state.selectedLocatorId = selectedLocatorId;
     state.songStartLocatorId = songStartLocatorId;
     return state;
@@ -162,6 +163,7 @@ void ProjectModel::replaceState (State state)
     loopEnd = std::max (loopStart + 1.0 / 64.0, state.loopEnd);
     totalBeats = std::max (16.0, state.totalBeats);
     locators = std::move (state.locators);
+    midiMappings = std::move (state.midiMappings);
     selectedLocatorId = state.selectedLocatorId;
     songStartLocatorId = state.songStartLocatorId;
     nextLocatorId = 1;
@@ -178,6 +180,7 @@ void ProjectModel::replaceState (State state)
 
     undoStack.clear();
     redoStack.clear();
+    redoStackBeforeEdit.clear();
     editInProgress = false;
 
     for (const auto& track : tracks)
@@ -220,7 +223,7 @@ void ProjectModel::replaceState (State state)
     sendChangeMessage();
 }
 
-ProjectModel::Snapshot ProjectModel::makeSnapshot() const
+ProjectModel::Snapshot ProjectModel::makeSnapshot (bool includePluginState) const
 {
     Snapshot snapshot;
     snapshot.master = *masterTrack;
@@ -236,9 +239,13 @@ ProjectModel::Snapshot ProjectModel::makeSnapshot() const
     snapshot.loopEnd = loopEnd;
     snapshot.totalBeats = totalBeats;
     snapshot.locators = locators;
+    snapshot.midiMappings = midiMappings;
     snapshot.selectedLocatorId = selectedLocatorId;
     snapshot.songStartLocatorId = songStartLocatorId;
     snapshot.nextLocatorId = nextLocatorId;
+    snapshot.includesPluginState = includePluginState;
+    if (includePluginState && capturePluginHistoryState)
+        snapshot.plugins = capturePluginHistoryState();
     return snapshot;
 }
 
@@ -274,6 +281,7 @@ void ProjectModel::restoreSnapshot (Snapshot&& snapshot)
     loopEnd = snapshot.loopEnd;
     totalBeats = snapshot.totalBeats;
     locators = std::move (snapshot.locators);
+    midiMappings = std::move (snapshot.midiMappings);
     selectedLocatorId = snapshot.selectedLocatorId;
     songStartLocatorId = snapshot.songStartLocatorId;
     nextLocatorId = snapshot.nextLocatorId;
@@ -298,6 +306,8 @@ void ProjectModel::restoreSnapshot (Snapshot&& snapshot)
     if (onSelectionChanged) onSelectionChanged();
     if (onMixerChanged) onMixerChanged();
     if (onLoopChanged) onLoopChanged();
+    if (snapshot.includesPluginState && restorePluginHistoryState)
+        restorePluginHistoryState (snapshot.plugins);
     sendChangeMessage();
 }
 
@@ -308,8 +318,8 @@ void ProjectModel::recordUndo()
         undoStack.push_back (makeSnapshot());
         if (undoStack.size() > 200)
             undoStack.erase (undoStack.begin());
+        redoStack.clear();
     }
-    redoStack.clear();
 }
 
 void ProjectModel::beginEdit()
@@ -320,12 +330,38 @@ void ProjectModel::beginEdit()
     undoStack.push_back (makeSnapshot());
     if (undoStack.size() > 200)
         undoStack.erase (undoStack.begin());
+    redoStackBeforeEdit = std::move (redoStack);
+    redoStack.clear();
+}
+
+void ProjectModel::beginExternalEdit()
+{
+    if (editInProgress)
+        return;
+    editInProgress = true;
+    undoStack.push_back (makeSnapshot (true));
+    if (undoStack.size() > 200)
+        undoStack.erase (undoStack.begin());
+    redoStackBeforeEdit = std::move (redoStack);
     redoStack.clear();
 }
 
 void ProjectModel::endEdit()
 {
+    if (! editInProgress)
+        return;
     editInProgress = false;
+    redoStackBeforeEdit.clear();
+}
+
+void ProjectModel::cancelEdit()
+{
+    if (! editInProgress)
+        return;
+    editInProgress = false;
+    if (! undoStack.empty())
+        undoStack.pop_back();
+    redoStack = std::move (redoStackBeforeEdit);
 }
 
 bool ProjectModel::undo()
@@ -333,7 +369,7 @@ bool ProjectModel::undo()
     endEdit();
     if (undoStack.empty())
         return false;
-    redoStack.push_back (makeSnapshot());
+    redoStack.push_back (makeSnapshot (undoStack.back().includesPluginState));
     auto snapshot = std::move (undoStack.back());
     undoStack.pop_back();
     restoreSnapshot (std::move (snapshot));
@@ -345,7 +381,7 @@ bool ProjectModel::redo()
     endEdit();
     if (redoStack.empty())
         return false;
-    undoStack.push_back (makeSnapshot());
+    undoStack.push_back (makeSnapshot (redoStack.back().includesPluginState));
     auto snapshot = std::move (redoStack.back());
     redoStack.pop_back();
     restoreSnapshot (std::move (snapshot));
@@ -398,6 +434,7 @@ roll::Placement* ProjectModel::selectedClip() const
 
 roll::Track* ProjectModel::addTrack (roll::TrackType type)
 {
+    recordUndo();
     auto t = std::make_unique<roll::Track>();
     t->id = nextTrackId++;
     t->type = type;
@@ -422,6 +459,7 @@ void ProjectModel::removeTrack (int id)
         return;
     }
 
+    beginExternalEdit();
     if (selectedTrackId == id)
     {
         selectedClipId = -1;
@@ -429,6 +467,10 @@ void ProjectModel::removeTrack (int id)
         if (onSelectionChanged) onSelectionChanged();     // o piano roll solta o clip antes dele ser apagado
     }
     if (onTrackRemoved) onTrackRemoved (id);
+    std::erase_if (midiMappings, [id] (const MidiMapping& mapping)
+    {
+        return mapping.trackId == id;
+    });
     tracks.erase (tracks.begin() + idx);
     std::erase (selectedTrackIds, id);
 
@@ -440,6 +482,7 @@ void ProjectModel::removeTrack (int id)
         selectedTrackIds.push_back (selectedTrackId);
     if (onSelectionChanged) onSelectionChanged();
     if (onMixerChanged) onMixerChanged();
+    endEdit();
     sendChangeMessage();
 }
 
@@ -585,6 +628,10 @@ bool ProjectModel::ungroupTrack (int groupId)
     }
     if (onTrackRemoved)
         onTrackRemoved (groupId);
+    std::erase_if (midiMappings, [groupId] (const MidiMapping& mapping)
+    {
+        return mapping.trackId == groupId;
+    });
     tracks.erase (tracks.begin() + index);
     std::erase (selectedTrackIds, groupId);
     if (selectedTrackId < 0 && ! tracks.empty())
@@ -664,16 +711,31 @@ void ProjectModel::selectTrackRange (int anchorTrackId, int targetTrackId, bool 
 
 void ProjectModel::setTrackSolo (int id, bool solo, bool additive)
 {
-    if (track (id) == nullptr)
+    const auto target = std::find_if (tracks.begin(), tracks.end(),
+        [id] (const auto& item) { return item->id == id; });
+    if (target == tracks.end())
         return;
+
+    const bool applyToSelection = ! additive && solo
+        && isTrackSelected (id) && selectedTrackIds.size() > 1;
+    bool changed = false;
+    for (const auto& item : tracks)
+    {
+        const bool desired = additive ? (item->id == id ? solo : item->solo)
+            : solo ? (applyToSelection ? isTrackSelected (item->id) : item->id == id)
+                   : false;
+        changed |= item->solo != desired;
+    }
+    if (! changed)
+        return;
+    recordUndo();
 
     if (additive)
     {
-        track (id)->solo = solo;
+        (*target)->solo = solo;
     }
     else if (solo)
     {
-        const bool applyToSelection = isTrackSelected (id) && selectedTrackIds.size() > 1;
         for (auto& item : tracks)
             item->solo = applyToSelection
                 ? isTrackSelected (item->id)
@@ -728,6 +790,7 @@ void ProjectModel::setTrackRouting (int trackId, roll::TrackOutputRouting routin
     {
         if (t->outputRouting != routing)
         {
+            recordUndo();
             t->outputRouting = routing;
             notifyMixer();
         }
@@ -1368,8 +1431,13 @@ void ProjectModel::notifyTrackNotes (int trackId)
 
 void ProjectModel::setLoop (double s, double e)
 {
-    loopStart = std::max (0.0, s);
-    loopEnd = std::max (loopStart + 1.0 / 64.0, e);
+    const double newStart = std::max (0.0, s);
+    const double newEnd = std::max (newStart + 1.0 / 64.0, e);
+    if (newStart == loopStart && newEnd == loopEnd)
+        return;
+    recordUndo();
+    loopStart = newStart;
+    loopEnd = newEnd;
     if (onLoopChanged) onLoopChanged();
     sendChangeMessage();
 }

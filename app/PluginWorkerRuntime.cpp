@@ -53,6 +53,55 @@ void copyString (char* destination, int capacity, const juce::String& value)
     pluginworker::writeText (destination, capacity, value.toRawUTF8());
 }
 
+class ParameterGestureRelay final : public juce::AudioProcessorParameter::Listener
+{
+public:
+    explicit ParameterGestureRelay (pluginworker::SharedData* sharedData) : shared (sharedData) {}
+
+    void parameterValueChanged (int, float) override {}
+
+    void parameterGestureChanged (int parameterIndex, bool gestureIsStarting) override
+    {
+        if (shared != nullptr
+            && parameterIndex >= 0 && parameterIndex < pluginworker::maxParameters)
+            InterlockedExchange (gestureIsStarting ? &shared->parameterGestureStarted
+                                                   : &shared->parameterGestureEnded,
+                                 parameterIndex);
+    }
+
+private:
+    pluginworker::SharedData* shared = nullptr;
+};
+
+void setNativeWindowIcon (juce::DocumentWindow& window)
+{
+    auto* peer = window.getPeer();
+    if (peer == nullptr)
+        return;
+
+    const auto hwnd = static_cast<HWND> (peer->getNativeHandle());
+    if (hwnd == nullptr)
+        return;
+
+    const auto instance = GetModuleHandleW (nullptr);
+    auto largeIcon = static_cast<HICON> (LoadImageW (instance, L"IDI_PROJECT_FREEDOM", IMAGE_ICON,
+                                                      0, 0, LR_DEFAULTSIZE | LR_SHARED));
+    if (largeIcon == nullptr)
+    {
+        juce::Logger::writeToLog ("PluginWorker: nao foi possivel carregar o icone do Project Freedom.");
+        return;
+    }
+
+    auto smallIcon = static_cast<HICON> (LoadImageW (instance, L"IDI_PROJECT_FREEDOM", IMAGE_ICON,
+                                                      GetSystemMetrics (SM_CXSMICON),
+                                                      GetSystemMetrics (SM_CYSMICON), LR_SHARED));
+    if (smallIcon == nullptr)
+        smallIcon = largeIcon;
+
+    SendMessageW (hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM> (largeIcon));
+    SendMessageW (hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM> (smallIcon));
+}
+
 void configurePluginBusesForStereoHost (juce::AudioProcessor& plugin);
 
 class PluginWorkerEditorWindow : public juce::DocumentWindow
@@ -116,6 +165,7 @@ public:
                     SetWindowPos (window, nullptr, 0, 0, 0, 0,
                                   SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED);
                 }
+        setNativeWindowIcon (*this);
         toFront (true);
     }
 
@@ -220,6 +270,11 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
                              pluginworker::floatToBits (parameter->getValue()));
     }
 
+    parameterGestureListener = std::make_unique<ParameterGestureRelay> (shared);
+    for (auto* parameter : parameters)
+        if (parameter != nullptr && parameter->isAutomatable())
+            parameter->addListener (parameterGestureListener.get());
+
     ready = true;
     InterlockedExchange (&shared->state, 1);
     SetEvent (responseEvent);
@@ -233,6 +288,11 @@ PluginWorkerRuntime::~PluginWorkerRuntime()
         SetEvent (requestEvent);
     stopThread (2000);
     closeEditor();
+    if (processor != nullptr && parameterGestureListener != nullptr)
+        for (auto* parameter : processor->getParameters())
+            if (parameter != nullptr)
+                parameter->removeListener (parameterGestureListener.get());
+    parameterGestureListener.reset();
     if (processor != nullptr)
         processor->releaseResources();
     if (shared != nullptr)

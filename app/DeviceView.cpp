@@ -1,7 +1,44 @@
 #include "DeviceView.h"
+#include "Icons.h"
 
 class DeviceView::Box : public juce::Component, public juce::DragAndDropTarget
 {
+    class IconButton final : public juce::TextButton
+    {
+    public:
+        IconButton (icons::Icon icon, juce::String tooltip, bool invertActiveState = false)
+            : juce::TextButton (), icon (icon), invertActiveState (invertActiveState)
+        {
+            setTooltip (tooltip);
+            setName (tooltip);
+            setMouseClickGrabsKeyboardFocus (false);
+        }
+
+        void paintButton (juce::Graphics& g, bool isMouseOver, bool isButtonDown) override
+        {
+            const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
+            const auto active = invertActiveState ? ! getToggleState() : getToggleState();
+            g.setColour (isButtonDown ? theme::accent()
+                                      : isMouseOver ? theme::accentHover()
+                                                    : theme::panel());
+            g.fillRoundedRectangle (bounds, 5.0f);
+            g.setColour (isMouseOver || isButtonDown
+                ? theme::accent()
+                : active ? theme::accent()
+                         : theme::textDim());
+            g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+            if (const auto* drawable = icons::get (
+                    icon, isMouseOver || isButtonDown ? theme::text() :
+                    active ? theme::accent() : theme::textDim(), 18))
+                drawable->drawWithin (g, getLocalBounds().reduced (5).toFloat(),
+                                      juce::RectanglePlacement::centred, 1.0f);
+        }
+
+    private:
+        icons::Icon icon;
+        bool invertActiveState;
+    };
+
 public:
     Box (const DeviceInfo& d, DeviceView& o, bool canMoveLeft, bool canMoveRight)
         : info (d), owner (o)
@@ -15,14 +52,17 @@ public:
         foldButton.setVisible (false);
         moveLeftButton.setEnabled (canMoveLeft);
         moveRightButton.setEnabled (canMoveRight);
-        moveLeftButton.setTooltip (theme::ui ("Mover para antes"));
-        moveRightButton.setTooltip (theme::ui ("Mover para depois"));
+        openButton.setTooltip ("Abrir ou restaurar a janela do plugin");
+        openButton.setName ("Abrir ou restaurar a janela do plugin");
+        bypassButton.setName (info.isBypassed ? "Plugin em bypass" : "Plugin ativo");
+        removeButton.setName ("Remover plugin");
+        moveLeftButton.setTooltip (theme::ui ("Mover este plugin uma posicao para a esquerda"));
+        moveRightButton.setTooltip (theme::ui ("Mover este plugin uma posicao para a direita"));
         openButton.onClick = [this] { if (owner.onOpen) owner.onOpen (owner.trackId, info.id); };
         bypassButton.setClickingTogglesState (true);
         bypassButton.setToggleState (info.isBypassed, juce::dontSendNotification);
-        bypassButton.setButtonText (info.isBypassed ? "Bypass" : "Ativo");
-        bypassButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
-        bypassButton.setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        bypassButton.setTooltip (info.isBypassed ? "Ativar plugin" : "Colocar plugin em bypass");
+        removeButton.setTooltip ("Remover plugin");
         bypassButton.onClick = [this]
         {
             const int tid = owner.trackId, did = info.id;
@@ -162,7 +202,7 @@ public:
         auto r = getLocalBounds().toFloat().reduced (2.0f);
         g.setColour (theme::panelLight());
         g.fillRoundedRectangle (r, 6.0f);
-        g.setColour (info.isInstrument ? theme::accent() : juce::Colour (0xff8c7ae6));
+        g.setColour (info.isInstrument ? theme::accent() : theme::accentHover());
         g.fillRoundedRectangle (r.withHeight (5.0f), 3.0f);
         if (rackCollapsed)
         {
@@ -194,6 +234,11 @@ public:
             g.setColour (theme::accent());
             g.drawRoundedRectangle (r, 6.0f, 2.0f);
         }
+        else
+        {
+            g.setColour (theme::border());
+            g.drawRoundedRectangle (r, 6.0f, 1.0f);
+        }
     }
 
     void paintOverChildren (juce::Graphics& g) override
@@ -207,16 +252,16 @@ public:
     void resized() override
     {
         foldButton.setBounds (getWidth() - 28, 8, 20, 20);
-        auto a = getLocalBounds().reduced (8).removeFromBottom (26);
-        removeButton.setBounds (a.removeFromRight (24));
-        a.removeFromRight (2);
-        moveRightButton.setBounds (a.removeFromRight (20));
-        a.removeFromRight (2);
-        moveLeftButton.setBounds (a.removeFromRight (20));
-        a.removeFromRight (4);
-        bypassButton.setBounds (a.removeFromRight (52));
-        a.removeFromRight (4);
-        openButton.setBounds (a);
+        auto a = getLocalBounds().reduced (10).removeFromBottom (34);
+        removeButton.setBounds (a.removeFromRight (22));
+        a.removeFromRight (3);
+        moveRightButton.setBounds (a.removeFromRight (18));
+        a.removeFromRight (3);
+        moveLeftButton.setBounds (a.removeFromRight (18));
+        a.removeFromRight (3);
+        bypassButton.setBounds (a.removeFromRight (34));
+        a.removeFromRight (3);
+        openButton.setBounds (a.removeFromRight (34));
     }
 
     int groupId() const noexcept { return info.groupId; }
@@ -227,7 +272,9 @@ public:
     {
         info.isBypassed = bypassed;
         bypassButton.setToggleState (bypassed, juce::dontSendNotification);
-        bypassButton.setButtonText (bypassed ? "Bypass" : "Ativo");
+        bypassButton.setTooltip (bypassed ? "Ativar plugin" : "Colocar plugin em bypass");
+        bypassButton.setName (bypassed ? "Plugin em bypass" : "Plugin ativo");
+        bypassButton.repaint();
     }
 
     void setRackState (bool isHeader, bool collapsed, int size)
@@ -289,8 +336,11 @@ private:
     bool rackHeader = false, rackCollapsed = false;
     int rackSize = 0;
     bool dragStarted = false, dropHighlight = false, dropAfterTarget = false, popupMenuRequested = false;
-    juce::TextButton openButton { "Abrir" }, bypassButton, moveLeftButton { "<" },
-                     moveRightButton { ">" }, removeButton { "x" }, foldButton { "-" };
+    IconButton openButton { icons::Icon::OpenWindow, "Abrir ou restaurar a janela do plugin" };
+    IconButton bypassButton { icons::Icon::Power, "Ativar ou colocar plugin em bypass", true };
+    juce::TextButton moveLeftButton { "<" }, moveRightButton { ">" };
+    IconButton removeButton { icons::Icon::Close, "Remover plugin" };
+    juce::TextButton foldButton { "-" };
 };
 
 DeviceView::DeviceView (TaskRegistry& taskRegistry) : registry (taskRegistry)
@@ -327,6 +377,19 @@ bool DeviceView::keyPressed (const juce::KeyPress& key)
 
     const bool ctrl = key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (static_cast<juce::juce_wchar> (key.getKeyCode()));
+    if (ctrl && keyCode == 'C')
+    {
+        const auto selected = selectedDevicesInOrder();
+        if (! selected.empty() && onCopyDevices)
+            onCopyDevices (trackId, selected);
+        return true;
+    }
+    if (ctrl && keyCode == 'V')
+    {
+        if (canPasteDevices && canPasteDevices() && onPasteDevices)
+            onPasteDevices (trackId);
+        return true;
+    }
     if (! ctrl || keyCode != 'G')
         return false;
 
@@ -404,6 +467,7 @@ void DeviceView::mouseUp (const juce::MouseEvent& event)
 
 void DeviceView::mouseDown (const juce::MouseEvent& event)
 {
+    grabKeyboardFocus();
     popupMenuRequested = event.mods.isPopupMenu();
 }
 
@@ -869,8 +933,12 @@ void DeviceView::showDeviceContextMenu (int deviceId, juce::Point<int> screenPos
         menu.addItem (12, "Mover plugin para antes", clickedBox->canMoveLeft() && static_cast<bool> (onMove));
         menu.addItem (13, "Mover plugin para depois", clickedBox->canMoveRight() && static_cast<bool> (onMove));
         menu.addItem (14, "Remover plugin", static_cast<bool> (onRemove));
+        menu.addItem (15, "Copiar plugin(s) configurado(s) (Ctrl+C)",
+                      ! selectedDevicesInOrder().empty() && static_cast<bool> (onCopyDevices));
         menu.addSeparator();
     }
+    menu.addItem (16, "Colar plugin(s) configurado(s) (Ctrl+V)",
+                  canPasteDevices && canPasteDevices() && static_cast<bool> (onPasteDevices));
     menu.addItem (1, "Agrupar selecionados em rack (Ctrl+G)", canGroupSelection() && static_cast<bool> (onGroupRequested));
     menu.addItem (2, "Desagrupar rack (Ctrl+Shift+G)", canUngroupSelection() && static_cast<bool> (onUngroupRequested));
     if (clickedGroupId > 0)
@@ -905,6 +973,10 @@ void DeviceView::showDeviceContextMenu (int deviceId, juce::Point<int> screenPos
                 safeThis->onMove (targetTrackId, deviceId, 1);
             else if (result == 14 && safeThis->onRemove)
                 safeThis->onRemove (targetTrackId, deviceId);
+            else if (result == 15 && safeThis->onCopyDevices)
+                safeThis->onCopyDevices (targetTrackId, selected);
+            else if (result == 16 && safeThis->onPasteDevices)
+                safeThis->onPasteDevices (targetTrackId);
             else if (result == 1 && safeThis->onGroupRequested)
                 safeThis->onGroupRequested (safeThis->trackId, selected);
             else if (result == 2 && safeThis->onUngroupRequested)

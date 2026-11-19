@@ -7,12 +7,14 @@
 #endif
 
 #include "MainComponent.h"
+#include "FreedomModalDialog.h"
 #include "OptionsWindow.h"
 #include "WindowPlacement.h"
 #include "DrumRackEditor.h"
 #include "DrumRackProcessor.h"
 #include "NativeEffectProcessors.h"
 #include "RemotePluginProcessor.h"
+#include "Icons.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -23,6 +25,117 @@
 
 namespace
 {
+struct ThemeColours
+{
+    std::array<juce::Colour, 12> values;
+};
+
+ThemeColours currentThemeColours()
+{
+    return {{
+        theme::background(), theme::panel(), theme::panelLight(), theme::control(),
+        theme::hover(), theme::pressed(), theme::border(), theme::text(), theme::textDim(),
+        theme::accent(), theme::accentHover(), theme::recording()
+    }};
+}
+
+void updateThemeColour (juce::Component& component, int colourId,
+                        const ThemeColours& oldColours, const ThemeColours& newColours)
+{
+    if (! component.isColourSpecified (colourId))
+        return;
+
+    const auto oldColour = component.findColour (colourId, false);
+    for (std::size_t i = 0; i < oldColours.values.size(); ++i)
+        if (oldColour == oldColours.values[i])
+        {
+            component.setColour (colourId, newColours.values[i]);
+            return;
+        }
+}
+
+void refreshThemeColours (juce::Component& component,
+                          const ThemeColours& oldColours, const ThemeColours& newColours)
+{
+    if (dynamic_cast<juce::Label*> (&component) != nullptr)
+        for (const int id : { juce::Label::backgroundColourId, juce::Label::textColourId,
+                              juce::Label::outlineColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::TextButton*> (&component) != nullptr)
+        for (const int id : { juce::TextButton::buttonColourId, juce::TextButton::buttonOnColourId,
+                              juce::TextButton::textColourOffId, juce::TextButton::textColourOnId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::ToggleButton*> (&component) != nullptr)
+        for (const int id : { juce::ToggleButton::textColourId, juce::ToggleButton::tickColourId,
+                              juce::ToggleButton::tickDisabledColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::ComboBox*> (&component) != nullptr)
+        for (const int id : { juce::ComboBox::backgroundColourId, juce::ComboBox::textColourId,
+                              juce::ComboBox::outlineColourId, juce::ComboBox::buttonColourId,
+                              juce::ComboBox::arrowColourId, juce::ComboBox::focusedOutlineColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::TextEditor*> (&component) != nullptr)
+        for (const int id : { juce::TextEditor::backgroundColourId, juce::TextEditor::textColourId,
+                              juce::TextEditor::highlightColourId, juce::TextEditor::highlightedTextColourId,
+                              juce::TextEditor::outlineColourId, juce::TextEditor::focusedOutlineColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::Slider*> (&component) != nullptr)
+        for (const int id : { juce::Slider::backgroundColourId, juce::Slider::thumbColourId,
+                              juce::Slider::trackColourId, juce::Slider::rotarySliderFillColourId,
+                              juce::Slider::rotarySliderOutlineColourId, juce::Slider::textBoxTextColourId,
+                              juce::Slider::textBoxBackgroundColourId, juce::Slider::textBoxHighlightColourId,
+                              juce::Slider::textBoxOutlineColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::TreeView*> (&component) != nullptr)
+        for (const int id : { juce::TreeView::backgroundColourId, juce::TreeView::linesColourId,
+                              juce::TreeView::dragAndDropIndicatorColourId,
+                              juce::TreeView::selectedItemBackgroundColourId,
+                              juce::TreeView::oddItemsColourId, juce::TreeView::evenItemsColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::ListBox*> (&component) != nullptr)
+        for (const int id : { juce::ListBox::backgroundColourId, juce::ListBox::outlineColourId,
+                              juce::ListBox::textColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::ScrollBar*> (&component) != nullptr)
+        for (const int id : { juce::ScrollBar::backgroundColourId, juce::ScrollBar::thumbColourId,
+                              juce::ScrollBar::trackColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (dynamic_cast<juce::TabbedButtonBar*> (&component) != nullptr)
+        for (const int id : { juce::TabbedButtonBar::tabOutlineColourId,
+                              juce::TabbedButtonBar::tabTextColourId,
+                              juce::TabbedButtonBar::frontOutlineColourId,
+                              juce::TabbedButtonBar::frontTextColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    if (auto* tabs = dynamic_cast<juce::TabbedComponent*> (&component))
+        for (int i = 0; i < tabs->getNumTabs(); ++i)
+            tabs->setTabBackgroundColour (i, theme::panel());
+
+    if (dynamic_cast<juce::ResizableWindow*> (&component) != nullptr)
+        updateThemeColour (component, juce::ResizableWindow::backgroundColourId,
+                           oldColours, newColours);
+
+    if (dynamic_cast<juce::AlertWindow*> (&component) != nullptr)
+        for (const int id : { juce::AlertWindow::backgroundColourId, juce::AlertWindow::textColourId,
+                              juce::AlertWindow::outlineColourId })
+            updateThemeColour (component, id, oldColours, newColours);
+
+    for (int i = 0; i < component.getNumChildComponents(); ++i)
+        if (auto* child = component.getChildComponent (i))
+            refreshThemeColours (*child, oldColours, newColours);
+
+    component.repaint();
+}
+
 juce::File userPreferencesFile()
 {
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -432,7 +545,8 @@ class MainComponent::PluginWindowNavigator final : public juce::DocumentWindow,
                                                    private juce::KeyListener
 {
 public:
-    PluginWindowNavigator (juce::TopLevelWindow* ownerWindow, std::function<void (int)> onScroll)
+    PluginWindowNavigator (juce::TopLevelWindow* ownerWindow,
+                           std::function<void (int)> onScroll)
         : DocumentWindow ("Plugin window navigation", theme::panel(), 0),
           onScroll (std::move (onScroll))
     {
@@ -451,9 +565,9 @@ public:
         scrollBar->setMouseClickGrabsKeyboardFocus (true);
         scrollBar->addListener (this);
         scrollBar->addKeyListener (this);
-        scrollBar->addMouseListener (this, true);
+        scrollBar->addMouseListener (this, false);
         setContentOwned (scrollBarComponent.release(), true);
-        setContentComponentSize (280, 18);
+        setContentComponentSize (360, 28);
         setVisible (false);
         setOwnerWindow (ownerWindow);
     }
@@ -518,8 +632,30 @@ private:
     std::function<void (int)> onScroll;
 };
 
+struct MainComponent::PluginHistoryRestore
+{
+    std::vector<PluginState> plugins;
+    std::size_t nextPlugin = 0;
+    int failures = 0;
+};
+
+struct MainComponent::PluginCopyOperation
+{
+    int targetTrackId = -1;
+    std::vector<PluginState> devices;
+    std::size_t nextDevice = 0;
+    int added = 0;
+    int failures = 0;
+    std::set<std::string> targetIdentifiers;
+    std::map<int, std::vector<int>> copiedGroups;
+    std::map<int, std::size_t> expectedGroupSizes;
+};
+
 // Janela de plugin: mantem o editor visivel e oferece rolagem como fallback.
-class MainComponent::PluginWindow : public juce::DocumentWindow, private juce::KeyListener
+class MainComponent::PluginWindow : public juce::DocumentWindow,
+                                    private juce::KeyListener,
+                                    private juce::AudioProcessorParameter::Listener,
+                                    private juce::Timer
 {
 public:
     PluginWindow (const juce::String& name,
@@ -530,13 +666,30 @@ public:
                   int cascadeIndex,
                   const std::vector<roll::Rect>& occupiedWindows,
                   std::function<void()> onActiveWindowStatusChanged,
-                  std::function<bool (const juce::KeyPress&)> onTransportKeyPress)
-        : DocumentWindow (name, juce::Colours::darkgrey, DocumentWindow::minimiseButton | DocumentWindow::closeButton)
+                  std::function<bool (const juce::KeyPress&)> onTransportKeyPress,
+                  int automationTrackId = -1,
+                  int automationDeviceId = -1,
+                  std::function<void (int, int, int, bool)> onPluginParameterGesture = {})
+        : DocumentWindow (name, theme::panel(), DocumentWindow::minimiseButton | DocumentWindow::closeButton)
         , onActiveWindowStatusChanged (std::move (onActiveWindowStatusChanged))
         , onTransportKeyPress (std::move (onTransportKeyPress))
+        , automationTrackId (automationTrackId)
+        , automationDeviceId (automationDeviceId)
+        , onPluginParameterGesture (std::move (onPluginParameterGesture))
     {
         setUsingNativeTitleBar (true);
+        setIcon (icons::appIcon());
         editorComponent = editor.get();
+        if (automationTrackId >= 0 && automationDeviceId > 0 && onPluginParameterGesture)
+            if (auto* processor = editor->getAudioProcessor())
+                for (auto* parameter : processor->getParameters())
+                    if (parameter != nullptr && parameter->isAutomatable())
+                    {
+                        parameter->addListener (this);
+                        observedParameters.push_back (parameter);
+                    }
+        if (! observedParameters.empty())
+            startTimerHz (30);
         addTransportKeyListenerRecursively (*editorComponent);
         addKeyListener (this);
         const bool editorResizable = editor->isResizable();
@@ -591,6 +744,11 @@ public:
 
     ~PluginWindow() override
     {
+        stopTimer();
+        for (auto* parameter : observedParameters)
+            if (parameter != nullptr)
+                parameter->removeListener (this);
+        observedParameters.clear();
         if (editorComponent != nullptr)
             removeTransportKeyListenerRecursively (*editorComponent);
         removeKeyListener (this);
@@ -634,6 +792,28 @@ public:
     }
 
 private:
+    void parameterValueChanged (int, float) override {}
+
+    void parameterGestureChanged (int parameterIndex, bool gestureIsStarting) override
+    {
+        if (gestureIsStarting)
+            pendingParameterGestureStart.store (parameterIndex, std::memory_order_release);
+        else
+            pendingParameterGestureEnd.store (parameterIndex, std::memory_order_release);
+    }
+
+    void timerCallback() override
+    {
+        const int startedParameter = pendingParameterGestureStart.exchange (-1, std::memory_order_acq_rel);
+        if (startedParameter >= 0 && isVisible() && ! isMinimised() && isActiveWindow()
+            && onPluginParameterGesture)
+            onPluginParameterGesture (automationTrackId, automationDeviceId, startedParameter, true);
+
+        const int endedParameter = pendingParameterGestureEnd.exchange (-1, std::memory_order_acq_rel);
+        if (endedParameter >= 0 && onPluginParameterGesture)
+            onPluginParameterGesture (automationTrackId, automationDeviceId, endedParameter, false);
+    }
+
     void addTransportKeyListenerRecursively (juce::Component& component)
     {
         component.addKeyListener (this);
@@ -658,11 +838,20 @@ private:
     juce::AudioProcessorEditor* editorComponent = nullptr;
     std::function<void()> onActiveWindowStatusChanged;
     std::function<bool (const juce::KeyPress&)> onTransportKeyPress;
+    std::function<void (int, int, int, bool)> onPluginParameterGesture;
+    std::vector<juce::AudioProcessorParameter*> observedParameters;
+    std::atomic<int> pendingParameterGestureStart { -1 }, pendingParameterGestureEnd { -1 };
+    int automationTrackId = -1, automationDeviceId = -1;
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
 };
 
 MainComponent::MainComponent()
 {
+    tooltipWindow = std::make_unique<juce::TooltipWindow> (this, 450);
+    tooltipWindow->setColour (juce::TooltipWindow::backgroundColourId, theme::panel());
+    tooltipWindow->setColour (juce::TooltipWindow::textColourId, theme::text());
+    tooltipWindow->setColour (juce::TooltipWindow::outlineColourId, theme::accent());
+
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
     engine.onPluginCrashed = [this, token] (int, int, const juce::String& pluginName)
     {
@@ -671,10 +860,12 @@ MainComponent::MainComponent()
         {
             browser.setStatus ("O plugin " + pluginName
                                + " falhou e foi encerrado; a faixa foi protegida.");
-            juce::AlertWindow::showMessageBoxAsync (
-                juce::MessageBoxIconType::WarningIcon, "Falha de plugin",
+            FreedomModalDialog::show (
+                *this, "Falha de plugin",
                 "O plugin " + pluginName
-                    + " falhou e foi encerrado. A faixa foi protegida e o Project Freedom continua aberto.");
+                    + " falhou e foi encerrado. A faixa foi protegida e o Project Freedom continua aberto.",
+                FreedomModalDialog::Icon::Error,
+                { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
         }
     };
 
@@ -734,14 +925,14 @@ MainComponent::MainComponent()
     {
         b->setClickingTogglesState (true);
         b->setColour (juce::TextButton::buttonOnColourId, theme::accent());
-        b->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b->setColour (juce::TextButton::textColourOnId, theme::text());
     }
     for (auto* b : { &clipTab, &deviceTab })
     {
         b->setClickingTogglesState (true);
         b->setRadioGroupId (4801);
         b->setColour (juce::TextButton::buttonOnColourId, theme::accent());
-        b->setColour (juce::TextButton::textColourOnId, juce::Colours::black);
+        b->setColour (juce::TextButton::textColourOnId, theme::text());
     }
     clipTab.setToggleState (true, juce::dontSendNotification);
     clipTab.onClick = [this] { audioClipEditorOpen = false; showDetail (false); };
@@ -784,6 +975,21 @@ MainComponent::MainComponent()
     pianoLocatorAddButton.setEnabled (false);
     pianoLocatorNextButton.setEnabled (false);
     pianoLocatorDeleteButton.setEnabled (false);
+
+    clipTab.setTooltip ("Editar a selecao de audio ou MIDI no painel detalhado");
+    deviceTab.setTooltip ("Exibir os dispositivos e efeitos da trilha selecionada");
+    scaleButton.setTooltip ("Escala: destacar ou limitar as notas as notas da escala");
+    highlightButton.setTooltip ("Destacar as notas pertencentes a escala ativa");
+    foldButton.setTooltip ("Fold: recolher a grade para mostrar apenas as notas usadas");
+    foldScaleButton.setTooltip ("Fold da escala: mostrar somente as notas da escala");
+    drawButton.setTooltip ("Desenhar notas diretamente na grade do piano roll");
+    snapButton.setTooltip ("Snap: ajustar as notas a grade ritmica ativa");
+    previewButton.setTooltip ("Pre-ouvir notas ao inserir ou mover eventos");
+    groovesButton.setTooltip ("Grooves: aplicar ritmos e deslocamentos a selecao");
+    zoomHMinus.setTooltip ("Reduzir o zoom horizontal do piano roll");
+    zoomHPlus.setTooltip ("Ampliar o zoom horizontal do piano roll");
+    zoomVMinus.setTooltip ("Reduzir o zoom vertical das notas");
+    zoomVPlus.setTooltip ("Ampliar o zoom vertical das notas");
     rootBox.setMouseClickGrabsKeyboardFocus (false);
     modeBox.setMouseClickGrabsKeyboardFocus (false);
     lengthBox.setMouseClickGrabsKeyboardFocus (false);
@@ -829,11 +1035,38 @@ MainComponent::MainComponent()
     project.onMixerChanged = [this] { applyMixers(); };
     project.onSelectionChanged = [this] { onSelectionChanged(); };
     project.onLoopChanged = [this] { engine.graph().setLoopRegion (project.loopStart, project.loopEnd); };
+    arrangement.onMidiLearnRequested = [this] (int trackId, MidiMappingTarget target)
+    {
+        requestMidiLearn (trackId, target);
+    };
+    arrangement.onMidiMappingClearRequested = [this] (int trackId, MidiMappingTarget target)
+    {
+        clearMidiMapping (trackId, target);
+    };
+    project.capturePluginHistoryState = [this] { return engine.getPluginStates(); };
+    project.restorePluginHistoryState = [this] (const std::vector<PluginState>& plugins)
+    {
+        restorePluginHistoryState (plugins);
+    };
     project.addChangeListener (this);
     model.addChangeListener (this);
+    engine.audioDeviceManager().addMidiInputDeviceCallback ({}, this);
 
     // ---- piano roll <-> projeto ----
     model.onNotesChanged = [this] { project.notifyTrackNotes (project.selectedTrackId); project.sendChangeMessage(); };
+    model.onEditStarted = [this] { project.beginEdit(); };
+    model.onEditFinished = [this] { project.endEdit(); };
+    model.onGlobalUndoRedo = [this] (bool redo)
+    {
+        if (pluginHistoryRestoreInProgress || pluginCopyInProgress)
+            return;
+        if (redo)
+            project.redo();
+        else
+            project.undo();
+    };
+    model.canGlobalUndo = [this] { return project.canUndo(); };
+    model.canGlobalRedo = [this] { return project.canRedo(); };
     model.onLengthChanged = [this]
     {
         project.notifyTrackNotes (project.selectedTrackId);
@@ -935,6 +1168,7 @@ MainComponent::MainComponent()
         transport.togglePlay();
     };
     arrangement.meterProvider = [this] (int id) { return engine.peak (id); };
+    arrangement.masterStereoPeakProvider = [this] { return engine.masterPeakStereo(); };
     arrangement.liveMixerProvider = [this] (int id)
     {
         return ArrangementView::LiveMixerValues {
@@ -972,6 +1206,11 @@ MainComponent::MainComponent()
             }
         }
         return choices;
+    };
+    arrangement.automationParameterValueTextProvider = [this] (
+        int trackId, const roll::AutomationTarget& target, double value)
+    {
+        return engine.pluginParameterValueText (trackId, target, value);
     };
     arrangement.onTrackDuplicateRequested = [this] (int id) { duplicateSelectedTrack (id); };
     arrangement.canAcceptPluginDrop = [this] (const juce::String& identifier, int trackId)
@@ -1197,49 +1436,74 @@ MainComponent::MainComponent()
     deviceView.onOpen = [this] (int trackId, int deviceId) { openDeviceEditor (trackId, deviceId); };
     deviceView.onBypass = [this] (int trackId, int deviceId, bool bypassed)
     {
+        project.beginExternalEdit();
         engine.setDeviceBypassed (trackId, deviceId, bypassed);
+        project.endEdit();
     };
     deviceView.onMove = [this] (int trackId, int deviceId, int direction)
     {
+        project.beginExternalEdit();
         if (engine.moveDevice (trackId, deviceId, direction))
         {
+            project.endEdit();
             refreshDeviceView();
             project.sendChangeMessage();
         }
+        else
+            project.cancelEdit();
     };
     deviceView.onReorder = [this] (int trackId, int deviceId, int targetDeviceId, bool afterTarget)
     {
+        project.beginExternalEdit();
         if (engine.reorderDevice (trackId, deviceId, targetDeviceId, afterTarget))
         {
+            project.endEdit();
             refreshDeviceView();
             project.sendChangeMessage();
         }
+        else
+            project.cancelEdit();
     };
     deviceView.onGroupRequested = [this] (int trackId, const std::vector<int>& deviceIds)
     {
+        project.beginExternalEdit();
         if (engine.groupDevices (trackId, deviceIds))
         {
+            project.endEdit();
             refreshDeviceView();
             project.sendChangeMessage();
             browser.setStatus ("Plugins agrupados. Ctrl+Shift+G para desagrupar.");
         }
         else
         {
+            project.cancelEdit();
             browser.setStatus ("Selecione pelo menos dois plugins consecutivos para agrupar.");
         }
     };
     deviceView.onUngroupRequested = [this] (int trackId, const std::vector<int>& deviceIds)
     {
+        project.beginExternalEdit();
         if (engine.ungroupDevices (trackId, deviceIds))
         {
+            project.endEdit();
             refreshDeviceView();
             project.sendChangeMessage();
             browser.setStatus ("Rack desagrupado.");
         }
         else
         {
+            project.cancelEdit();
             browser.setStatus ("Selecione um rack para desagrupar.");
         }
+    };
+    deviceView.onCopyDevices = [this] (int trackId, const std::vector<int>& deviceIds)
+    {
+        copyDevicesToClipboard (trackId, deviceIds);
+    };
+    deviceView.onPasteDevices = [this] (int trackId) { pasteDevicesToTrack (trackId); };
+    deviceView.canPasteDevices = [this]
+    {
+        return ! copiedPluginStates.empty() && ! pluginCopyInProgress && ! pluginHistoryRestoreInProgress;
     };
     deviceView.canAcceptPluginDrop = [this] (int trackId, const juce::String& identifier)
     {
@@ -1270,9 +1534,11 @@ MainComponent::MainComponent()
     };
     deviceView.onRemove = [this] (int trackId, int deviceId)
     {
+        project.beginExternalEdit();
         windows.erase (deviceId);
         closeWindowsOfRack (trackId, deviceId);
         engine.removeDevice (trackId, deviceId);
+        project.endEdit();
         refreshDeviceView();
         project.sendChangeMessage();
     };
@@ -1280,9 +1546,14 @@ MainComponent::MainComponent()
     browser.onLoadRequested = [this] (const juce::PluginDescription& d) { loadDevice (d); };
     browser.onAddDrumRackRequested = [this]
     {
+        project.beginExternalEdit();
         const auto deviceId = engine.addDrumRack (project.selectedTrackId);
         if (deviceId <= 0)
+        {
+            project.cancelEdit();
             return juce::String ("Drum Rack can only be added to a MIDI track.");
+        }
+        project.endEdit();
         showDetail (true);
         return juce::String ("Drum Rack added to the selected track.");
     };
@@ -1330,6 +1601,7 @@ MainComponent::MainComponent()
     showDetail (false);
 
     setWantsKeyboardFocus (true);
+    addKeyListenerRecursively (*this);
     setSize (1360, 800);
     startTimerHz (30);
     nextRecoverySaveTime = juce::Time::getMillisecondCounterHiRes() + 120000.0;
@@ -1339,6 +1611,8 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    engine.audioDeviceManager().removeMidiInputDeviceCallback ({}, this);
+    removeKeyListenerRecursively (*this);
     stopGroovePreview();
     grooveBrowserWindow.reset();
     releaseComputerMidiNotes();
@@ -1374,6 +1648,390 @@ void MainComponent::setMainWindow (juce::TopLevelWindow* window)
 {
     mainWindow = window;
     updatePluginWindowZOrder();
+}
+
+void MainComponent::restorePluginHistoryState (const std::vector<PluginState>& plugins)
+{
+    if (pluginHistoryRestoreInProgress)
+    {
+        setProjectStatus ("Aguarde a restauracao atual de plugins terminar.");
+        return;
+    }
+
+    pluginHistoryRestoreInProgress = true;
+    pluginHistoryRestore = std::make_shared<PluginHistoryRestore>();
+    pluginHistoryRestore->plugins = plugins;
+    std::stable_sort (pluginHistoryRestore->plugins.begin(), pluginHistoryRestore->plugins.end(),
+        [] (const PluginState& a, const PluginState& b)
+        {
+            return a.trackId == b.trackId ? a.order < b.order : a.trackId < b.trackId;
+        });
+
+    const auto current = engine.getPluginStates();
+    for (const auto& device : current)
+    {
+        const auto desired = std::find_if (plugins.begin(), plugins.end(),
+            [&device] (const PluginState& candidate)
+            {
+                return candidate.trackId == device.trackId && candidate.identifier == device.identifier;
+            });
+        if (desired != plugins.end())
+            continue;
+
+        const auto devices = engine.devices (device.trackId);
+        const auto existing = std::find_if (devices.begin(), devices.end(),
+            [&device] (const DeviceInfo& candidate)
+            {
+                return candidate.pluginIdentifier == device.identifier;
+            });
+        if (existing == devices.end())
+            continue;
+
+        windows.erase (existing->id);
+        closeWindowsOfRack (device.trackId, existing->id);
+        engine.removeDevice (device.trackId, existing->id);
+    }
+
+    setProjectStatus ("Restaurando o estado dos plugins...");
+    restoreNextPluginHistoryState();
+}
+
+void MainComponent::restoreNextPluginHistoryState()
+{
+    const auto operation = pluginHistoryRestore;
+    if (operation == nullptr)
+        return;
+
+    while (operation->nextPlugin < operation->plugins.size())
+    {
+        const auto state = operation->plugins[operation->nextPlugin++];
+        const auto devices = engine.devices (state.trackId);
+        const auto existing = std::find_if (devices.begin(), devices.end(),
+            [&state] (const DeviceInfo& candidate)
+            {
+                return candidate.pluginIdentifier == state.identifier;
+            });
+
+        if (existing != devices.end())
+        {
+            if (! engine.restorePluginState (state.trackId, existing->id, state.state))
+                ++operation->failures;
+            engine.setDeviceBypassed (state.trackId, existing->id, state.bypassed);
+            continue;
+        }
+
+        int nativeDeviceId = 0;
+        if (state.identifier == AudioEngine::drumRackPluginIdentifier)
+            nativeDeviceId = engine.addDrumRack (state.trackId);
+        else if (state.identifier == AudioEngine::utilityPluginIdentifier
+                 || state.identifier == AudioEngine::autoPanPluginIdentifier)
+            nativeDeviceId = engine.addUtility (state.trackId);
+
+        if (nativeDeviceId > 0)
+        {
+            if (! engine.restorePluginState (state.trackId, nativeDeviceId, state.state))
+                ++operation->failures;
+            engine.setDeviceBypassed (state.trackId, nativeDeviceId, state.bypassed);
+            continue;
+        }
+
+        const auto description = scanner.list().getTypeForIdentifierString (state.identifier);
+        if (description == nullptr)
+        {
+            ++operation->failures;
+            continue;
+        }
+
+        const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+        engine.addDevice (state.trackId, *description,
+            [this, token, operation, state] (const juce::String& error, int deviceId)
+            {
+                const auto alive = token.lock();
+                if (alive == nullptr || ! alive->load() || pluginHistoryRestore != operation)
+                    return;
+
+                if (error.isNotEmpty())
+                {
+                    ++operation->failures;
+                    browser.setStatus ("Nao foi possivel restaurar " + state.identifier + ": " + error);
+                }
+                else
+                {
+                    if (! engine.restorePluginState (state.trackId, deviceId, state.state))
+                        ++operation->failures;
+                    engine.setDeviceBypassed (state.trackId, deviceId, state.bypassed);
+                }
+
+                restoreNextPluginHistoryState();
+            }, state.order);
+        return;
+    }
+
+    std::set<int> trackIds;
+    for (const auto& state : operation->plugins)
+        trackIds.insert (state.trackId);
+
+    for (const int trackId : trackIds)
+    {
+        auto devices = engine.devices (trackId);
+        std::vector<int> deviceIds;
+        deviceIds.reserve (devices.size());
+        for (const auto& device : devices)
+            deviceIds.push_back (device.id);
+        engine.ungroupDevices (trackId, deviceIds);
+
+        std::vector<PluginState> desiredTrack;
+        for (const auto& state : operation->plugins)
+            if (state.trackId == trackId)
+                desiredTrack.push_back (state);
+
+        for (std::size_t targetIndex = 0; targetIndex < desiredTrack.size(); ++targetIndex)
+        {
+            devices = engine.devices (trackId);
+            auto target = std::find_if (devices.begin(), devices.end(),
+                [&desiredTrack, targetIndex] (const DeviceInfo& device)
+                {
+                    return device.pluginIdentifier == desiredTrack[targetIndex].identifier;
+                });
+            if (target == devices.end())
+            {
+                ++operation->failures;
+                continue;
+            }
+
+            auto currentIndex = static_cast<int> (target - devices.begin());
+            while (currentIndex > static_cast<int> (targetIndex))
+            {
+                if (! engine.moveDevice (trackId, target->id, -1))
+                {
+                    ++operation->failures;
+                    break;
+                }
+                --currentIndex;
+                devices = engine.devices (trackId);
+                target = std::find_if (devices.begin(), devices.end(),
+                    [&desiredTrack, targetIndex] (const DeviceInfo& device)
+                    {
+                        return device.pluginIdentifier == desiredTrack[targetIndex].identifier;
+                    });
+            }
+        }
+
+        std::map<int, std::vector<int>> groups;
+        devices = engine.devices (trackId);
+        for (const auto& state : desiredTrack)
+            if (state.groupId > 0)
+                if (const auto device = std::find_if (devices.begin(), devices.end(),
+                        [&state] (const DeviceInfo& candidate)
+                        {
+                            return candidate.pluginIdentifier == state.identifier;
+                        }); device != devices.end())
+                    groups[state.groupId].push_back (device->id);
+        for (const auto& [groupId, members] : groups)
+        {
+            juce::ignoreUnused (groupId);
+            if (members.size() > 1 && ! engine.groupDevices (trackId, members))
+                ++operation->failures;
+        }
+    }
+
+    finishPluginHistoryRestore();
+}
+
+void MainComponent::addKeyListenerRecursively (juce::Component& component)
+{
+    component.addKeyListener (this);
+    for (int i = 0; i < component.getNumChildComponents(); ++i)
+        if (auto* child = component.getChildComponent (i))
+            addKeyListenerRecursively (*child);
+}
+
+void MainComponent::removeKeyListenerRecursively (juce::Component& component)
+{
+    component.removeKeyListener (this);
+    for (int i = 0; i < component.getNumChildComponents(); ++i)
+        if (auto* child = component.getChildComponent (i))
+            removeKeyListenerRecursively (*child);
+}
+
+void MainComponent::copyDevicesToClipboard (int trackId, const std::vector<int>& deviceIds)
+{
+    copiedPluginStates.clear();
+    if (deviceIds.empty())
+        return;
+
+    const std::set<int> selected (deviceIds.begin(), deviceIds.end());
+    const auto devices = engine.devices (trackId);
+    auto states = engine.getPluginStates();
+    for (std::size_t order = 0; order < devices.size(); ++order)
+    {
+        if (! selected.contains (devices[order].id))
+            continue;
+
+        const auto state = std::find_if (states.begin(), states.end(),
+            [trackId, order] (const PluginState& candidate)
+            {
+                return candidate.trackId == trackId && candidate.order == static_cast<int> (order);
+            });
+        if (state != states.end())
+            copiedPluginStates.push_back (*state);
+    }
+
+    std::stable_sort (copiedPluginStates.begin(), copiedPluginStates.end(),
+        [] (const PluginState& a, const PluginState& b) { return a.order < b.order; });
+    browser.setStatus (copiedPluginStates.empty()
+        ? "Nao foi possivel copiar os plugins selecionados."
+        : juce::String (copiedPluginStates.size()) + " plugin(s) configurado(s) copiado(s). "
+          "Selecione outra trilha e use Ctrl+V.");
+}
+
+void MainComponent::pasteDevicesToTrack (int trackId)
+{
+    if (copiedPluginStates.empty() || project.track (trackId) == nullptr)
+        return;
+    if (pluginCopyInProgress || pluginHistoryRestoreInProgress)
+    {
+        setProjectStatus ("Aguarde a operacao atual de plugins terminar.");
+        return;
+    }
+
+    auto operation = std::make_shared<PluginCopyOperation>();
+    operation->targetTrackId = trackId;
+    operation->devices = copiedPluginStates;
+    for (const auto& device : engine.devices (trackId))
+        operation->targetIdentifiers.insert (device.pluginIdentifier.toStdString());
+    for (const auto& state : operation->devices)
+        if (state.groupId > 0)
+            ++operation->expectedGroupSizes[state.groupId];
+
+    project.beginExternalEdit();
+    pluginCopyOperation = std::move (operation);
+    pluginCopyInProgress = true;
+    setProjectStatus ("Copiando plugins configurados para a trilha...");
+    pasteNextDevice();
+}
+
+void MainComponent::pasteNextDevice()
+{
+    const auto operation = pluginCopyOperation;
+    if (operation == nullptr)
+        return;
+
+    while (operation->nextDevice < operation->devices.size())
+    {
+        const auto state = operation->devices[operation->nextDevice++];
+        const auto identifier = state.identifier.toStdString();
+        if (operation->targetIdentifiers.contains (identifier))
+        {
+            ++operation->failures;
+            continue;
+        }
+
+        int deviceId = 0;
+        if (state.identifier == AudioEngine::drumRackPluginIdentifier)
+        {
+            deviceId = engine.addDrumRack (operation->targetTrackId);
+        }
+        else if (state.identifier == AudioEngine::utilityPluginIdentifier
+                 || state.identifier == AudioEngine::autoPanPluginIdentifier)
+        {
+            deviceId = engine.addUtility (operation->targetTrackId);
+        }
+        else
+        {
+            const auto description = scanner.list().getTypeForIdentifierString (state.identifier);
+            if (description == nullptr || ! engine.canAcceptPlugin (operation->targetTrackId, *description))
+            {
+                ++operation->failures;
+                continue;
+            }
+
+            const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+            engine.addDevice (operation->targetTrackId, *description,
+                [this, token, operation, state] (const juce::String& error, int loadedDeviceId)
+                {
+                    const auto alive = token.lock();
+                    if (alive == nullptr || ! alive->load() || pluginCopyOperation != operation)
+                        return;
+                    if (error.isNotEmpty() || loadedDeviceId <= 0)
+                    {
+                        ++operation->failures;
+                        browser.setStatus ("Nao foi possivel copiar " + state.identifier + ": "
+                                          + (error.isNotEmpty() ? error : "falha ao adicionar."));
+                    }
+                    else
+                    {
+                        if (! engine.restorePluginState (operation->targetTrackId, loadedDeviceId, state.state))
+                            ++operation->failures;
+                        engine.setDeviceBypassed (operation->targetTrackId, loadedDeviceId, state.bypassed);
+                        operation->targetIdentifiers.insert (state.identifier.toStdString());
+                        operation->copiedGroups[state.groupId].push_back (loadedDeviceId);
+                        ++operation->added;
+                    }
+                    pasteNextDevice();
+                }, -1);
+            return;
+        }
+
+        if (deviceId <= 0)
+        {
+            ++operation->failures;
+            continue;
+        }
+        if (! engine.restorePluginState (operation->targetTrackId, deviceId, state.state))
+            ++operation->failures;
+        engine.setDeviceBypassed (operation->targetTrackId, deviceId, state.bypassed);
+        operation->targetIdentifiers.insert (state.identifier.toStdString());
+        operation->copiedGroups[state.groupId].push_back (deviceId);
+        ++operation->added;
+    }
+
+    for (const auto& [groupId, deviceIds] : operation->copiedGroups)
+    {
+        const auto expected = operation->expectedGroupSizes.find (groupId);
+        if (groupId > 0 && expected != operation->expectedGroupSizes.end()
+            && expected->second == deviceIds.size() && deviceIds.size() > 1
+            && ! engine.groupDevices (operation->targetTrackId, deviceIds))
+            ++operation->failures;
+    }
+    finishDeviceCopy();
+}
+
+void MainComponent::finishDeviceCopy()
+{
+    const auto operation = pluginCopyOperation;
+    if (operation == nullptr)
+        return;
+
+    if (operation->added > 0)
+    {
+        project.endEdit();
+        project.sendChangeMessage();
+        refreshDeviceView();
+    }
+    else
+    {
+        project.cancelEdit();
+    }
+
+    pluginCopyOperation.reset();
+    pluginCopyInProgress = false;
+    const auto result = juce::String (operation->added) + " plugin(s) copiado(s)";
+    setProjectStatus (operation->failures == 0
+        ? result + "."
+        : result + "; " + juce::String (operation->failures) + " nao puderam ser copiados.");
+}
+
+void MainComponent::finishPluginHistoryRestore()
+{
+    const int failures = pluginHistoryRestore != nullptr ? pluginHistoryRestore->failures : 0;
+    pluginHistoryRestore.reset();
+    pluginHistoryRestoreInProgress = false;
+    refreshDeviceView();
+    project.sendChangeMessage();
+    setProjectStatus (failures == 0
+        ? "Estado de plugins restaurado."
+        : "Estado restaurado com " + juce::String (failures) + " falha(s) ao carregar plugins.");
 }
 
 std::vector<juce::Rectangle<int>> MainComponent::pluginWindowBounds() const
@@ -1452,7 +2110,7 @@ void MainComponent::updatePluginWindowNavigator()
     pluginWindowScrollRange = maximumOffset;
     const bool appForeground = juce::Process::isForegroundProcess()
                             || RemotePluginProcessor::isPluginEditorForeground();
-    const int navigatorWidth = std::min (280, area.getWidth());
+    const int navigatorWidth = std::min (360, area.getWidth());
     const int navigatorHeight = std::min (28, area.getHeight());
     const auto navigatorBounds = juce::Rectangle<int> (area.getRight() - navigatorWidth,
                                                        area.getBottom() - navigatorHeight,
@@ -1461,7 +2119,8 @@ void MainComponent::updatePluginWindowNavigator()
         pluginWindowNavigator->setBounds (navigatorBounds);
     const bool wasVisible = pluginWindowNavigator->isVisible();
     pluginWindowNavigator->updateRange (pluginWindowScrollRange, pluginWindowScrollOffset,
-                                        area.getWidth(), pluginWindowScrollRange > 0 && appForeground);
+                                        area.getWidth(),
+                                        pluginWindowScrollRange > 0 && appForeground);
     pluginWindowNavigator->setOwnerWindow (mainWindow);
 #if defined(_WIN32)
     const auto foreground = reinterpret_cast<std::uintptr_t> (GetForegroundWindow());
@@ -1588,6 +2247,7 @@ void MainComponent::resized()
     tabs.removeFromLeft (4);
     deviceTab.setBounds (tabs.removeFromLeft (110));
     auto locatorButtons = tabs.removeFromRight (128);
+    tabs.removeFromRight (10);
     pianoLocatorPreviousButton.setBounds (locatorButtons.removeFromLeft (26).reduced (0, 2));
     locatorButtons.removeFromLeft (4);
     pianoLocatorAddButton.setBounds (locatorButtons.removeFromLeft (26).reduced (0, 2));
@@ -2279,8 +2939,46 @@ void MainComponent::loopSelectedTrack()
 
 // ------------------------------------------------------------ teclado
 
+bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
+{
+    if (pendingMidiLearn.has_value() && key.getKeyCode() == juce::KeyPress::escapeKey)
+    {
+        pendingMidiLearn.reset();
+        setProjectStatus ("MIDI Learn cancelado.");
+        return true;
+    }
+
+    if (isTextEditorFocused())
+        return false;
+
+    const auto modifiers = key.getModifiers();
+    const bool ctrl = modifiers.isCtrlDown() || modifiers.isCommandDown();
+    const auto keyCode = juce::CharacterFunctions::toUpperCase (
+        static_cast<juce::juce_wchar> (key.getKeyCode()));
+    const bool undo = ctrl && keyCode == 'Z' && ! modifiers.isShiftDown();
+    const bool redo = ctrl && (keyCode == 'Y' || (keyCode == 'Z' && modifiers.isShiftDown()));
+    if (! undo && ! redo)
+        return false;
+
+    if (! pluginHistoryRestoreInProgress && ! pluginCopyInProgress)
+    {
+        if (redo)
+            project.redo();
+        else
+            project.undo();
+    }
+    return true;
+}
+
 bool MainComponent::keyPressed (const juce::KeyPress& k)
 {
+    if (pendingMidiLearn.has_value() && k.getKeyCode() == juce::KeyPress::escapeKey)
+    {
+        pendingMidiLearn.reset();
+        setProjectStatus ("MIDI Learn cancelado.");
+        return true;
+    }
+
     if (audioRenderInProgress)
         return true;
 
@@ -2374,9 +3072,9 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
         }
     }
     if (ctrl && keyCode == 'Z' && ! k.getModifiers().isShiftDown())
-        return project.undo();
+        return pluginHistoryRestoreInProgress || pluginCopyInProgress || project.undo();
     if (ctrl && (keyCode == 'Y' || (keyCode == 'Z' && k.getModifiers().isShiftDown())))
-        return project.redo();
+        return pluginHistoryRestoreInProgress || pluginCopyInProgress || project.redo();
 
     if (k.getModifiers().isCtrlDown()
         && juce::CharacterFunctions::toLowerCase (k.getKeyCode()) == 'b')
@@ -2469,6 +3167,241 @@ void MainComponent::applyMixers()
     }
 }
 
+void MainComponent::requestMidiLearn (int trackId, MidiMappingTarget target)
+{
+    const bool masterTarget = target == MidiMappingTarget::MasterVolume
+                           || target == MidiMappingTarget::MasterPan;
+    if ((masterTarget && trackId != AudioEngine::masterTrackId)
+        || (! masterTarget && project.track (trackId) == nullptr))
+        return;
+
+    pendingMidiLearn = PendingMidiLearn { trackId, target };
+    const auto controlName = target == MidiMappingTarget::TrackVolume ? "Volume"
+                           : target == MidiMappingTarget::TrackPan ? "Pan"
+                           : target == MidiMappingTarget::TrackMute ? "Mute"
+                           : target == MidiMappingTarget::TrackSolo ? "Solo"
+                           : target == MidiMappingTarget::MasterVolume ? "Volume Master"
+                           : "Pan Master";
+    setProjectStatus (juce::String ("MIDI Learn: mova um controle para ") + controlName
+                      + " (CC; Mute/Solo tambem aceitam notas; Esc cancela).");
+}
+
+void MainComponent::clearMidiMapping (int trackId, MidiMappingTarget target)
+{
+    const auto mappingExists = std::any_of (project.midiMappings.begin(), project.midiMappings.end(),
+        [trackId, target] (const MidiMapping& mapping)
+        {
+            return mapping.trackId == trackId && mapping.target == target;
+        });
+    if (! mappingExists)
+        return;
+
+    project.beginEdit();
+    std::erase_if (project.midiMappings, [trackId, target] (const MidiMapping& mapping)
+    {
+        return mapping.trackId == trackId && mapping.target == target;
+    });
+    project.endEdit();
+    lastMidiButtonValues.erase ({ trackId, static_cast<int> (target) });
+    project.sendChangeMessage();
+    arrangement.refreshMidiMappingInfo();
+    setProjectStatus ("Mapeamento MIDI removido.");
+}
+
+void MainComponent::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
+{
+    MidiMappingMessageType messageType;
+    int number = 0, value = 0;
+    bool noteOn = false;
+    if (message.isController())
+    {
+        messageType = MidiMappingMessageType::ControlChange;
+        number = message.getControllerNumber();
+        value = message.getControllerValue();
+    }
+    else if (message.isNoteOn() || message.isNoteOff())
+    {
+        messageType = MidiMappingMessageType::Note;
+        number = message.getNoteNumber();
+        value = message.getVelocity();
+        noteOn = message.isNoteOn();
+    }
+    else
+    {
+        return;
+    }
+
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    if (! juce::MessageManager::callAsync ([this, token, channel = message.getChannel(),
+                                            messageType, number, value, noteOn]
+    {
+        const auto alive = token.lock();
+        if (alive != nullptr && alive->load())
+            handleMidiMessageOnMessageThread (channel, messageType, number, value, noteOn);
+    }))
+        juce::Logger::writeToLog ("MainComponent: nao foi possivel enfileirar uma mensagem MIDI.");
+}
+
+void MainComponent::handleMidiMessageOnMessageThread (int channel, MidiMappingMessageType messageType,
+                                                      int number, int value, bool noteOn)
+{
+    if (pendingMidiLearn.has_value())
+    {
+        const auto pending = *pendingMidiLearn;
+        const bool buttonTarget = pending.target == MidiMappingTarget::TrackMute
+                               || pending.target == MidiMappingTarget::TrackSolo;
+        if (messageType == MidiMappingMessageType::ControlChange
+            || (messageType == MidiMappingMessageType::Note && buttonTarget && noteOn))
+        {
+            const bool masterTarget = pending.target == MidiMappingTarget::MasterVolume
+                                   || pending.target == MidiMappingTarget::MasterPan;
+            if ((masterTarget && pending.trackId != AudioEngine::masterTrackId)
+                || (! masterTarget && project.track (pending.trackId) == nullptr))
+            {
+                pendingMidiLearn.reset();
+                setProjectStatus ("MIDI Learn cancelado: trilha removida.");
+                return;
+            }
+
+            project.beginEdit();
+            std::erase_if (project.midiMappings, [&pending] (const MidiMapping& mapping)
+            {
+                return mapping.trackId == pending.trackId && mapping.target == pending.target;
+            });
+            project.midiMappings.push_back ({ pending.trackId, pending.target, messageType, channel, number });
+            project.endEdit();
+            pendingMidiLearn.reset();
+            lastMidiButtonValues.erase ({ pending.trackId, static_cast<int> (pending.target) });
+            project.sendChangeMessage();
+            arrangement.refreshMidiMappingInfo();
+            setProjectStatus ("MIDI mapeado: canal " + juce::String (channel)
+                              + (messageType == MidiMappingMessageType::ControlChange ? " CC " : " nota ")
+                              + juce::String (number) + ".");
+            return;
+        }
+    }
+
+    for (const auto& mapping : project.midiMappings)
+        if (mapping.channel == channel && mapping.messageType == messageType
+            && mapping.number == number)
+            applyMidiMapping (mapping, value, noteOn);
+}
+
+void MainComponent::applyMidiMapping (const MidiMapping& mapping, int value, bool noteOn)
+{
+    auto* track = mapping.trackId == AudioEngine::masterTrackId
+        ? project.masterTrack.get() : project.track (mapping.trackId);
+    if (track == nullptr)
+        return;
+
+    const bool buttonTarget = mapping.target == MidiMappingTarget::TrackMute
+                           || mapping.target == MidiMappingTarget::TrackSolo;
+    if (buttonTarget)
+    {
+        bool pressed = false;
+        if (mapping.messageType == MidiMappingMessageType::Note)
+        {
+            pressed = noteOn;
+        }
+        else
+        {
+            const auto key = std::make_pair (mapping.trackId, static_cast<int> (mapping.target));
+            const auto previous = lastMidiButtonValues.find (key);
+            pressed = value >= 64 && (previous == lastMidiButtonValues.end() || previous->second < 64);
+            lastMidiButtonValues[key] = value;
+        }
+
+        if (! pressed)
+            return;
+
+        if (mapping.target == MidiMappingTarget::TrackSolo)
+        {
+            project.setTrackSolo (mapping.trackId, ! track->solo, true);
+        }
+        else
+        {
+            project.beginEdit();
+            track->mute = ! track->mute;
+            project.notifyMixer();
+            project.endEdit();
+        }
+        return;
+    }
+
+    const double normalized = std::clamp (static_cast<double> (value) / 127.0, 0.0, 1.0);
+    bool changed = false;
+    switch (mapping.target)
+    {
+        case MidiMappingTarget::TrackVolume:
+        {
+            const double newValue = normalized * 1.5;
+            changed = std::abs (track->volume - newValue) >= 0.0005;
+            if (changed)
+                track->volume = newValue;
+            break;
+        }
+        case MidiMappingTarget::TrackPan:
+        case MidiMappingTarget::MasterPan:
+        {
+            const double newValue = value <= 64
+                ? (static_cast<double> (value) - 64.0) / 64.0
+                : (static_cast<double> (value) - 64.0) / 63.0;
+            changed = std::abs (track->pan - newValue) >= 0.005;
+            if (changed)
+                track->pan = newValue;
+            break;
+        }
+        case MidiMappingTarget::MasterVolume:
+        {
+            const double decibels = -60.0 + normalized * 66.0;
+            const double newValue = roll::decibelsToGain (static_cast<float> (decibels));
+            changed = std::abs (track->volume - newValue) >= 0.0005;
+            if (changed)
+                track->volume = newValue;
+            break;
+        }
+        case MidiMappingTarget::TrackMute:
+        case MidiMappingTarget::TrackSolo:
+            break;
+    }
+
+    if (changed)
+        project.notifyMixer();
+}
+
+void MainComponent::handlePluginParameterGesture (
+    int trackId, int deviceId, int parameterIndex, bool gestureIsStarting)
+{
+    engine.setPluginAutomationOverride (trackId, deviceId, parameterIndex, gestureIsStarting);
+    if (! gestureIsStarting)
+        return;
+
+    const auto devices = engine.devices (trackId);
+    for (std::size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex)
+    {
+        const auto& device = devices[deviceIndex];
+        if (device.id != deviceId)
+            continue;
+
+        const auto parameter = std::find_if (device.automatableParameters.begin(),
+                                              device.automatableParameters.end(),
+            [parameterIndex] (const auto& candidate) { return candidate.index == parameterIndex; });
+        if (parameter == device.automatableParameters.end())
+            return;
+
+        roll::AutomationTarget target;
+        target.type = roll::AutomationParameterType::PluginParameter;
+        target.pluginIdentifier = device.pluginIdentifier.toStdString();
+        target.parameterId = parameter->id.toStdString();
+        target.parameterName = parameter->name.toStdString();
+        target.parameterIndex = parameter->index;
+        target.deviceIndex = static_cast<int> (deviceIndex);
+        target.currentValue = std::clamp (static_cast<double> (parameter->value), 0.0, 1.0);
+        arrangement.selectPluginAutomationParameter (trackId, target);
+        return;
+    }
+}
+
 void MainComponent::showProjectMenu()
 {
     juce::PopupMenu menu;
@@ -2500,6 +3433,41 @@ void MainComponent::showOptionsWindow()
             {
                 createFadesOnClipEdges = enabled;
                 saveCreateFadesOnClipEdges (enabled);
+            },
+            [this] (theme::Palette palette)
+            {
+                const auto oldColours = currentThemeColours();
+                theme::setCurrent (palette);
+                const auto newColours = currentThemeColours();
+                if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
+                {
+                    laf->setColourScheme ({ theme::background(), theme::panel(), theme::panel(),
+                                            theme::border(), theme::text(), theme::control(),
+                                            juce::Colours::black, theme::accent(), theme::text() });
+                    laf->setColour (juce::ResizableWindow::backgroundColourId, theme::background());
+                    laf->setColour (juce::TextButton::buttonColourId, theme::control());
+                    laf->setColour (juce::TextButton::buttonOnColourId, theme::accent());
+                    laf->setColour (juce::TextButton::textColourOffId, theme::text());
+                    laf->setColour (juce::TextButton::textColourOnId, theme::text());
+                    laf->setColour (juce::TooltipWindow::textColourId, theme::text());
+                    laf->setColour (juce::ComboBox::backgroundColourId, theme::control());
+                    laf->setColour (juce::ComboBox::textColourId, theme::text());
+                    laf->setColour (juce::ComboBox::outlineColourId, theme::controlBorder());
+                    laf->setColour (juce::TextEditor::backgroundColourId, theme::control());
+                    laf->setColour (juce::TextEditor::textColourId, theme::text());
+                    laf->setColour (juce::PopupMenu::backgroundColourId, theme::panel());
+                    laf->setColour (juce::PopupMenu::textColourId, theme::text());
+                    laf->setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::accent());
+                    laf->setColour (juce::PopupMenu::highlightedTextColourId, theme::text());
+                }
+
+                if (mainWindow != nullptr)
+                    refreshThemeColours (*mainWindow, oldColours, newColours);
+                else
+                    refreshThemeColours (*this, oldColours, newColours);
+
+                if (optionsWindow != nullptr)
+                    refreshThemeColours (*optionsWindow, oldColours, newColours);
             });
     }
 
@@ -2543,22 +3511,18 @@ void MainComponent::chooseWavExportFile()
 
 void MainComponent::showWavRenderOptions (const juce::File& file)
 {
-    auto* alert = new juce::AlertWindow (
-        "Exportar Master como WAV", "Cauda apos o fim do arrangement (segundos):",
-        juce::AlertWindow::NoIcon);
-    alert->addTextEditor ("tailSeconds", "2.0");
-    alert->addButton ("Exportar", 1);
-    alert->addButton ("Cancelar", 0);
-
     juce::Component::SafePointer<MainComponent> safeThis (this);
-    alert->enterModalState (true,
-        juce::ModalCallbackFunction::create ([safeThis, alert, file] (int result)
+    FreedomModalDialog::showInput (
+        *this, "Exportar Master como WAV",
+        "Cauda apos o fim do Arrangement (segundos):", "2.0", "Segundos",
+        { { "Exportar", 1, FreedomModalDialog::ButtonStyle::Primary },
+          { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+        [safeThis, file] (int result, juce::String tailText)
         {
             if (safeThis == nullptr || result != 1)
                 return;
 
-            const auto tailText = alert->getTextEditorContents ("tailSeconds")
-                                      .trim().replaceCharacter (',', '.');
+            tailText = tailText.trim().replaceCharacter (',', '.');
             const bool hasDigit = std::any_of (tailText.begin(), tailText.end(),
                 [] (juce::juce_wchar character) { return juce::CharacterFunctions::isDigit (character); });
             const double tailSeconds = tailText.getDoubleValue();
@@ -2569,7 +3533,7 @@ void MainComponent::showWavRenderOptions (const juce::File& file)
             }
 
             safeThis->startWavRender (file, tailSeconds);
-        }), true);
+        });
 }
 
 void MainComponent::startWavRender (const juce::File& file, double tailSeconds)
@@ -2602,7 +3566,7 @@ void MainComponent::startWavRender (const juce::File& file, double tailSeconds)
     const double bpm = engine.graph().getBpm();
     if (endBeat <= 0.0 || ! std::isfinite (bpm) || bpm <= 0.0)
     {
-        setProjectStatus ("O projeto nao possui audio ou clips para exportar.");
+        setProjectStatus ("O projeto nao possui audio ou clipes para exportar.");
         return;
     }
 
@@ -2690,14 +3654,12 @@ void MainComponent::offerRecoveryBeforeOpening (std::function<void()> continueSt
     }
 
     const juce::Component::SafePointer<MainComponent> safeThis (this);
-    juce::AlertWindow::showAsync (
-        juce::MessageBoxOptions()
-            .withIconType (juce::MessageBoxIconType::WarningIcon)
-            .withTitle ("Sessao de recuperacao encontrada")
-            .withMessage ("O Project Freedom encontrou uma copia automatica recente. Deseja recupera-la?")
-            .withButton ("Recuperar")
-            .withButton ("Descartar")
-            .withAssociatedComponent (this),
+    FreedomModalDialog::show (
+        *this, "Sessao de recuperacao encontrada",
+        "O Project Freedom encontrou uma copia automatica recente. Deseja recupera-la?",
+        FreedomModalDialog::Icon::Question,
+        { { "Recuperar", 1, FreedomModalDialog::ButtonStyle::Primary },
+          { "Descartar", 2, FreedomModalDialog::ButtonStyle::Secondary } },
         [safeThis, recoveryFile = files.front(), continueStartup = std::move (continueStartup)] (int result) mutable
         {
             if (safeThis == nullptr)
@@ -2726,15 +3688,13 @@ void MainComponent::requestClose (std::function<void()> onCloseApproved)
     }
 
     const juce::Component::SafePointer<MainComponent> safeThis (this);
-    juce::AlertWindow::showAsync (
-        juce::MessageBoxOptions()
-            .withIconType (juce::MessageBoxIconType::QuestionIcon)
-            .withTitle ("Salvar projeto?")
-            .withMessage ("Deseja salvar o projeto antes de fechar?")
-            .withButton ("Salvar")
-            .withButton ("Nao salvar")
-            .withButton ("Cancelar")
-            .withAssociatedComponent (this),
+    FreedomModalDialog::show (
+        *this, "Salvar projeto?",
+        "Deseja salvar o projeto antes de fechar?",
+        FreedomModalDialog::Icon::Question,
+        { { "Salvar", 1, FreedomModalDialog::ButtonStyle::Primary },
+          { "Nao salvar", 2, FreedomModalDialog::ButtonStyle::Secondary },
+          { "Cancelar", 3, FreedomModalDialog::ButtonStyle::Tertiary } },
         [safeThis, onCloseApproved = std::move (onCloseApproved)] (int result) mutable
         {
             if (safeThis == nullptr)
@@ -2967,6 +3927,8 @@ void MainComponent::loadProject (const juce::File& file, bool recovering)
 void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData data,
                                        const std::shared_ptr<TaskScope>& task, bool recovering)
 {
+    pendingMidiLearn.reset();
+    lastMidiButtonValues.clear();
     projectLoadTask = task;
     projectLoadWorkDone = 0;
     projectLoadWorkTotal = data.plugins.size();
@@ -3600,6 +4562,9 @@ void MainComponent::timerCallback()
 {
     updateComputerMidiKeyboard();
     updatePluginWindowNavigator();
+    for (const auto& gesture : engine.consumePluginParameterGestures())
+        handlePluginParameterGesture (gesture.trackId, gesture.deviceId,
+                                      gesture.parameterIndex, gesture.gestureIsStarting);
 
     const auto now = juce::Time::getMillisecondCounterHiRes();
     if (now >= nextRecoverySaveTime)
@@ -3838,12 +4803,17 @@ void MainComponent::duplicateSelectedTrack (int trackId)
 
     auto pluginStates = engine.getPluginStates();
     std::erase_if (pluginStates, [trackId] (const PluginState& state) { return state.trackId != trackId; });
+    project.beginExternalEdit();
     const auto duplicateId = project.duplicateTrack (trackId);
     if (duplicateId < 0)
+    {
+        project.cancelEdit();
         return;
+    }
 
     if (pluginStates.empty())
     {
+        project.endEdit();
         setProjectStatus ("Faixa duplicada.");
         return;
     }
@@ -3875,6 +4845,7 @@ void MainComponent::duplicateSelectedTrack (int trackId)
         {
             trackDuplicationInProgress = false;
             operation->task->end();
+            project.endEdit();
             setProjectStatus ("A faixa duplicada foi removida antes da copia dos dispositivos.");
             return;
         }
@@ -3889,6 +4860,7 @@ void MainComponent::duplicateSelectedTrack (int trackId)
             trackDuplicationInProgress = false;
             operation->task->setProgress (1.0);
             operation->task->end();
+            project.endEdit();
             refreshDeviceView();
             project.sendChangeMessage();
             setProjectStatus (operation->failures == 0
@@ -3980,10 +4952,22 @@ juce::String MainComponent::addNativeEffectToTrack (int trackId)
     if (project.track (trackId) == nullptr)
         return "Trilha inexistente.";
 
+    const auto existing = engine.devices (trackId);
+    if (std::any_of (existing.begin(), existing.end(), [] (const DeviceInfo& device)
+        {
+            return device.pluginIdentifier == AudioEngine::utilityPluginIdentifier;
+        }))
+        return "O Volume Master ja esta neste canal.";
+
+    project.beginExternalEdit();
     const int deviceId = engine.addUtility (trackId);
     if (deviceId <= 0)
+    {
+        project.cancelEdit();
         return "Nao foi possivel adicionar o Volume Master a esta trilha.";
+    }
 
+    project.endEdit();
     project.selectTrack (trackId);
     showDetail (true);
     refreshDeviceView();
@@ -4001,6 +4985,22 @@ void MainComponent::addNativeDrumRackToTrack (int trackId)
         return;
     }
 
+    const auto currentDevices = engine.devices (trackId);
+    if (std::any_of (currentDevices.begin(), currentDevices.end(), [] (const DeviceInfo& device)
+        {
+            return device.pluginIdentifier == AudioEngine::drumRackPluginIdentifier;
+        }))
+    {
+        const auto existing = std::find_if (currentDevices.begin(), currentDevices.end(),
+            [] (const DeviceInfo& device)
+            {
+                return device.pluginIdentifier == AudioEngine::drumRackPluginIdentifier;
+            });
+        openDeviceEditor (trackId, existing->id);
+        return;
+    }
+
+    project.beginExternalEdit();
     for (const auto& device : engine.devices (trackId))
         if (device.isInstrument)
         {
@@ -4010,10 +5010,12 @@ void MainComponent::addNativeDrumRackToTrack (int trackId)
     const int deviceId = engine.addDrumRack (trackId);
     if (deviceId <= 0)
     {
+        project.cancelEdit();
         browser.setStatus ("Nao foi possivel adicionar o Drum Rack a este canal.");
         return;
     }
 
+    project.endEdit();
     project.selectTrack (trackId);
     showDetail (true);
     refreshDeviceView();
@@ -4071,6 +5073,7 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
         taskRegistry, theme::ui ("Carregando ") + desc.name, target);
     browser.setStatus ("Carregando " + desc.name + "...");
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    project.beginExternalEdit();
     engine.addDevice (trackId, desc,
         [this, token, pluginTask, trackId] (const juce::String& error, int deviceId)
     {
@@ -4080,9 +5083,17 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
 
         if (error.isNotEmpty())
         {
+            project.cancelEdit();
             browser.setStatus ("Erro: " + error);
             return;
         }
+        if (deviceId <= 0)
+        {
+            project.cancelEdit();
+            browser.setStatus ("O plugin nao foi adicionado.");
+            return;
+        }
+        project.endEdit();
         browser.setStatus (juce::String (scanner.list().getNumTypes()) + " plugins encontrados");
         refreshDeviceView();
         project.sendChangeMessage();
@@ -4166,9 +5177,10 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 auto description = scanner.list().getTypeForIdentifierString (identifier);
                 if (description == nullptr || description->isInstrument)
                 {
-                    juce::AlertWindow::showMessageBoxAsync (
-                        juce::MessageBoxIconType::WarningIcon, "Efeito do pad",
-                        "Arraste um plugin de efeito de audio para o pad.");
+                    FreedomModalDialog::show (
+                        *this, "Efeito do pad", "Arraste um plugin de efeito de audio para o pad.",
+                        FreedomModalDialog::Icon::Warning,
+                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
                     return;
                 }
 
@@ -4181,8 +5193,9 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                             return;
                         if (error.isNotEmpty())
                         {
-                            juce::AlertWindow::showMessageBoxAsync (
-                                juce::MessageBoxIconType::WarningIcon, "Efeito do pad", error);
+                            FreedomModalDialog::show (
+                                *this, "Efeito do pad", error, FreedomModalDialog::Icon::Warning,
+                                { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
                             return;
                         }
                         if (safeEditor != nullptr)
@@ -4206,16 +5219,18 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 }
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
                 {
-                    juce::AlertWindow::showMessageBoxAsync (
-                        juce::MessageBoxIconType::InfoIcon, "Efeito do pad",
-                        "Este efeito nao possui uma interface grafica.");
+                    FreedomModalDialog::show (
+                        *this, "Efeito do pad", "Este efeito nao possui uma interface grafica.",
+                        FreedomModalDialog::Icon::Question,
+                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
                     return;
                 }
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::failed)
                 {
-                    juce::AlertWindow::showMessageBoxAsync (
-                        juce::MessageBoxIconType::WarningIcon, "Efeito do pad",
-                        "O processo isolado deste efeito foi encerrado.");
+                    FreedomModalDialog::show (
+                        *this, "Efeito do pad", "O processo isolado deste efeito foi encerrado.",
+                        FreedomModalDialog::Icon::Error,
+                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
                     return;
                 }
 
@@ -4232,9 +5247,10 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 auto editor = engine.createPadEffectEditor (trackId, deviceId, pad, effectIndex);
                 if (editor == nullptr)
                 {
-                    juce::AlertWindow::showMessageBoxAsync (
-                        juce::MessageBoxIconType::InfoIcon, "Efeito do pad",
-                        "Este efeito nao possui uma interface grafica.");
+                    FreedomModalDialog::show (
+                        *this, "Efeito do pad", "Este efeito nao possui uma interface grafica.",
+                        FreedomModalDialog::Icon::Question,
+                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
                     return;
                 }
 
@@ -4309,6 +5325,15 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
             {
                 const auto alive = token.lock();
                 return alive != nullptr && alive->load() && handleTransportKeyPress (key);
+            },
+            trackId, deviceId,
+            [this, token] (int parameterTrackId, int parameterDeviceId, int parameterIndex,
+                           bool gestureIsStarting)
+            {
+                const auto alive = token.lock();
+                if (alive != nullptr && alive->load())
+                    handlePluginParameterGesture (parameterTrackId, parameterDeviceId,
+                                                  parameterIndex, gestureIsStarting);
             });
         windows[deviceId] = std::move (window);
         if (computerMidiIndicator->isVisible())

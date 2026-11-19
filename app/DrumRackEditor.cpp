@@ -1,4 +1,6 @@
 #include "DrumRackEditor.h"
+#include "FreedomModalDialog.h"
+#include "Theme.h"
 
 namespace
 {
@@ -32,8 +34,8 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
 {
     title.setText ("Drum Rack - 15 teclas MIDI", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centredLeft);
-    title.setColour (juce::Label::textColourId, juce::Colours::white);
-    selectedPadLabel.setColour (juce::Label::textColourId, juce::Colours::white);
+    title.setColour (juce::Label::textColourId, theme::text());
+    selectedPadLabel.setColour (juce::Label::textColourId, theme::text());
     selectedPadLabel.setFont (juce::FontOptions (14.0f, juce::Font::bold));
 
     addAndMakeVisible (title);
@@ -82,11 +84,13 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
     clearButton.onClick = [this]
     {
         juce::Component::SafePointer<DrumRackEditor> safeThis (this);
-        juce::AlertWindow::showOkCancelBox (
-            juce::AlertWindow::WarningIcon, "Limpar todos os pads?",
+        FreedomModalDialog::show (
+            *this, "Limpar todos os pads?",
             "Isso remove os samples dos 15 pads. Use Desfazer para restaurar.",
-            "Limpar todos", "Cancelar", this,
-            juce::ModalCallbackFunction::create ([safeThis] (int result)
+            FreedomModalDialog::Icon::Warning,
+            { { "Limpar todos", 1, FreedomModalDialog::ButtonStyle::Primary },
+              { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+            [safeThis] (int result)
             {
                 if (safeThis == nullptr || result == 0)
                     return;
@@ -94,7 +98,7 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
                 safeThis->refreshPadLabels();
                 safeThis->refreshPadControls();
                 safeThis->refreshHistoryButtons();
-            }));
+            });
     };
     undoButton.onClick = [this]
     {
@@ -175,8 +179,8 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
         auto button = std::make_unique<juce::TextButton>();
         button->onClick = [this, index] { selectPad (index); };
         button->setMouseClickGrabsKeyboardFocus (false);
-        button->setColour (juce::TextButton::buttonColourId, juce::Colour (0xffe1e3e8));
-        button->setColour (juce::TextButton::textColourOffId, juce::Colour (0xff202127));
+        button->setColour (juce::TextButton::buttonColourId, theme::control());
+        button->setColour (juce::TextButton::textColourOffId, theme::text());
         addAndMakeVisible (*button);
         pads[static_cast<std::size_t> (index)] = std::move (button);
     }
@@ -199,7 +203,7 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
 
 void DrumRackEditor::paint (juce::Graphics& graphics)
 {
-    graphics.fillAll (juce::Colour (0xff202127));
+    graphics.fillAll (theme::background());
 }
 
 void DrumRackEditor::resized()
@@ -238,8 +242,8 @@ void DrumRackEditor::resized()
                                  : semitone == 10 ? 5 : 7;
         const int sharpWidth = keyWidth * 2 / 3;
         const int x = grid.getX() + whiteKeyColumn * keyWidth + (keyWidth - sharpWidth) / 2;
-        pads[pad]->setColour (juce::TextButton::buttonColourId, juce::Colour (0xff343741));
-        pads[pad]->setColour (juce::TextButton::textColourOffId, juce::Colours::white);
+        pads[pad]->setColour (juce::TextButton::buttonColourId, theme::panel());
+        pads[pad]->setColour (juce::TextButton::textColourOffId, theme::textDim());
         pads[pad]->setBounds (x, grid.getY() + 2, sharpWidth, rowHeight - 4);
     }
 
@@ -370,8 +374,9 @@ void DrumRackEditor::chooseSample()
             juce::String error;
             if (! safeThis->processor.loadPadFromFile (safeThis->selectedPad, file, error))
             {
-                juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-                                                        "Drum Rack", error);
+                FreedomModalDialog::show (
+                    *safeThis.getComponent(), "Drum Rack", error, FreedomModalDialog::Icon::Warning,
+                    { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
                 return;
             }
             safeThis->refreshPadLabels();
@@ -495,8 +500,9 @@ bool DrumRackEditor::loadSampleIntoPad (int pad, const juce::File& file)
     juce::String error;
     if (! processor.loadPadFromFile (pad, file, error))
     {
-        juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon,
-                                                "Drum Rack", error);
+        FreedomModalDialog::show (
+            *this, "Drum Rack", error, FreedomModalDialog::Icon::Warning,
+            { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
         refreshPadLabels();
         return false;
     }
@@ -530,13 +536,10 @@ void DrumRackEditor::refreshPadLabels()
         const bool sharp = isSharpPad (pad);
         const bool flashing = padIsFlashing[static_cast<std::size_t> (pad)];
         button->setColour (juce::TextButton::buttonColourId,
-                           pad == dropTargetPad ? juce::Colour (0xff668f89)
-                           : flashing ? juce::Colour (0xff3976bd)
-                           : pad == selectedPad ? juce::Colour (0xff486b67)
-                           : sharp ? juce::Colour (0xff343741) : juce::Colour (0xffe1e3e8));
-        button->setColour (juce::TextButton::textColourOffId,
-                           pad == dropTargetPad || flashing || pad == selectedPad || sharp
-                               ? juce::Colours::white : juce::Colour (0xff202127));
+                           pad == dropTargetPad ? theme::accentHover()
+                           : flashing || pad == selectedPad ? theme::accent()
+                           : sharp ? theme::panel() : theme::control());
+        button->setColour (juce::TextButton::textColourOffId, theme::text());
     }
 }
 

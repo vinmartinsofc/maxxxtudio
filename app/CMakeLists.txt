@@ -1,17 +1,32 @@
+set(PROJECT_FREEDOM_APP_ICON_ARGS)
+if(NOT WIN32)
+    list(APPEND PROJECT_FREEDOM_APP_ICON_ARGS
+        ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app/project-freedom.png"
+        ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app/project-freedom.png")
+endif()
+
 juce_add_gui_app(ProjectFreedom
     PRODUCT_NAME "Project Freedom"
     COMPANY_NAME "rjc"
-    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app/project-freedom.png"
-    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app/project-freedom.png"
+    ${PROJECT_FREEDOM_APP_ICON_ARGS}
     VERSION ${PROJECT_VERSION})
+
+if(WIN32)
+    configure_file (ProjectFreedomIcon.rc.in
+                    "${CMAKE_CURRENT_BINARY_DIR}/ProjectFreedomIcon.rc" @ONLY)
+    target_sources (ProjectFreedom PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/ProjectFreedomIcon.rc")
+endif()
 
 file(GLOB_RECURSE PROJECT_FREEDOM_ICON_FILES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/*.svg")
+list(APPEND PROJECT_FREEDOM_ICON_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app/project-freedom.png")
 juce_add_binary_data(ProjectFreedomIcons SOURCES ${PROJECT_FREEDOM_ICON_FILES})
 
 target_sources(ProjectFreedom PRIVATE
     Main.cpp
     Icons.cpp
+    FreedomModalDialog.cpp
     ProjectModel.cpp
     ArrangementView.cpp
     DeviceView.cpp
@@ -41,6 +56,7 @@ target_compile_definitions(ProjectFreedom PRIVATE
     JUCE_USE_CURL=0
     JUCE_PLUGINHOST_VST=0
     JUCE_PLUGINHOST_VST3=1
+    JUCE_WIN_PER_MONITOR_DPI_AWARE=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:ProjectFreedom,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:ProjectFreedom,JUCE_VERSION>")
 
@@ -57,6 +73,11 @@ target_link_libraries(ProjectFreedom
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 
+if(MSVC)
+    target_link_options(ProjectFreedom PRIVATE
+        "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/ProjectFreedom.manifest")
+endif()
+
 juce_add_gui_app(ProjectFreedomPluginWorker
     PRODUCT_NAME "Project Freedom Plugin Worker"
     COMPANY_NAME "rjc"
@@ -67,11 +88,17 @@ target_sources(ProjectFreedomPluginWorker PRIVATE
     PluginWorkerRuntime.cpp
     PluginScanRuntime.cpp)
 
+if(WIN32)
+    target_sources(ProjectFreedomPluginWorker PRIVATE
+        "${CMAKE_CURRENT_BINARY_DIR}/ProjectFreedomIcon.rc")
+endif()
+
 target_compile_definitions(ProjectFreedomPluginWorker PRIVATE
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_PLUGINHOST_VST=0
     JUCE_PLUGINHOST_VST3=1
+    JUCE_WIN_PER_MONITOR_DPI_AWARE=1
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:ProjectFreedomPluginWorker,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:ProjectFreedomPluginWorker,JUCE_VERSION>")
 
@@ -83,6 +110,11 @@ target_link_libraries(ProjectFreedomPluginWorker
         juce::juce_gui_basics
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
+
+if(MSVC)
+    target_link_options(ProjectFreedomPluginWorker PRIVATE
+        "/MANIFESTINPUT:${CMAKE_CURRENT_SOURCE_DIR}/ProjectFreedom.manifest")
+endif()
 
 set_target_properties(ProjectFreedomPluginWorker PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/app/ProjectFreedom_artefacts/$<CONFIG>")
@@ -136,6 +168,7 @@ if(ROLL_BUILD_TESTS)
         ../tests/TaskRegistryTests.cpp
         ActivityIndicator.cpp
         DeviceView.cpp
+        Icons.cpp
         TaskRegistry.cpp)
     target_include_directories(task_registry_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(task_registry_tests PRIVATE
@@ -145,6 +178,7 @@ if(ROLL_BUILD_TESTS)
     target_link_libraries(task_registry_tests
         PRIVATE
             roll_core
+            ProjectFreedomIcons
             Catch2::Catch2WithMain
             juce::juce_gui_basics
             juce::juce_recommended_config_flags
@@ -157,6 +191,7 @@ if(ROLL_BUILD_TESTS)
         RemotePluginProcessor.cpp
         DrumRackProcessor.cpp
         DrumRackEditor.cpp
+        FreedomModalDialog.cpp
         NativeEffectProcessors.cpp)
     target_include_directories(audio_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(audio_engine_tests PRIVATE
