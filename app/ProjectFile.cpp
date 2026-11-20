@@ -53,6 +53,8 @@ std::size_t trackWorkUnits (const roll::Track& track)
     for (const auto& clip : track.clips)
         count += 1 + clip->clip.notes().size() + clip->clip.pianoRollLocators().size();
     count += track.audioClips.size();
+    for (const auto& clip : track.audioClips)
+        count += clip->warpMarkers.size();
     return count;
 }
 
@@ -78,6 +80,10 @@ std::size_t xmlWorkUnits (const juce::XmlElement& xml)
                 else if (child->hasTagName ("AudioClip"))
                 {
                     ++count;
+                    for (auto* marker = child->getFirstChildElement(); marker != nullptr;
+                         marker = marker->getNextElement())
+                        if (marker->hasTagName ("WarpMarker"))
+                            ++count;
                 }
                 else if (child->hasTagName ("Automation"))
                 {
@@ -186,12 +192,17 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
             case roll::AutomationParameterType::Pan: targetNode->setAttribute ("type", "pan"); break;
             case roll::AutomationParameterType::Mute: targetNode->setAttribute ("type", "mute"); break;
             case roll::AutomationParameterType::PluginParameter: targetNode->setAttribute ("type", "plugin"); break;
+            case roll::AutomationParameterType::AudioClipGain: targetNode->setAttribute ("type", "audioGain"); break;
+            case roll::AutomationParameterType::AudioClipPitch: targetNode->setAttribute ("type", "audioPitch"); break;
+            case roll::AutomationParameterType::AudioClipFadeIn: targetNode->setAttribute ("type", "audioFadeIn"); break;
+            case roll::AutomationParameterType::AudioClipFadeOut: targetNode->setAttribute ("type", "audioFadeOut"); break;
         }
         targetNode->setAttribute ("pluginIdentifier", stringFromUtf8 (envelope.target.pluginIdentifier));
         targetNode->setAttribute ("parameterId", stringFromUtf8 (envelope.target.parameterId));
         targetNode->setAttribute ("parameterName", stringFromUtf8 (envelope.target.parameterName));
         targetNode->setAttribute ("parameterIndex", envelope.target.parameterIndex);
         targetNode->setAttribute ("deviceIndex", envelope.target.deviceIndex);
+        targetNode->setAttribute ("clipId", envelope.target.clipId);
         targetNode->setAttribute ("currentValue", envelope.target.currentValue);
         for (const auto& point : envelope.points)
         {
@@ -257,6 +268,9 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
 
     for (const auto& clip : track.audioClips)
     {
+        if (! roll::isValidAudioWarpMarkers (clip->warpMarkers, clip->sourceOffsetSeconds,
+                                              clip->durationSeconds, clip->lengthBeats))
+            throw std::runtime_error ("An audio clip contains invalid warp markers.");
         const auto sourcePath = clip->filePath;
         const auto asset = collectAudioAsset (stringFromUtf8 (sourcePath), projectFolder, assetFolder,
                                               copiedAssets, assetNames);
@@ -274,8 +288,20 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
         audioNode->setAttribute ("sourceBpm", clip->sourceBpm);
         audioNode->setAttribute ("enabled", clip->enabled);
         audioNode->setAttribute ("warpEnabled", clip->warpEnabled);
+        audioNode->setAttribute ("pitchSemitones", clip->pitchSemitones);
+        audioNode->setAttribute ("pitchCents", clip->pitchCents);
+        audioNode->setAttribute ("gainDb", clip->gainDb);
+        audioNode->setAttribute ("warpMode", clip->warpMode);
+        audioNode->setAttribute ("reverse", clip->reverse);
         audioNode->setAttribute ("name", stringFromUtf8 (clip->name));
         audioNode->setAttribute ("file", asset);
+        for (const auto& marker : clip->warpMarkers)
+        {
+            auto* markerNode = audioNode->createNewChildElement ("WarpMarker");
+            markerNode->setAttribute ("sourceSeconds", marker.sourceSeconds);
+            markerNode->setAttribute ("beat", marker.beat);
+            progress.completeUnit();
+        }
         progress.completeUnit();
     }
     progress.completeUnit();
@@ -332,6 +358,14 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
                 envelope.target.type = roll::AutomationParameterType::Mute;
             else if (targetType == "plugin")
                 envelope.target.type = roll::AutomationParameterType::PluginParameter;
+            else if (targetType == "audioGain")
+                envelope.target.type = roll::AutomationParameterType::AudioClipGain;
+            else if (targetType == "audioPitch")
+                envelope.target.type = roll::AutomationParameterType::AudioClipPitch;
+            else if (targetType == "audioFadeIn")
+                envelope.target.type = roll::AutomationParameterType::AudioClipFadeIn;
+            else if (targetType == "audioFadeOut")
+                envelope.target.type = roll::AutomationParameterType::AudioClipFadeOut;
             else
                 return false;
 
@@ -340,6 +374,7 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
             envelope.target.parameterName = targetNode->getStringAttribute ("parameterName").toStdString();
             envelope.target.parameterIndex = targetNode->getIntAttribute ("parameterIndex", -1);
             envelope.target.deviceIndex = targetNode->getIntAttribute ("deviceIndex", -1);
+            envelope.target.clipId = targetNode->getIntAttribute ("clipId", -1);
             envelope.target.currentValue = targetNode->getDoubleAttribute ("currentValue", 0.0);
             for (auto* pointNode = child->getFirstChildElement(); pointNode != nullptr;
                  pointNode = pointNode->getNextElement())
@@ -484,6 +519,27 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
             clip->fadeOutCurve = fadeOutCurve;
             clip->enabled = child->getBoolAttribute ("enabled", true);
             clip->warpEnabled = child->getBoolAttribute ("warpEnabled", true);
+            clip->pitchSemitones = child->getDoubleAttribute ("pitchSemitones", 0.0);
+            clip->pitchCents = child->getDoubleAttribute ("pitchCents", 0.0);
+            clip->gainDb = child->getDoubleAttribute ("gainDb", 0.0);
+            clip->warpMode = child->getIntAttribute ("warpMode", 0);
+            clip->reverse = child->getBoolAttribute ("reverse", false);
+            for (auto* markerNode = child->getFirstChildElement(); markerNode != nullptr;
+                 markerNode = markerNode->getNextElement())
+            {
+                if (! markerNode->hasTagName ("WarpMarker"))
+                    continue;
+                clip->warpMarkers.push_back ({
+                    markerNode->getDoubleAttribute ("sourceSeconds",
+                        std::numeric_limits<double>::quiet_NaN()),
+                    markerNode->getDoubleAttribute ("beat",
+                        std::numeric_limits<double>::quiet_NaN())
+                });
+                progress.completeUnit();
+            }
+            if (! roll::isValidAudioWarpMarkers (clip->warpMarkers, clip->sourceOffsetSeconds,
+                                                  clip->durationSeconds, clip->lengthBeats))
+                return false;
             if (! source.existsAsFile())
                 missingAudioFiles.push_back (source);
             progress.completeUnit();

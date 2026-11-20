@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <map>
 #include <set>
 #include <utility>
 
@@ -27,7 +28,7 @@ namespace
 {
 struct ThemeColours
 {
-    std::array<juce::Colour, 12> values;
+    std::array<juce::Colour, 16> values;
 };
 
 ThemeColours currentThemeColours()
@@ -35,7 +36,9 @@ ThemeColours currentThemeColours()
     return {{
         theme::background(), theme::panel(), theme::panelLight(), theme::control(),
         theme::hover(), theme::pressed(), theme::border(), theme::text(), theme::textDim(),
-        theme::accent(), theme::accentHover(), theme::recording()
+        theme::accent(), theme::accentHover(), theme::recording(),
+        juce::Colour (0xff1685ff), juce::Colour (0xff3d9cff),
+        juce::Colour (0xff27c96b), juce::Colour (0xff4adf88)
     }};
 }
 
@@ -235,29 +238,6 @@ std::shared_ptr<AudioFileData> createGroovePreviewAudio (const roll::GrooveTempl
     }
 
     return preview;
-}
-
-double sourceBpmFromFileName (const juce::File& file, double fallback)
-{
-    const auto name = file.getFileNameWithoutExtension().toLowerCase();
-    const int marker = name.indexOf ("bpm");
-    if (marker <= 0)
-        return fallback;
-
-    int numberEnd = marker;
-    while (numberEnd > 0 && (name[numberEnd - 1] == ' ' || name[numberEnd - 1] == '_' || name[numberEnd - 1] == '-'))
-        --numberEnd;
-    int start = numberEnd;
-    while (start > 0)
-    {
-        const auto character = name[start - 1];
-        if (character < '0' || character > '9')
-            break;
-        --start;
-    }
-
-    const double bpm = name.substring (start, numberEnd).getDoubleValue();
-    return bpm >= 20.0 && bpm <= 300.0 ? bpm : fallback;
 }
 
 bool isProjectFile (const juce::File& file)
@@ -850,7 +830,7 @@ MainComponent::MainComponent()
     tooltipWindow = std::make_unique<juce::TooltipWindow> (this, 450);
     tooltipWindow->setColour (juce::TooltipWindow::backgroundColourId, theme::panel());
     tooltipWindow->setColour (juce::TooltipWindow::textColourId, theme::text());
-    tooltipWindow->setColour (juce::TooltipWindow::outlineColourId, theme::accent());
+    tooltipWindow->setColour (juce::TooltipWindow::outlineColourId, theme::border());
 
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
     engine.onPluginCrashed = [this, token] (int, int, const juce::String& pluginName)
@@ -955,6 +935,76 @@ MainComponent::MainComponent()
     {
         project.setAudioClipWarpEnabled (project.selectedTrackId, project.selectedAudioClipId, enabled);
     };
+    audioClipEditor.onWarpMarkersChanged = [this] (const auto& markers)
+    {
+        return project.setAudioClipWarpMarkers (
+            project.selectedTrackId, project.selectedAudioClipId, markers);
+    };
+    audioClipEditor.onSplitAtPlayhead = [this]
+    {
+        if (project.selectedTrackId >= 0 && project.selectedAudioClipId >= 0)
+        {
+            project.splitAudioClip (project.selectedTrackId,
+                                    project.selectedAudioClipId,
+                                    arrangement.snapBeat (arrangement.getPlayhead()));
+        }
+    };
+    audioClipEditor.onJoinWithNext = [this]
+    {
+        if (project.selectedTrackId < 0 || project.selectedAudioClipId < 0)
+            return false;
+        auto* track = project.track (project.selectedTrackId);
+        auto* left = track != nullptr ? track->findAudioClip (project.selectedAudioClipId) : nullptr;
+        if (track == nullptr || left == nullptr)
+            return false;
+        roll::AudioPlacement* right = nullptr;
+        int rightId = -1;
+        for (auto& candidate : track->audioClips)
+            if (candidate != nullptr && candidate.get() != left
+                && std::abs (candidate->start - left->end()) < 1.0e-7)
+            {
+                right = candidate.get();
+                rightId = candidate->id;
+                break;
+            }
+        return right != nullptr
+            && project.joinAudioClips (project.selectedTrackId, left->id, rightId);
+    };
+    audioClipEditor.onFadesChanged = [this] (double fadeIn, double fadeOut)
+    {
+        return project.setAudioClipFades (project.selectedTrackId,
+                                          project.selectedAudioClipId,
+                                          fadeIn, fadeOut);
+    };
+    audioClipEditor.onPlaybackChanged = [this] (
+        double pitchSemitones, double pitchCents, double gainDb,
+        int warpMode, bool reverse)
+    {
+        return project.setAudioClipPlayback (
+            project.selectedTrackId, project.selectedAudioClipId,
+            pitchSemitones, pitchCents, gainDb, warpMode, reverse);
+    };
+    audioClipEditor.onAutomationParameterChanged =
+        [this] (juce::String parameterName, double value)
+    {
+        if (! arrangement.getAutomationMode()) return;
+        const int trackId = project.selectedTrackId;
+        const int clipId = project.selectedAudioClipId;
+        roll::AutomationParameterType type = roll::AutomationParameterType::AudioClipGain;
+        if (parameterName == "Pitch")
+            type = roll::AutomationParameterType::AudioClipPitch;
+        else if (parameterName == "Fade entrada")
+            type = roll::AutomationParameterType::AudioClipFadeIn;
+        else if (parameterName == "Fade saida")
+            type = roll::AutomationParameterType::AudioClipFadeOut;
+        arrangement.selectAudioClipAutomationParameter (trackId, clipId, type, value);
+    };
+    audioClipEditor.onAutomationGestureStarted = [this]
+    {
+        if (arrangement.getAutomationMode())
+            project.beginEdit();
+    };
+    audioClipEditor.onAutomationGestureEnded = [this] { project.endEdit(); };
 
     // botoes nao roubam o foco do teclado (Espaco continua sendo play/pause)
     for (auto* b : { &scaleButton, &highlightButton, &foldButton, &foldScaleButton, &drawButton, &snapButton, &previewButton,
@@ -1033,6 +1083,10 @@ MainComponent::MainComponent()
     };
     project.onAudioClipsChanged = [this] (int id) { publishAudioTrack (id); };
     project.onMixerChanged = [this] { applyMixers(); };
+    project.onAudioClipAutomationChanged = [this] (int trackId)
+    {
+        publishAudioTrack (trackId);
+    };
     project.onSelectionChanged = [this] { onSelectionChanged(); };
     project.onLoopChanged = [this] { engine.graph().setLoopRegion (project.loopStart, project.loopEnd); };
     arrangement.onMidiLearnRequested = [this] (int trackId, MidiMappingTarget target)
@@ -1185,6 +1239,57 @@ MainComponent::MainComponent()
     arrangement.automationParametersProvider = [this] (int trackId)
     {
         std::vector<ArrangementView::AutomationParameterChoice> choices;
+        if (const auto* track = project.track (trackId))
+        {
+            for (const auto& clip : track->audioClips)
+            {
+                const auto name = juce::String::fromUTF8 (clip->name.c_str());
+                choices.push_back ({
+                    [&]
+                    {
+                        roll::AutomationTarget target;
+                        target.type = roll::AutomationParameterType::AudioClipGain;
+                        target.currentValue = clip->gainDb;
+                        target.clipId = clip->id;
+                        return target;
+                    }(),
+                    name + " : Gain"
+                });
+                choices.push_back ({
+                    [&]
+                    {
+                        roll::AutomationTarget target;
+                        target.type = roll::AutomationParameterType::AudioClipPitch;
+                        target.currentValue = clip->pitchSemitones + clip->pitchCents / 100.0;
+                        target.clipId = clip->id;
+                        return target;
+                    }(),
+                    name + " : Pitch"
+                });
+                choices.push_back ({
+                    [&]
+                    {
+                        roll::AutomationTarget target;
+                        target.type = roll::AutomationParameterType::AudioClipFadeIn;
+                        target.currentValue = clip->fadeInBeats;
+                        target.clipId = clip->id;
+                        return target;
+                    }(),
+                    name + " : Fade entrada"
+                });
+                choices.push_back ({
+                    [&]
+                    {
+                        roll::AutomationTarget target;
+                        target.type = roll::AutomationParameterType::AudioClipFadeOut;
+                        target.currentValue = clip->fadeOutBeats;
+                        target.clipId = clip->id;
+                        return target;
+                    }(),
+                    name + " : Fade saida"
+                });
+            }
+        }
         const auto devices = engine.devices (trackId);
         for (std::size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex)
         {
@@ -1277,6 +1382,79 @@ MainComponent::MainComponent()
             target = existing != project.tracks.end() ? existing->get() : project.addTrack (roll::TrackType::Audio);
         }
         loadAudioFile (file, target->id, beat);
+    };
+    arrangement.onMidiDropped = [this] (const juce::File& file, int trackId, double beat)
+    {
+        juce::FileInputStream input (file);
+        juce::MidiFile midi;
+        if (! input.openedOk() || ! midi.readFrom (input))
+        {
+            setProjectStatus ("Nao foi possivel ler o arquivo MIDI.");
+            return;
+        }
+
+        auto* target = project.track (trackId);
+        if (target == nullptr || target->type != roll::TrackType::Midi)
+        {
+            target = project.addTrack (roll::TrackType::Midi);
+            if (target != nullptr)
+                trackId = target->id;
+        }
+        if (target == nullptr)
+            return;
+
+        const double ticksPerQuarter = std::max (1.0,
+            static_cast<double> (midi.getTimeFormat()));
+        std::vector<roll::Note> notes;
+        double clipLength = 1.0;
+        for (int trackIndex = 0; trackIndex < midi.getNumTracks(); ++trackIndex)
+        {
+            const auto* events = midi.getTrack (trackIndex);
+            if (events == nullptr)
+                continue;
+            std::map<int, std::pair<double, int>> activeNotes;
+            for (int eventIndex = 0; eventIndex < events->getNumEvents(); ++eventIndex)
+            {
+                const auto& event = events->getEventPointer (eventIndex)->message;
+                const double startBeats = event.getTimeStamp() / ticksPerQuarter;
+                clipLength = std::max (clipLength, startBeats + 0.25);
+                if (event.isNoteOn())
+                {
+                    activeNotes[event.getNoteNumber()] = {
+                        startBeats, std::clamp (static_cast<int> (event.getVelocity()), 1, 127)
+                    };
+                }
+                else if (event.isNoteOff())
+                {
+                    const auto active = activeNotes.find (event.getNoteNumber());
+                    if (active == activeNotes.end())
+                        continue;
+                    const double length = std::max (1.0 / 64.0, startBeats - active->second.first);
+                    notes.push_back ({ event.getNoteNumber(), active->second.first,
+                                       length, active->second.second });
+                    clipLength = std::max (clipLength, startBeats);
+                    activeNotes.erase (active);
+                }
+            }
+        }
+        if (notes.empty())
+        {
+            setProjectStatus ("O arquivo MIDI nao possui notas.");
+            return;
+        }
+
+        project.beginEdit();
+        auto* clip = project.addClip (trackId, beat, clipLength);
+        if (clip != nullptr)
+        {
+            clip->name = file.getFileNameWithoutExtension().toStdString();
+            clip->clip.setNotes (std::move (notes));
+            project.notifyTrackNotes (trackId);
+        }
+        project.endEdit();
+        setProjectStatus (clip != nullptr
+            ? "MIDI importado: " + file.getFileName()
+            : "Nao foi possivel inserir o MIDI nesse ponto.");
     };
     arrangement.onAudioClipDoubleClicked = [this] (int trackId, int clipId)
     {
@@ -2444,10 +2622,15 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
 
         const auto path = file.getFullPathName().toStdString();
         audioAssets[path] = data;
-        const double sourceBpm = sourceBpmFromFileName (file, engine.graph().getBpm());
+        const double projectBpm = engine.graph().getBpm();
+        const double sourceBpm = data->estimatedBpm >= 20.0
+            ? data->estimatedBpm : projectBpm;
+        if (data->estimatedBpm >= 20.0
+            && std::abs (projectBpm - sourceBpm) > 1.0e-6)
+            transport.setBpm (sourceBpm);
         const double lengthBeats = data->durationSeconds * sourceBpm / 60.0;
         const double edgeFadeBeats = createFadesOnClipEdges
-            ? engine.graph().getBpm() * 0.004 / 60.0 : 0.0;
+            ? projectBpm * 0.004 / 60.0 : 0.0;
         if (project.addAudioClipReplacingRange (trackId, startBeat, lengthBeats, path,
                                                 file.getFileName().toStdString(), data->waveform,
                                                 data->durationSeconds, sourceBpm, edgeFadeBeats) == nullptr)
@@ -2736,10 +2919,22 @@ void MainComponent::publishAudioTrack (int trackId)
         for (const auto& clip : track->audioClips)
             if (clip->enabled)
                 if (const auto asset = audioAssets.find (clip->filePath); asset != audioAssets.end())
-                    clips.push_back ({ clip->start, clip->lengthBeats, clip->sourceBpm,
-                                       clip->sourceOffsetSeconds, clip->fadeInBeats,
-                                       clip->fadeOutBeats, clip->fadeInCurve, clip->fadeOutCurve,
-                                       asset->second, clip->warpEnabled });
+                {
+                    AudioClipPlayback playback {
+                        clip->start, clip->lengthBeats, clip->sourceBpm,
+                        clip->sourceOffsetSeconds, clip->fadeInBeats,
+                        clip->fadeOutBeats, clip->fadeInCurve, clip->fadeOutCurve,
+                        clip->pitchSemitones + clip->pitchCents / 100.0,
+                        clip->gainDb, clip->warpMode, asset->second,
+                        clip->warpEnabled, clip->reverse
+                    };
+                    playback.durationSeconds = clip->durationSeconds;
+                    playback.warpMarkers = clip->warpMarkers;
+                    for (const auto& envelope : track->automation)
+                        if (envelope.target.clipId == clip->id)
+                            playback.automation.push_back (envelope);
+                    clips.push_back (std::move (playback));
+                }
     engine.publishAudioClips (trackId, clips);
 
     for (auto it = audioAssets.begin(); it != audioAssets.end();)
@@ -3445,11 +3640,15 @@ void MainComponent::showOptionsWindow()
                                             theme::border(), theme::text(), theme::control(),
                                             juce::Colours::black, theme::accent(), theme::text() });
                     laf->setColour (juce::ResizableWindow::backgroundColourId, theme::background());
+                    laf->setColour (juce::BubbleComponent::backgroundColourId, theme::panel());
+                    laf->setColour (juce::BubbleComponent::outlineColourId, theme::border());
                     laf->setColour (juce::TextButton::buttonColourId, theme::control());
                     laf->setColour (juce::TextButton::buttonOnColourId, theme::accent());
                     laf->setColour (juce::TextButton::textColourOffId, theme::text());
                     laf->setColour (juce::TextButton::textColourOnId, theme::text());
+                    laf->setColour (juce::TooltipWindow::backgroundColourId, theme::panel());
                     laf->setColour (juce::TooltipWindow::textColourId, theme::text());
+                    laf->setColour (juce::TooltipWindow::outlineColourId, theme::border());
                     laf->setColour (juce::ComboBox::backgroundColourId, theme::control());
                     laf->setColour (juce::ComboBox::textColourId, theme::text());
                     laf->setColour (juce::ComboBox::outlineColourId, theme::controlBorder());
@@ -3459,6 +3658,13 @@ void MainComponent::showOptionsWindow()
                     laf->setColour (juce::PopupMenu::textColourId, theme::text());
                     laf->setColour (juce::PopupMenu::highlightedBackgroundColourId, theme::accent());
                     laf->setColour (juce::PopupMenu::highlightedTextColourId, theme::text());
+                }
+
+                if (tooltipWindow != nullptr)
+                {
+                    tooltipWindow->setColour (juce::TooltipWindow::backgroundColourId, theme::panel());
+                    tooltipWindow->setColour (juce::TooltipWindow::textColourId, theme::text());
+                    tooltipWindow->setColour (juce::TooltipWindow::outlineColourId, theme::border());
                 }
 
                 if (mainWindow != nullptr)

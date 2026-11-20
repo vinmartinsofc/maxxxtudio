@@ -12,7 +12,10 @@ namespace roll
 {
 enum class TrackType { Midi, Audio, Group };
 enum class TrackOutputRouting { Master, ExtOut };
-enum class AutomationParameterType { Volume, Pan, Mute, PluginParameter };
+enum class AutomationParameterType {
+    Volume, Pan, Mute, PluginParameter,
+    AudioClipGain, AudioClipPitch, AudioClipFadeIn, AudioClipFadeOut
+};
 
 struct AutomationTarget
 {
@@ -20,13 +23,20 @@ struct AutomationTarget
     std::string pluginIdentifier, parameterId, parameterName;
     int parameterIndex = -1, deviceIndex = -1;
     double currentValue = 0.0;
+    int clipId = -1;
 
     bool operator== (const AutomationTarget& other) const
     {
         if (type != other.type)
             return false;
         if (type != AutomationParameterType::PluginParameter)
-            return true;
+            if (type == AutomationParameterType::AudioClipGain
+                || type == AutomationParameterType::AudioClipPitch
+                || type == AutomationParameterType::AudioClipFadeIn
+                || type == AutomationParameterType::AudioClipFadeOut)
+                return clipId < 0 || other.clipId < 0 || clipId == other.clipId;
+            else
+                return true;
         return pluginIdentifier == other.pluginIdentifier
             && (deviceIndex < 0 || other.deviceIndex < 0 || deviceIndex == other.deviceIndex)
             && (parameterId.empty() ? parameterIndex == other.parameterIndex
@@ -71,6 +81,10 @@ inline std::pair<double, double> automationValueRange (AutomationParameterType t
         case AutomationParameterType::Pan: return { -1.0, 1.0 };
         case AutomationParameterType::Mute: return { 0.0, 1.0 };
         case AutomationParameterType::PluginParameter: return { 0.0, 1.0 };
+        case AutomationParameterType::AudioClipGain: return { -24.0, 24.0 };
+        case AutomationParameterType::AudioClipPitch: return { -25.0, 25.0 };
+        case AutomationParameterType::AudioClipFadeIn: return { 0.0, 64.0 };
+        case AutomationParameterType::AudioClipFadeOut: return { 0.0, 64.0 };
     }
     return { 0.0, 1.0 };
 }
@@ -84,6 +98,12 @@ inline bool isValidAutomationEnvelope (const AutomationEnvelope& envelope)
         && (envelope.target.pluginIdentifier.empty()
             || envelope.target.deviceIndex < -1
             || (envelope.target.parameterId.empty() && envelope.target.parameterIndex < 0)))
+        return false;
+    if ((envelope.target.type == AutomationParameterType::AudioClipGain
+         || envelope.target.type == AutomationParameterType::AudioClipPitch
+         || envelope.target.type == AutomationParameterType::AudioClipFadeIn
+         || envelope.target.type == AutomationParameterType::AudioClipFadeOut)
+        && envelope.target.clipId < 1)
         return false;
 
     const auto [minimum, maximum] = automationValueRange (envelope.target.type);
@@ -121,6 +141,14 @@ struct WaveformRange
     friend bool operator== (const WaveformRange&, const WaveformRange&) = default;
 };
 
+struct AudioWarpMarker
+{
+    double sourceSeconds = 0.0;
+    double beat = 0.0;
+
+    friend bool operator== (const AudioWarpMarker&, const AudioWarpMarker&) = default;
+};
+
 inline double audioFadeCurveValue (double progress, double curve)
 {
     const double t = std::clamp (progress, 0.0, 1.0);
@@ -143,13 +171,75 @@ struct AudioPlacement
     double      fadeInCurve = 0.0;
     double      fadeOutCurve = 0.0;
     double      sourceBpm = 120.0;
+    double pitchSemitones = 0.0;
+    double pitchCents = 0.0;
+    double gainDb = 0.0;
+    int warpMode = 0; // Beats, Tones, Texture, Re-Pitch, Complex, Complex Pro
     bool        enabled = true;
     bool        warpEnabled = true;
+    bool        reverse = false;
     std::string name, filePath;
     std::vector<WaveformRange> waveform;
+    std::vector<AudioWarpMarker> warpMarkers;
 
     double end() const { return start + lengthBeats; }
 };
+
+inline double audioSourceSecondsAtBeat (const AudioPlacement& clip, double beat)
+{
+    if (clip.warpMarkers.size() >= 2)
+    {
+        const auto& markers = clip.warpMarkers;
+        if (beat <= markers.front().beat)
+            return markers.front().sourceSeconds;
+        if (beat >= markers.back().beat)
+            return markers.back().sourceSeconds;
+
+        const auto next = std::upper_bound (markers.begin(), markers.end(), beat,
+            [] (double position, const AudioWarpMarker& marker) { return position < marker.beat; });
+        const auto previous = next - 1;
+        const double proportion = (beat - previous->beat) / (next->beat - previous->beat);
+        return previous->sourceSeconds
+             + (next->sourceSeconds - previous->sourceSeconds) * proportion;
+    }
+
+    const double proportion = clip.lengthBeats > 0.0
+        ? std::clamp (beat / clip.lengthBeats, 0.0, 1.0) : 0.0;
+    return clip.sourceOffsetSeconds + clip.durationSeconds * proportion;
+}
+
+inline bool isValidAudioWarpMarkers (const std::vector<AudioWarpMarker>& markers,
+                                     double sourceOffset, double durationSeconds,
+                                     double lengthBeats)
+{
+    if (markers.empty())
+        return true;
+    if (markers.size() < 2 || markers.size() > 4096
+        || ! std::isfinite (sourceOffset) || ! std::isfinite (durationSeconds)
+        || ! std::isfinite (lengthBeats) || durationSeconds <= 0.0 || lengthBeats <= 0.0)
+        return false;
+
+    constexpr double epsilon = 1.0e-7;
+    if (std::abs (markers.front().sourceSeconds - sourceOffset) > epsilon
+        || std::abs (markers.front().beat) > epsilon
+        || std::abs (markers.back().sourceSeconds - (sourceOffset + durationSeconds)) > epsilon
+        || std::abs (markers.back().beat - lengthBeats) > epsilon)
+        return false;
+
+    for (std::size_t i = 0; i < markers.size(); ++i)
+    {
+        const auto& marker = markers[i];
+        if (! std::isfinite (marker.sourceSeconds) || ! std::isfinite (marker.beat)
+            || marker.sourceSeconds < sourceOffset - epsilon
+            || marker.sourceSeconds > sourceOffset + durationSeconds + epsilon
+            || marker.beat < -epsilon || marker.beat > lengthBeats + epsilon)
+            return false;
+        if (i > 0 && (marker.sourceSeconds <= markers[i - 1].sourceSeconds
+                      || marker.beat <= markers[i - 1].beat))
+            return false;
+    }
+    return true;
+}
 
 // Trilha + parametros de mixagem. Clips ficam em heap (ponteiros estaveis).
 class Track

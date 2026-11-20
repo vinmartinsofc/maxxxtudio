@@ -1,4 +1,5 @@
 #include "NativeEffectProcessors.h"
+#include "ThemeKnobSlider.h"
 #include "Theme.h"
 
 #include <algorithm>
@@ -214,7 +215,7 @@ public:
                 }
                 else
                 {
-                    control->slider = std::make_unique<juce::Slider>();
+                    control->slider = std::make_unique<ThemeKnobSlider>();
                     auto& slider = *control->slider;
                     slider.setName (parameter->getName (64));
                     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);

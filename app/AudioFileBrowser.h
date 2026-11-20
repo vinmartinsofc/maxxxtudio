@@ -61,6 +61,7 @@ private:
     void createFolderInDirectory (const juce::File&);
     void previewFile (const juce::File&);
     void showFileMenu (const juce::File&, juce::Point<int> screenPosition);
+    void locateInExplorer (const juce::File&);
     void setFavorite (const juce::File&, int color);
     void removeFavorite (const juce::File&);
     void loadFavorites();

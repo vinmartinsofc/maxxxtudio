@@ -850,6 +850,38 @@ TEST_CASE ("Audio engine registers only VST3")
     REQUIRE_FALSE (hasVst2);
 }
 
+TEST_CASE ("Audio loop tempo analysis resists off-beat transients")
+{
+    constexpr double sampleRate = 44100.0;
+    constexpr double durationSeconds = 15.24;
+    const int sampleCount = static_cast<int> (std::lround (sampleRate * durationSeconds));
+    juce::AudioBuffer<float> samples (1, sampleCount);
+    samples.clear();
+
+    const int kickPeriod = static_cast<int> (std::lround (sampleRate * 60.0 / 126.0));
+    for (int start = 0; start < sampleCount; start += kickPeriod)
+        for (int i = 0; i < 2500 && start + i < sampleCount; ++i)
+        {
+            const double seconds = static_cast<double> (i) / sampleRate;
+            samples.addSample (0, start + i,
+                static_cast<float> (0.8 * std::exp (-seconds * 45.0)
+                    * std::sin (2.0 * juce::MathConstants<double>::pi * 60.0 * seconds)));
+        }
+
+    const int transientPeriod = static_cast<int> (std::lround (sampleRate * 60.0 / 170.0));
+    for (int start = 1000; start < sampleCount; start += transientPeriod)
+        for (int i = 0; i < 256 && start + i < sampleCount; ++i)
+        {
+            const double seconds = static_cast<double> (i) / sampleRate;
+            samples.addSample (0, start + i,
+                static_cast<float> (0.35 * std::exp (-seconds * 900.0)
+                    * std::sin (2.0 * juce::MathConstants<double>::pi * 8000.0 * seconds)));
+        }
+
+    const double bpm = AudioEngine::estimateAudioBpm (samples, sampleRate);
+    CHECK (std::abs (bpm - 126.0) < 1.0);
+}
+
 TEST_CASE ("Offline track rendering captures audio before the master bus")
 {
     AudioEngine engine;
@@ -916,6 +948,110 @@ TEST_CASE ("Audio clips receive a short safety fade at their start")
     REQUIRE (rendered.getSample (0, 80) > 0.05f);
     REQUIRE (rendered.getSample (0, 80) < 0.5f);
     REQUIRE (rendered.getSample (0, 400) > 0.49f);
+}
+
+TEST_CASE ("Audio clip reverse reads the selected source region backwards")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample,
+                0.1f + 0.4f * static_cast<float> (sample) / source->samples->getNumSamples());
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 2.0;
+    clip.sourceBpm = 120.0;
+    clip.source = std::move (source);
+    clip.warpEnabled = false;
+    clip.reverse = true;
+    clip.durationSeconds = 1.0;
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (1, error));
+    juce::AudioBuffer<float> rendered (2, 44100);
+    const auto result = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    REQUIRE (rendered.getSample (0, 1000) > rendered.getSample (0, 30000));
+}
+
+TEST_CASE ("Manual warp markers control audio source timing")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 88200);
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample,
+                static_cast<float> (sample) / source->samples->getNumSamples());
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 2.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 4.0;
+    clip.sourceBpm = 120.0;
+    clip.durationSeconds = 2.0;
+    clip.source = std::move (source);
+    clip.warpMarkers = { { 0.0, 0.0 }, { 1.5, 2.0 }, { 2.0, 4.0 } };
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (1, error));
+    juce::AudioBuffer<float> rendered (2, 88200);
+    const auto result = engine.renderTrackRange (0.0, 4.0, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    CHECK (std::abs (rendered.getSample (0, 44100) - 0.75f) < 0.02f);
+}
+
+TEST_CASE ("Audio clip gain automation affects playback and applies base gain once")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    source->samples->clear();
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample, 0.1f);
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 2.0;
+    clip.sourceBpm = 120.0;
+    clip.source = std::move (source);
+    clip.warpEnabled = false;
+    clip.durationSeconds = 1.0;
+    clip.automation.push_back ({
+        { roll::AutomationParameterType::AudioClipGain, {}, {}, {}, -1, -1, 0.0, 1 },
+        { { 0.0, 0.0 }, { 2.0, 6.0 } }
+    });
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (1, error));
+    juce::AudioBuffer<float> rendered (2, 44100);
+    const auto result = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    const float lowerGain = rendered.getSample (0, 10000);
+    const float higherGain = rendered.getSample (0, 40000);
+    REQUIRE (higherGain > lowerGain * 1.4f);
+    REQUIRE (higherGain < lowerGain * 1.8f);
 }
 
 TEST_CASE ("Audio from a track passes through its group bus before the master")

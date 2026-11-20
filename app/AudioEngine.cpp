@@ -11,6 +11,237 @@
 
 namespace
 {
+double onsetPeriodicity (const std::vector<double>& onset, double onsetMean,
+                         double secondsPerFrame, double bpm)
+{
+    const double lag = 60.0 / (bpm * secondsPerFrame);
+    if (lag < 2.0 || lag >= static_cast<double> (onset.size()))
+        return 0.0;
+
+    double correlation = 0.0, leftEnergy = 0.0, rightEnergy = 0.0;
+    for (std::size_t i = static_cast<std::size_t> (std::ceil (lag)); i < onset.size(); ++i)
+    {
+        const double sourcePosition = static_cast<double> (i) - lag;
+        const auto first = static_cast<std::size_t> (sourcePosition);
+        const double fraction = sourcePosition - static_cast<double> (first);
+        const double previous = onset[first] * (1.0 - fraction)
+                              + onset[std::min (first + 1, onset.size() - 1)] * fraction;
+        const double currentValue = std::max (0.0, onset[i] - onsetMean);
+        const double previousValue = std::max (0.0, previous - onsetMean);
+        correlation += currentValue * previousValue;
+        leftEnergy += currentValue * currentValue;
+        rightEnergy += previousValue * previousValue;
+    }
+
+    const double normalization = std::sqrt (leftEnergy * rightEnergy);
+    return normalization > 1.0e-12 ? correlation / normalization : 0.0;
+}
+
+double estimateAudioBpmInternal (const juce::AudioBuffer<float>& samples, double sampleRate)
+{
+    if (sampleRate <= 0.0 || samples.getNumSamples() < 256)
+        return 0.0;
+
+    constexpr int frameSize = 1024;
+    constexpr int hopSize = 512;
+    const int numSamples = samples.getNumSamples();
+    const int numChannels = samples.getNumChannels();
+    const int maxSamples = std::min (numSamples, static_cast<int> (sampleRate * 180.0));
+    std::vector<double> energy;
+    energy.reserve (static_cast<std::size_t> (maxSamples / hopSize) + 1);
+
+    for (int start = 0; start + frameSize <= maxSamples; start += hopSize)
+    {
+        double frameEnergy = 0.0;
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            const float* channelSamples = samples.getReadPointer (channel);
+            for (int i = start; i < start + frameSize; ++i)
+                frameEnergy += static_cast<double> (channelSamples[i])
+                             * static_cast<double> (channelSamples[i]);
+        }
+        energy.push_back (std::sqrt (frameEnergy / static_cast<double> (frameSize * numChannels)));
+    }
+    if (energy.size() < 32)
+        return 0.0;
+
+    std::vector<double> onset (energy.size(), 0.0);
+    double onsetMean = 0.0;
+    for (std::size_t i = 1; i < energy.size(); ++i)
+    {
+        onset[i] = std::max (0.0, energy[i] - energy[i - 1]);
+        onsetMean += onset[i];
+    }
+    onsetMean /= std::max (1.0, static_cast<double> (onset.size() - 1));
+    if (onsetMean <= 1.0e-8)
+        return 0.0;
+
+    const double secondsPerFrame = static_cast<double> (hopSize) / sampleRate;
+    std::vector<double> peaks;
+    double lastPeakSeconds = -1.0;
+    const double peakThreshold = onsetMean * 1.65;
+    for (std::size_t i = 1; i + 1 < onset.size(); ++i)
+    {
+        if (onset[i] >= peakThreshold
+            && onset[i] >= onset[i - 1] && onset[i] >= onset[i + 1])
+        {
+            const double seconds = static_cast<double> (i) * secondsPerFrame;
+            if (seconds - lastPeakSeconds >= 0.18)
+            {
+                peaks.push_back (seconds);
+                lastPeakSeconds = seconds;
+            }
+        }
+    }
+
+    std::vector<double> candidates;
+    candidates.reserve (peaks.size());
+    for (std::size_t i = 1; i < peaks.size(); ++i)
+    {
+        const double interval = peaks[i] - peaks[i - 1];
+        if (interval < 0.20 || interval > 1.20)
+            continue;
+        double bpm = 60.0 / interval;
+        while (bpm < 70.0) bpm *= 2.0;
+        while (bpm > 180.0) bpm *= 0.5;
+        candidates.push_back (bpm);
+    }
+
+    double estimatedBpm = 0.0;
+    if (! candidates.empty())
+    {
+        std::sort (candidates.begin(), candidates.end());
+        std::vector<double> clustered;
+        for (std::size_t i = 0; i < candidates.size();)
+        {
+            double sum = 0.0;
+            int count = 0;
+            std::size_t j = i;
+            for (; j < candidates.size() && candidates[j] - candidates[i] <= 3.5; ++j)
+            {
+                sum += candidates[j];
+                ++count;
+            }
+            clustered.push_back (sum / std::max (1, count));
+            i = j;
+        }
+
+        double bestBpm = clustered.front();
+        int bestCount = 0;
+        for (double candidate : clustered)
+        {
+            int count = 0;
+            for (double value : candidates)
+                if (std::abs (value - candidate) <= 3.5)
+                    ++count;
+            if (count > bestCount)
+            {
+                bestCount = count;
+                bestBpm = candidate;
+            }
+        }
+        estimatedBpm = bestBpm;
+    }
+
+    if (estimatedBpm <= 0.0)
+    {
+        double bestScore = -1.0;
+        for (int bpm = 70; bpm <= 180; ++bpm)
+        {
+            const double score = onsetPeriodicity (onset, onsetMean, secondsPerFrame, bpm);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                estimatedBpm = bpm;
+            }
+        }
+    }
+
+    const double audioDuration = maxSamples == numSamples
+        ? static_cast<double> (numSamples) / sampleRate : 0.0;
+    const double selectedPeriodicity = onsetPeriodicity (
+        onset, onsetMean, secondsPerFrame, estimatedBpm);
+    double bestLoopBpm = estimatedBpm;
+    double bestLoopScore = 0.0;
+    for (int bars : { 1, 2, 4, 8, 16, 32, 64 })
+    {
+        if (audioDuration <= 0.0)
+            break;
+        const double loopBpm = bars * 4.0 * 60.0 / audioDuration;
+        if (loopBpm < 70.0 || loopBpm > 180.0
+            || std::abs (loopBpm - estimatedBpm) > estimatedBpm * 0.35)
+            continue;
+
+        const double score = onsetPeriodicity (onset, onsetMean, secondsPerFrame, loopBpm);
+        if (score >= 0.15 && score >= selectedPeriodicity * 0.55
+            && score > bestLoopScore)
+        {
+            bestLoopScore = score;
+            bestLoopBpm = loopBpm;
+        }
+    }
+    return estimatedBpm > 0.0 ? std::round (bestLoopBpm * 10.0) / 10.0 : 0.0;
+}
+
+std::vector<double> detectTransientSeconds (const juce::AudioBuffer<float>& samples, double sampleRate)
+{
+    if (sampleRate <= 0.0 || samples.getNumSamples() < 256)
+        return {};
+
+    constexpr int frameSize = 512;
+    constexpr int hopSize = 256;
+    const int numChannels = samples.getNumChannels();
+    const int numSamples = samples.getNumSamples();
+    std::vector<double> flux;
+    std::vector<double> energy;
+    energy.reserve (static_cast<std::size_t> (numSamples / hopSize) + 1);
+
+    for (int start = 0; start + frameSize <= numSamples; start += hopSize)
+    {
+        double value = 0.0;
+        for (int channel = 0; channel < numChannels; ++channel)
+        {
+            const float* channelSamples = samples.getReadPointer (channel);
+            for (int i = start; i < start + frameSize; ++i)
+            {
+                const double sample = std::abs (static_cast<double> (channelSamples[i]));
+                value += sample;
+            }
+        }
+        energy.push_back (value / static_cast<double> (frameSize * numChannels));
+    }
+    if (energy.size() < 8)
+        return {};
+
+    double mean = 0.0;
+    for (std::size_t i = 1; i < energy.size(); ++i)
+    {
+        const double onset = std::max (0.0, energy[i] - energy[i - 1]);
+        flux.push_back (onset);
+        mean += onset;
+    }
+    mean /= std::max (1.0, static_cast<double> (flux.size()));
+    const double threshold = mean * 2.2;
+
+    std::vector<double> transients;
+    double minimumSeconds = 0.08;
+    double lastTransient = -minimumSeconds;
+    for (std::size_t i = 1; i < flux.size(); ++i)
+    {
+        if (flux[i] <= threshold)
+            continue;
+        const double seconds = static_cast<double> ((i + 1) * hopSize) / sampleRate;
+        if (seconds - lastTransient >= minimumSeconds)
+        {
+            transients.push_back (seconds);
+            lastTransient = seconds;
+        }
+        if (transients.size() >= 4096)
+            break;
+    }
+    return transients;
+}
+
 juce::File audioDeviceSettingsFile()
 {
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -60,6 +291,8 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
         juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("Falha ao decodificar o arquivo de audio.", {}); });
         return;
     }
+    data->estimatedBpm = AudioEngine::estimateAudioBpm (*data->samples, data->sampleRate);
+    data->transientSeconds = detectTransientSeconds (*data->samples, data->sampleRate);
 
     constexpr int maxWaveformResolution = 16384;
     const int waveformResolution = std::min (numSamples, maxWaveformResolution);
@@ -111,6 +344,64 @@ bool connectAudioChannels (juce::AudioProcessorGraph& graph,
     return connected;
 }
 
+double integratedPitchRatio (const roll::AutomationEnvelope* envelope,
+                             double startBeat, double endBeat, double basePitch)
+{
+    if (endBeat <= startBeat)
+        return 0.0;
+
+    constexpr double semitoneScale = 0.0577622650466621;
+    const auto integrate = [envelope, basePitch] (double start, double end)
+    {
+        const double startPitch = envelope != nullptr
+            ? roll::automationValueAt (*envelope, start, basePitch) : basePitch;
+        const double endPitch = envelope != nullptr
+            ? roll::automationValueAt (*envelope, end, basePitch) : basePitch;
+        const double startRatio = std::exp ((startPitch - basePitch) * semitoneScale);
+        const double endRatio = std::exp ((endPitch - basePitch) * semitoneScale);
+        const double pitchDifference = endPitch - startPitch;
+        if (std::abs (pitchDifference) < 1.0e-12)
+            return (end - start) * startRatio;
+        return (end - start) * (endRatio - startRatio)
+             / (semitoneScale * pitchDifference);
+    };
+
+    double result = 0.0;
+    double cursor = startBeat;
+    if (envelope != nullptr)
+        for (const auto& point : envelope->points)
+            if (point.beat > cursor && point.beat < endBeat)
+            {
+                result += integrate (cursor, point.beat);
+                cursor = point.beat;
+            }
+    return result + integrate (cursor, endBeat);
+}
+
+double integratedWarpSourceSamples (const std::vector<roll::AudioWarpMarker>& markers,
+                                    double clipStartBeat, double relativeEndBeat,
+                                    double sourceRate, const roll::AutomationEnvelope* pitchEnvelope,
+                                    double basePitch)
+{
+    double samples = 0.0;
+    for (std::size_t i = 1; i < markers.size(); ++i)
+    {
+        const auto& previous = markers[i - 1];
+        const auto& next = markers[i];
+        const double segmentStart = std::max (0.0, previous.beat);
+        const double segmentEnd = std::min (relativeEndBeat, next.beat);
+        if (segmentEnd <= segmentStart)
+            continue;
+        const double samplesPerBeat = (next.sourceSeconds - previous.sourceSeconds)
+                                    / (next.beat - previous.beat) * sourceRate;
+        samples += samplesPerBeat * integratedPitchRatio (
+            pitchEnvelope, clipStartBeat + segmentStart, clipStartBeat + segmentEnd, basePitch);
+        if (relativeEndBeat <= next.beat)
+            break;
+    }
+    return samples * std::pow (2.0, basePitch / 12.0);
+}
+
 bool sameAutomation (const std::vector<roll::AutomationEnvelope>& first,
                      const std::vector<roll::AutomationEnvelope>& second)
 {
@@ -124,6 +415,11 @@ bool sameAutomation (const std::vector<roll::AutomationEnvelope>& first,
             return false;
     return true;
 }
+}
+
+double AudioEngine::estimateAudioBpm (const juce::AudioBuffer<float>& samples, double sampleRate)
+{
+    return estimateAudioBpmInternal (samples, sampleRate);
 }
 
 // ======================================================= TrackSource
@@ -243,37 +539,75 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             const double projectBpm = shared.plan.beatsPerSample * outputRate * 60.0;
             const double warpRatio = clip.warpEnabled && projectBpm > 0.0
                 ? projectBpm / clip.sourceBpm : 1.0;
-            const double sourceStep = clip.source->sampleRate / outputRate * warpRatio;
+            const double pitchRatio = std::pow (2.0, clip.pitchSemitones / 12.0);
+            const double pitchAdjustedStep = warpRatio * pitchRatio;
+            const double sourceStep = clip.source->sampleRate / outputRate * pitchAdjustedStep;
+            const bool useManualWarp = clip.warpEnabled && clip.warpMarkers.size() >= 2;
+            const auto findEnvelope = [&clip] (roll::AutomationParameterType type)
+                -> const roll::AutomationEnvelope*
+            {
+                const auto found = std::find_if (clip.automation.begin(), clip.automation.end(),
+                    [type] (const auto& envelope) { return envelope.target.type == type; });
+                return found != clip.automation.end() ? &*found : nullptr;
+            };
+            const auto* gainEnvelope = findEnvelope (roll::AutomationParameterType::AudioClipGain);
+            const auto* pitchEnvelope = findEnvelope (roll::AutomationParameterType::AudioClipPitch);
+            const auto* fadeInEnvelope = findEnvelope (roll::AutomationParameterType::AudioClipFadeIn);
+            const auto* fadeOutEnvelope = findEnvelope (roll::AutomationParameterType::AudioClipFadeOut);
             const double safetyFadeBeats = shared.plan.beatsPerSample * outputRate * 0.004;
             const double maximumFadeBeats = clip.lengthBeats * 0.5;
-            const double fadeInBeats = std::min (maximumFadeBeats,
-                std::max (clip.fadeInBeats, safetyFadeBeats));
-            const double sourceStart = clip.sourceOffsetSeconds * clip.source->sampleRate
-                                     + (activeStart - clip.startBeat)
-                                       / shared.plan.beatsPerSample * sourceStep;
+            const double sourceOffsetSamples = clip.sourceOffsetSeconds * clip.source->sampleRate;
+            const double sourceDuration = clip.durationSeconds > 0.0
+                ? clip.durationSeconds : clip.source->durationSeconds;
+            const double durationSamples = sourceDuration * clip.source->sampleRate;
+            const double relativeSamples = useManualWarp
+                ? integratedWarpSourceSamples (clip.warpMarkers, clip.startBeat,
+                    activeStart - clip.startBeat, clip.source->sampleRate,
+                    pitchEnvelope, clip.pitchSemitones)
+                : sourceStep / shared.plan.beatsPerSample
+                    * integratedPitchRatio (pitchEnvelope, clip.startBeat, activeStart,
+                                            clip.pitchSemitones);
+            const double sourceStart = clip.reverse
+                ? sourceOffsetSamples + durationSamples - 1.0 - relativeSamples
+                : sourceOffsetSamples + relativeSamples;
+            const double direction = clip.reverse ? -1.0 : 1.0;
             const int outputStart = segment.offset + static_cast<int> (std::lround ((activeStart - segment.a) / shared.plan.beatsPerSample));
             const int outputEnd = std::min (buffer.getNumSamples(),
                                             segment.offset + segment.samples);
-            const int frameCount = std::min (outputEnd - outputStart,
-                static_cast<int> (std::ceil ((activeEnd - activeStart) / shared.plan.beatsPerSample)));
+            const int frameCount = std::max (0, std::min (outputEnd - outputStart,
+                static_cast<int> (std::ceil ((activeEnd - activeStart) / shared.plan.beatsPerSample))));
+            double sourcePosition = sourceStart;
 
             for (int i = 0; i < frameCount; ++i)
             {
-                const double sourcePosition = sourceStart + i * sourceStep;
+                const double beat = activeStart + i * shared.plan.beatsPerSample;
                 const int sourceIndex = static_cast<int> (sourcePosition);
-                if (sourceIndex >= source.getNumSamples())
+                if (sourceIndex < 0 || sourceIndex >= source.getNumSamples())
                     break;
 
                 const int nextIndex = std::min (sourceIndex + 1, source.getNumSamples() - 1);
                 const float fraction = static_cast<float> (sourcePosition - sourceIndex);
-                const double beat = activeStart + i * shared.plan.beatsPerSample;
+                const double gainDb = gainEnvelope != nullptr
+                    ? roll::automationValueAt (*gainEnvelope, beat, clip.gainDb) : clip.gainDb;
+                const double pitch = pitchEnvelope != nullptr
+                    ? roll::automationValueAt (*pitchEnvelope, beat, clip.pitchSemitones)
+                    : clip.pitchSemitones;
+                const double automatedFadeIn = fadeInEnvelope != nullptr
+                    ? roll::automationValueAt (*fadeInEnvelope, beat, clip.fadeInBeats)
+                    : clip.fadeInBeats;
+                const double automatedFadeOut = fadeOutEnvelope != nullptr
+                    ? roll::automationValueAt (*fadeOutEnvelope, beat, clip.fadeOutBeats)
+                    : clip.fadeOutBeats;
+                const double currentFadeIn = std::min (maximumFadeBeats,
+                    std::max (automatedFadeIn, safetyFadeBeats));
                 double gain = 1.0;
-                if (fadeInBeats > 0.0)
-                    gain *= roll::audioFadeCurveValue ((beat - clip.startBeat) / fadeInBeats,
+                gain *= std::pow (10.0, gainDb / 20.0);
+                if (currentFadeIn > 0.0)
+                    gain *= roll::audioFadeCurveValue ((beat - clip.startBeat) / currentFadeIn,
                                                        clip.fadeInCurve);
-                if (clip.fadeOutBeats > 0.0)
+                if (automatedFadeOut > 0.0)
                     gain *= 1.0 - roll::audioFadeCurveValue (
-                        1.0 - (clip.startBeat + clip.lengthBeats - beat) / clip.fadeOutBeats,
+                        1.0 - (clip.startBeat + clip.lengthBeats - beat) / automatedFadeOut,
                         clip.fadeOutCurve);
                 for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
                 {
@@ -283,6 +617,31 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
                     buffer.addSample (channel, outputStart + i,
                                       (first + (next - first) * fraction) * static_cast<float> (gain));
                 }
+                const double automatedPitchRatio = std::pow (2.0, (pitch - clip.pitchSemitones) / 12.0);
+                if (useManualWarp)
+                {
+                    const double relativeBeat = std::clamp (
+                        beat - clip.startBeat, 0.0, clip.lengthBeats);
+                    const auto nextMarker = std::upper_bound (
+                        clip.warpMarkers.begin(), clip.warpMarkers.end(), relativeBeat,
+                        [] (double position, const roll::AudioWarpMarker& marker)
+                        {
+                            return position < marker.beat;
+                        });
+                    const std::size_t markerNextIndex = std::clamp<std::size_t> (
+                        static_cast<std::size_t> (nextMarker - clip.warpMarkers.begin()),
+                        1, clip.warpMarkers.size() - 1);
+                    const auto& previous = clip.warpMarkers[markerNextIndex - 1];
+                    const auto& next = clip.warpMarkers[markerNextIndex];
+                    const double sourceSamplesPerBeat =
+                        (next.sourceSeconds - previous.sourceSeconds)
+                        / (next.beat - previous.beat) * clip.source->sampleRate;
+                    const double actualPitchRatio = std::pow (2.0, pitch / 12.0);
+                    sourcePosition += direction * sourceSamplesPerBeat
+                                    * shared.plan.beatsPerSample * actualPitchRatio;
+                }
+                else
+                    sourcePosition += direction * sourceStep * automatedPitchRatio;
             }
         }
     }

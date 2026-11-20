@@ -9,31 +9,44 @@
 </p>
 
 O Project Freedom é um DAW open source para Windows e Linux, desenvolvido em C++20
-com JUCE. Seu objetivo é reunir no próprio programa as ferramentas essenciais de
-produção e uma coleção crescente de instrumentos e efeitos. Assim, instrumentos e
-samples externos ficam a critério de cada pessoa — não são uma exigência para começar.
+com JUCE. O projeto está em evolução e reúne ferramentas essenciais de produção,
+instrumentos, efeitos e edição musical em uma interface própria.
 
-## Recursos atuais
+## Recursos implementados
 
-- **Arranjo:** trilhas MIDI e de áudio, clips organizados na linha do tempo, loop e controles de transporte.
-- **Piano roll:** criação e edição de notas, velocity, grade, quantização, escalas e ferramentas de seleção.
-- **Mixer:** volume, pan, mute, solo e medição de nível por trilha, além do canal Master.
-- **Drum Rack:** 16 pads para samples, com cadeias de efeitos por pad.
-- **Plugins VST3:** busca de instrumentos e efeitos, cadeias de plugins e salvamento do estado no projeto.
-- **Efeitos nativos:** ferramentas integradas como Volume Master e Pan Master.
-- **MIDI Learn:** mapeamento de controles MIDI para volume, pan, mute e solo, com vínculos salvos por projeto.
-- **Projetos e exportação:** salvar e abrir projetos `.pfs` e exportar o Master em WAV.
-- **Personalização:** temas, configurações de áudio e seleção de entradas MIDI.
+- **Arrangement:** trilhas MIDI e áudio, clips, navegação, zoom, grades, locators, loop e transporte.
+- **Piano Roll:** criação e edição de notas, velocity, quantização, escalas, fold, grooves e ferramentas de seleção.
+- **Edição de áudio:** divisão e união de clips, cortes de borda, fades de entrada e saída, curvas de fade, análise de transientes, Warp, BPM original, ×2 e ÷2.
+- **Seleção:** seleção por clique, Shift/Ctrl por faixa de tempo, seleção em várias trilhas e operações sobre a seleção.
+- **Mixer:** volume, pan, mute, solo, medição de pico e canal Master.
+- **Automação:** envelopes globais para volume, pan, mute e parâmetros de plugins; seleção automática ao tocar um controle.
+- **Plugins VST3:** varredura de fabricantes, favoritos, pastas personalizadas, execução isolada e estado salvo no projeto.
+- **Navegadores:** arquivos de áudio, favoritos por cor, busca, pré-escuta, histórico e localização no Explorer.
+- **Drum Rack:** 16 pads, carregamento de samples, modos One-Shot e Classic, pitch, volume, início, fim, reverso, loop e efeitos por pad.
+- **MIDI Learn:** mapeamento de controles MIDI para volume, pan, mute e solo.
+- **Teclado MIDI:** execução pelo teclado do computador, oitavas e velocidade.
+- **Projetos:** salvar e abrir `.pfs`, histórico de undo/redo, recuperação e exportação do Master como WAV.
+- **Temas:** preto, cinza grafite e branco com laranja; cinza/preto com azul; Matrix 1 e Matrix 2 com verde.
+- **Interface:** tooltips acessíveis, ícones vetoriais, estados ativos, hover e texto legível por tema.
 
-## Próximas grandes features
+## Plugins nativos
 
-Estas etapas fazem parte da visão do Project Freedom e ainda estão em desenvolvimento:
-
-1. **Editor de áudio completo:** ampliar as ferramentas de edição de clips, com cortes, divisão, ajuste de fades e operações mais precisas no arranjo.
-2. **Gravação em tempo real:** gravar entradas de áudio diretamente em trilhas, com monitoramento e integração ao transporte.
-3. **Sampler integrado e simples:** carregar e editar samples, ajustar reprodução e afinação e tocar o material pelo teclado ou MIDI.
-4. **Automação de plugins:** selecionar parâmetros de instrumentos e efeitos e criar ou editar suas linhas de automação no arranjo.
-5. **Mais efeitos integrados:** expandir a coleção nativa para oferecer ferramentas essenciais de processamento sem depender de plugins externos.
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="app/assets/readme/drum-rack.svg" alt="Miniatura do Drum Rack" width="300"><br>
+      <strong>Drum Rack</strong><br>
+      Instrumento de 16 pads para tocar samples por MIDI. Inclui carga de áudio, volume, pitch,
+      trecho inicial/final, reverso, loop, um modo One-Shot e cadeias de efeitos independentes por pad.
+    </td>
+    <td align="center" width="50%">
+      <img src="app/assets/readme/volume-master.svg" alt="Miniatura do Volume Master" width="300"><br>
+      <strong>Volume Master</strong><br>
+      Utilidade para ganho, largura estéreo, balanceamento, entrada mono/left/right/swap,
+      inversão de fase, mono baixo, mute, filtro DC e auto-pan configurável.
+    </td>
+  </tr>
+</table>
 
 ## Compilar
 

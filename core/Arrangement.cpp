@@ -196,6 +196,12 @@ AudioPlacement* Track::copyAudioClip (const AudioPlacement& source, double start
     copy->fadeOutCurve = source.fadeOutCurve;
     copy->enabled = source.enabled;
     copy->warpEnabled = source.warpEnabled;
+    copy->pitchSemitones = source.pitchSemitones;
+    copy->pitchCents = source.pitchCents;
+    copy->gainDb = source.gainDb;
+    copy->warpMode = source.warpMode;
+    copy->reverse = source.reverse;
+    copy->warpMarkers = source.warpMarkers;
     return copy;
 }
 
@@ -212,15 +218,21 @@ int Track::splitAudioClip (int clipId, double beat)
     if (offset <= eps || rightLength <= eps || ! isAudioFree (beat, rightLength, clipId))
         return -1;
 
-    const double fraction = offset / oldLength;
-    const double leftDuration = clip->durationSeconds * fraction;
+    const auto originalWarpMarkers = clip->warpMarkers;
+    const double splitSourceSeconds = audioSourceSecondsAtBeat (*clip, offset);
+    const double leftDuration = originalWarpMarkers.empty()
+        ? clip->durationSeconds * offset / oldLength
+        : std::clamp (splitSourceSeconds - clip->sourceOffsetSeconds, 0.0, clip->durationSeconds);
     const double rightDuration = clip->durationSeconds - leftDuration;
-    const double rightSourceOffset = clip->sourceOffsetSeconds + leftDuration;
+    const double sourceFraction = clip->durationSeconds > 0.0
+        ? leftDuration / clip->durationSeconds : offset / oldLength;
+    const double rightSourceOffset = originalWarpMarkers.empty()
+        ? clip->sourceOffsetSeconds + leftDuration : splitSourceSeconds;
     std::vector<WaveformRange> leftWaveform, rightWaveform;
     if (clip->waveform.size() > 1)
     {
         const auto splitIndex = static_cast<std::size_t> (std::clamp (
-            static_cast<int> (std::lround (clip->waveform.size() * fraction)), 1,
+            static_cast<int> (std::lround (clip->waveform.size() * sourceFraction)), 1,
             static_cast<int> (clip->waveform.size()) - 1));
         leftWaveform.assign (clip->waveform.begin(), clip->waveform.begin() + static_cast<std::ptrdiff_t> (splitIndex));
         rightWaveform.assign (clip->waveform.begin() + static_cast<std::ptrdiff_t> (splitIndex), clip->waveform.end());
@@ -241,12 +253,43 @@ int Track::splitAudioClip (int clipId, double beat)
     const double fadeOutCurve = clip->fadeOutCurve;
     const bool enabled = clip->enabled;
     const bool warpEnabled = clip->warpEnabled;
+    const double pitchSemitones = clip->pitchSemitones;
+    const double pitchCents = clip->pitchCents;
+    const double gainDb = clip->gainDb;
+    const int warpMode = clip->warpMode;
+    const bool reverse = clip->reverse;
+    std::vector<AudioWarpMarker> leftWarpMarkers, rightWarpMarkers;
+    if (! originalWarpMarkers.empty())
+    {
+        for (const auto& marker : originalWarpMarkers)
+        {
+            if (marker.beat < offset - eps)
+                leftWarpMarkers.push_back (marker);
+            else if (marker.beat > offset + eps)
+                rightWarpMarkers.push_back ({ marker.sourceSeconds, marker.beat - offset });
+            else
+            {
+                leftWarpMarkers.push_back ({ splitSourceSeconds, offset });
+                rightWarpMarkers.push_back ({ splitSourceSeconds, 0.0 });
+            }
+        }
+        if (leftWarpMarkers.empty() || leftWarpMarkers.back().beat < offset - eps)
+            leftWarpMarkers.push_back ({ splitSourceSeconds, offset });
+        if (rightWarpMarkers.empty() || rightWarpMarkers.front().beat > eps)
+            rightWarpMarkers.insert (rightWarpMarkers.begin(), { splitSourceSeconds, 0.0 });
+    }
     clip->lengthBeats = offset;
     clip->durationSeconds = leftDuration;
     clip->waveform = std::move (leftWaveform);
     clip->fadeInBeats = std::min (fadeIn, offset);
     clip->fadeOutBeats = std::max (0.0, fadeOut - rightLength);
     clip->fadeInCurve = fadeInCurve;
+    clip->pitchSemitones = pitchSemitones;
+    clip->pitchCents = pitchCents;
+    clip->gainDb = gainDb;
+    clip->warpMode = warpMode;
+    clip->reverse = reverse;
+    clip->warpMarkers = std::move (leftWarpMarkers);
 
     auto* right = addAudioClip (beat, rightLength, filePath, name, std::move (rightWaveform),
                                 rightDuration, sourceBpm);
@@ -256,6 +299,12 @@ int Track::splitAudioClip (int clipId, double beat)
     right->fadeOutCurve = fadeOutCurve;
     right->enabled = enabled;
     right->warpEnabled = warpEnabled;
+    right->pitchSemitones = pitchSemitones;
+    right->pitchCents = pitchCents;
+    right->gainDb = gainDb;
+    right->warpMode = warpMode;
+    right->reverse = reverse;
+    right->warpMarkers = std::move (rightWarpMarkers);
     return right->id;
 }
 

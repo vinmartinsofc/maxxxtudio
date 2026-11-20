@@ -1,6 +1,7 @@
 #include "ArrangementView.h"
 #include "FreedomModalDialog.h"
 #include "Icons.h"
+#include "ThemeKnobSlider.h"
 #include "WaveformDisplay.h"
 #include "ZoomCursor.h"
 #include <algorithm>
@@ -94,90 +95,15 @@ public:
     }
 };
 
-class MixerKnobSlider final : public juce::Slider
+class MixerKnobSlider final : public ThemeKnobSlider
 {
 public:
-    double centreValue = 0.0;
     std::function<void()> onDoubleClick, onMidiLearn, onMidiClear;
     juce::String mappingInfo;
 
     MixerKnobSlider()
     {
         setScrollWheelEnabled (true);
-    }
-
-    void paint (juce::Graphics& g) override
-    {
-        const auto bounds = getLocalBounds().toFloat();
-        const float diameter = std::min (bounds.getWidth(), bounds.getHeight()) - 1.0f;
-        const float radius = diameter * 0.5f;
-        const juce::Point<float> centre (bounds.getCentreX(), bounds.getCentreY());
-        const auto dial = juce::Rectangle<float> (diameter, diameter).withCentre (centre);
-        g.setColour (theme::border());
-        g.fillEllipse (dial);
-
-        const auto face = dial.reduced (1.0f);
-        g.setGradientFill (juce::ColourGradient (theme::panelLight().brighter (0.12f),
-                                                 centre.x, face.getY(),
-                                                 theme::panel().darker (0.08f),
-                                                 centre.x, face.getBottom(), false));
-        g.fillEllipse (face);
-        g.setColour (theme::border().brighter (0.25f).withAlpha (0.8f));
-        g.drawEllipse (face, 0.7f);
-
-        const float startAngle = juce::MathConstants<float>::pi * 0.75f;
-        const float sweep = juce::MathConstants<float>::pi * 1.5f;
-        const double minimum = getMinimum();
-        const double maximum = getMaximum();
-        const double centreValueClamped = std::clamp (centreValue, minimum, maximum);
-        const double value = std::clamp (getValue(), minimum, maximum);
-        const double proportion = value <= centreValueClamped
-            ? 0.5 * (value - minimum) / std::max (1.0e-9, centreValueClamped - minimum)
-            : 0.5 + 0.5 * (value - centreValueClamped)
-                          / std::max (1.0e-9, maximum - centreValueClamped);
-        const float angle = startAngle + static_cast<float> (proportion) * sweep;
-        const float arcRadius = radius * 0.7f;
-        const float arcThickness = std::max (1.0f, radius * 0.14f);
-        juce::Path scaleArc;
-        scaleArc.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f,
-                                startAngle, startAngle + sweep, true);
-        g.setColour (theme::border().brighter (0.25f));
-        g.strokePath (scaleArc, juce::PathStrokeType (arcThickness));
-
-        if (proportion > 0.001)
-        {
-            juce::Path valueArc;
-            valueArc.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f,
-                                    startAngle, angle, true);
-            g.setColour (theme::accent());
-            g.strokePath (valueArc, juce::PathStrokeType (arcThickness));
-        }
-
-        for (int tick = 0; tick <= 8; ++tick)
-        {
-            const float tickAngle = startAngle + static_cast<float> (tick) * sweep / 8.0f;
-            const float innerRadius = radius * 0.82f;
-            const float outerRadius = radius * 0.96f;
-            const juce::Point<float> inner (centre.x + std::cos (tickAngle) * innerRadius,
-                                            centre.y + std::sin (tickAngle) * innerRadius);
-            const juce::Point<float> outer (centre.x + std::cos (tickAngle) * outerRadius,
-                                            centre.y + std::sin (tickAngle) * outerRadius);
-            g.setColour (tick == 4 ? theme::textDim() : theme::border().brighter (0.45f));
-            g.drawLine (inner.x, inner.y, outer.x, outer.y, tick == 4 ? 1.2f : 0.8f);
-        }
-
-        const float indicatorRadius = radius * 0.53f;
-        const juce::Point<float> indicator (centre.x + std::cos (angle) * indicatorRadius,
-                                            centre.y + std::sin (angle) * indicatorRadius);
-        const float pointerStartRadius = radius * 0.15f;
-        const juce::Point<float> pointerStart (centre.x + std::cos (angle) * pointerStartRadius,
-                                               centre.y + std::sin (angle) * pointerStartRadius);
-        g.setColour (theme::text());
-        g.drawLine (pointerStart.x, pointerStart.y, indicator.x, indicator.y, 1.4f);
-        g.setColour (theme::panel());
-        g.fillEllipse (centre.x - 2.0f, centre.y - 2.0f, 4.0f, 4.0f);
-        g.setColour (theme::text());
-        g.drawEllipse (centre.x - 2.0f, centre.y - 2.0f, 4.0f, 4.0f, 0.8f);
     }
 
     void mouseDoubleClick (const juce::MouseEvent& event) override
@@ -227,7 +153,7 @@ class ArrangementView::Lanes : public juce::Component, public juce::DragAndDropT
                                public juce::FileDragAndDropTarget, private juce::Timer
 {
 public:
-    enum class Mode { None, Move, Resize, AutomationEdit, FadeIn, FadeOut, FadeInCurve, FadeOutCurve,
+    enum class Mode { None, Move, Resize, ResizeLeft, AutomationEdit, FadeIn, FadeOut, FadeInCurve, FadeOutCurve,
                       RangeSelect, EmptyClickPending, ClipTimeSelectPending, ShiftPending, CtrlPending };
 
     struct ClipSelection
@@ -426,6 +352,8 @@ public:
         selectedClips.clear();
         selectionAnchor = {};
         hasRangeSelection = false;
+        shiftRangeAnchorBeat = -1.0;
+        shiftRangeAnchorTrack = -1;
         repaint();
     }
 
@@ -577,6 +505,22 @@ public:
                     g.drawHorizontalLine (static_cast<int> (waveformArea.getCentreY()),
                                           waveformArea.getX(), waveformArea.getRight());
                     drawWaveformEnvelope (g, waveformArea, clip->waveform, base.brighter (0.7f), halfHeight);
+                    if (clip->sourceOffsetSeconds > 1.0e-6)
+                    {
+                        g.setColour (theme::accent().withAlpha (0.95f));
+                        g.fillRect (juce::Rectangle<float> (
+                            r.getX() + 1.0f, r.getY() + 15.0f, 3.0f,
+                            std::max (4.0f, r.getHeight() - 15.0f)));
+                        if (r.getWidth() >= 96.0f)
+                        {
+                            g.setColour (juce::Colours::white.withAlpha (0.85f));
+                            g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
+                            g.drawText (
+                                juce::String ("Origem ") + juce::String (clip->sourceOffsetSeconds, 2) + " s",
+                                r.toNearestInt().withTrimmedLeft (7).withTrimmedTop (15).withHeight (14),
+                                juce::Justification::centredLeft, true);
+                        }
+                    }
 
                     const float fadeTop = waveformArea.getY() + 3.0f;
                     const float fadeBottom = waveformArea.getBottom() - 3.0f;
@@ -893,7 +837,8 @@ public:
             const bool masterTarget = dragTrackIndex == static_cast<int> (project.tracks.size());
             const juce::String message = dragDropAllowed
                 ? (masterTarget ? "Solte efeito para adicionar ao Master"
-                                : dragDropIsAudio ? "Solte para adicionar audio" : "Solte para adicionar plugin")
+                                : dragDropIsAudio ? "Solte para adicionar audio"
+                                : "Solte para adicionar conteudo")
                 : (masterTarget ? "Master aceita apenas efeitos"
                                 : dragDropIsAudio ? "Audio indisponivel nesta trilha" : "Plugin indisponivel nesta trilha");
             const auto hint = juce::Rectangle<int> (8, y + 6, 220, 22);
@@ -949,6 +894,8 @@ public:
         dragTrackIndex = -1;
         dragDropAllowed = false;
         const bool audioDrop = description.startsWith ("audio:");
+        const bool midiDrop = description.startsWith ("browser-item:")
+            && juce::File (description.substring (13)).hasFileExtension (".mid;.midi");
         dragDropIsAudio = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
         repaint();
@@ -963,6 +910,15 @@ public:
             return;
         }
 
+        if (midiDrop)
+        {
+            juce::File file (description.substring (13));
+            notifyAction ("MIDI solto no arrangement", icons::Icon::PianoRoll, false, 650);
+            if (owner.onMidiDropped)
+                owner.onMidiDropped (file, trackId, beat);
+            return;
+        }
+
         if (description.startsWith ("plugin:") && owner.canAcceptPluginDrop
             && owner.canAcceptPluginDrop (description.substring (7), trackId) && owner.onPluginDropped)
         {
@@ -973,13 +929,20 @@ public:
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override
     {
-        return files.size() == 1 && isAudioFile (juce::File (files[0]));
+        const juce::File file (files.size() == 1 ? files[0] : juce::String());
+        return files.size() == 1
+            && (isAudioFile (file) || file.hasFileExtension (".mid;.midi"));
     }
 
     void fileDragEnter (const juce::StringArray& files, int x, int y) override
     {
         updateFileDragTarget (files, x, y);
-        notifyAction ("Arrastando audio para o arrangement", icons::Icon::Waveform, true, 0);
+        const juce::File file (files.size() == 1 ? files[0] : juce::String());
+        notifyAction (file.hasFileExtension (".mid;.midi")
+            ? "Arrastando MIDI para o arrangement"
+            : "Arrastando audio para o arrangement",
+            file.hasFileExtension (".mid;.midi") ? icons::Icon::PianoRoll : icons::Icon::Waveform,
+            true, 0);
     }
     void fileDragMove  (const juce::StringArray& files, int x, int y) override { updateFileDragTarget (files, x, y); }
 
@@ -1007,9 +970,17 @@ public:
         }
         const juce::File file (files[0]);
         const int trackId = trackIdAt (trackIndex);
-        notifyAction ("Audio solto no arrangement", icons::Icon::Waveform, false, 650);
-        if (owner.canAcceptAudioDrop && owner.canAcceptAudioDrop (file, trackId) && owner.onAudioDropped)
+        if (file.hasFileExtension (".mid;.midi"))
+        {
+            notifyAction ("MIDI solto no arrangement", icons::Icon::PianoRoll, false, 650);
+            if (owner.onMidiDropped)
+                owner.onMidiDropped (file, trackId, snapClipBeat (static_cast<double> (x) / owner.pixelsPerBeat));
+        }
+        else if (owner.canAcceptAudioDrop && owner.canAcceptAudioDrop (file, trackId) && owner.onAudioDropped)
+        {
+            notifyAction ("Audio solto no arrangement", icons::Icon::Waveform, false, 650);
             owner.onAudioDropped (file, trackId, snapClipBeat (static_cast<double> (x) / owner.pixelsPerBeat));
+        }
         dragTrackIndex = -1;
         dragDropAllowed = false;
         dragDropIsAudio = false;
@@ -1064,34 +1035,6 @@ public:
             return;
         }
 
-        if (e.mods.isShiftDown() && e.mods.isLeftButtonDown()
-            && row >= 0 && row < static_cast<int> (project.tracks.size()))
-        {
-            const auto clicked = hit (e.position);
-            if (clicked.clip != nullptr || clicked.audioClip != nullptr)
-            {
-                pendingSelection = { project.tracks[static_cast<std::size_t> (clicked.trackIndex)]->id,
-                                     clicked.audioClip != nullptr ? clicked.audioClip->id : clicked.clip->id,
-                                     clicked.audioClip != nullptr };
-                selectionDownPosition = e.position;
-                mode = Mode::ShiftPending;
-                notifyInteraction (true);
-                return;
-            }
-
-            mode = Mode::RangeSelect;
-            selectedClips.clear();
-            selectionAnchor = {};
-            const double rawBeat = std::max (0.0, e.position.x / owner.pixelsPerBeat);
-            rangeStartBeat = rangeEndBeat = e.mods.isAltDown() ? rawBeat : owner.snapBeat (rawBeat);
-            rangeStartTrack = rangeEndTrack = row;
-            hasRangeSelection = true;
-            const int trackId = project.tracks[static_cast<std::size_t> (row)]->id;
-            project.selectClip (trackId, -1);
-            notifyInteraction (true);
-            repaint();
-            return;
-        }
         hasRangeSelection = false;
 
         if (row == static_cast<int> (project.tracks.size()))
@@ -1138,6 +1081,18 @@ public:
             project.selectClip (trackId, -1);
             selectionDownPosition = e.position;
             mode = Mode::EmptyClickPending;
+            notifyInteraction (true);
+            return;
+        }
+
+        if (e.mods.isShiftDown())
+        {
+            pendingSelection = { trackId,
+                h.audioClip != nullptr ? h.audioClip->id : h.clip->id,
+                h.audioClip != nullptr };
+            selectionDownPosition = e.position;
+            mode = Mode::ShiftPending;
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
             notifyInteraction (true);
             return;
         }
@@ -1213,6 +1168,8 @@ public:
         }
         downBeat = e.position.x / owner.pixelsPerBeat;
         downY = e.position.y;
+        const float left = static_cast<float> (
+            (h.audioClip != nullptr ? h.audioClip->start : h.clip->start) * owner.pixelsPerBeat);
         const float right = static_cast<float> ((h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
         if (focusesClipTime)
         {
@@ -1221,13 +1178,17 @@ public:
             pendingRangeTrack = h.trackIndex;
         }
         else if (mode == Mode::None)
-            mode = (e.position.x > right - 7.0f) ? Mode::Resize : Mode::Move;
+            mode = e.position.x > right - 7.0f
+                ? Mode::Resize
+                : e.position.x < left + 7.0f
+                    ? Mode::ResizeLeft
+                    : Mode::Move;
         if (mode == Mode::Move && dragExistingSelection)
             captureMultiDragSources (clickedClip);
         if (mode == Mode::FadeInCurve || mode == Mode::FadeOutCurve)
             setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
         else
-            setMouseCursor (mode == Mode::Resize || mode == Mode::FadeIn || mode == Mode::FadeOut
+            setMouseCursor (mode == Mode::Resize || mode == Mode::ResizeLeft || mode == Mode::FadeIn || mode == Mode::FadeOut
                                 ? juce::MouseCursor::LeftRightResizeCursor
                                 : juce::MouseCursor::DraggingHandCursor);
         notifyInteraction (true);
@@ -1506,6 +1467,37 @@ public:
                         project.sendChangeMessage();
                     }
                 }
+                else if (mode == Mode::ResizeLeft)
+                {
+                    const double beat = e.position.x / owner.pixelsPerBeat;
+                    const double requestedStart = noSnap ? beat : owner.snapBeat (beat);
+                    if (curAudioClipId >= 0)
+                    {
+                    if (auto* track = project.track (curTrack))
+                        if (auto* clip = track->findAudioClip (curAudioClipId))
+                        {
+                            const double minimumLength = owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0;
+                            const double endBeat = clip->end();
+                            const double newStart = std::clamp (
+                                requestedStart, 0.0, endBeat - minimumLength);
+                            const double newLength = endBeat - newStart;
+                            project.resizeAudioClipStart (curTrack, curAudioClipId, newStart, newLength);
+                        }
+                    }
+                    else if (curClip >= 0)
+                    {
+                    if (auto* track = project.track (curTrack))
+                        if (auto* clip = track->find (curClip))
+                        {
+                            const double minimumLength = owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0;
+                            const double endBeat = clip->end();
+                            const double newStart = std::clamp (
+                                requestedStart, 0.0, endBeat - minimumLength);
+                            const double newLength = endBeat - newStart;
+                            project.resizeClipStart (curTrack, curClip, newStart, newLength);
+                        }
+                    }
+                }
         }
         else if (mode == Mode::FadeIn || mode == Mode::FadeOut)
         {
@@ -1602,6 +1594,69 @@ public:
             curAudioClipId = -1;
             repaint();
             return;
+        }
+
+        if ((mode == Mode::Resize || mode == Mode::ResizeLeft)
+            && e.getDistanceFromDragStart() >= 4.0f)
+        {
+            auto* track = project.track (curTrack);
+            if (track != nullptr)
+            {
+                if (curAudioClipId >= 0)
+                {
+                    auto* clip = track->findAudioClip (curAudioClipId);
+                    if (clip != nullptr)
+                    {
+                        if (mode == Mode::Resize)
+                        {
+                            for (const auto& adjacent : track->audioClips)
+                                if (adjacent->id != curAudioClipId
+                                    && std::abs (adjacent->start - clip->end()) < 1.0e-7)
+                                {
+                                    project.joinAudioClips (curTrack, curAudioClipId, adjacent->id);
+                                    break;
+                                }
+                        }
+                        else
+                        {
+                            for (const auto& adjacent : track->audioClips)
+                                if (adjacent->id != curAudioClipId
+                                    && std::abs (adjacent->end() - clip->start) < 1.0e-7)
+                                {
+                                    project.joinAudioClips (curTrack, adjacent->id, curAudioClipId);
+                                    break;
+                                }
+                        }
+                    }
+                }
+                else if (curClip >= 0)
+                {
+                    auto* clip = track->find (curClip);
+                    if (clip != nullptr)
+                    {
+                        if (mode == Mode::Resize)
+                        {
+                            for (const auto& adjacent : track->clips)
+                                if (adjacent->id != curClip
+                                    && std::abs (adjacent->start - clip->end()) < 1.0e-7)
+                                {
+                                    project.joinMidiClips (curTrack, curClip, adjacent->id);
+                                    break;
+                                }
+                        }
+                        else
+                        {
+                            for (const auto& adjacent : track->clips)
+                                if (adjacent->id != curClip
+                                    && std::abs (adjacent->end() - clip->start) < 1.0e-7)
+                                {
+                                    project.joinMidiClips (curTrack, adjacent->id, curClip);
+                                    break;
+                                }
+                        }
+                    }
+                }
+            }
         }
 
         bool moveFailed = false;
@@ -1970,6 +2025,30 @@ public:
             return true;
         }
 
+        if (ctrl && k.getModifiers().isShiftDown() && key == 'K')
+        {
+            if (! hasRangeSelection)
+                return false;
+            const double start = std::min (rangeStartBeat, rangeEndBeat);
+            const double end = std::max (rangeStartBeat, rangeEndBeat);
+            const int first = std::min (rangeStartTrack, rangeEndTrack);
+            const int last = std::max (rangeStartTrack, rangeEndTrack);
+            project.beginEdit();
+            bool changed = false;
+            for (int row = first; row <= last && row < static_cast<int> (project.tracks.size()); ++row)
+            {
+                const auto* track = project.tracks[static_cast<std::size_t> (row)].get();
+                if (project.cropRange (track->id, start, end))
+                    changed = true;
+            }
+            project.endEdit();
+            if (changed)
+            {
+                notifyAction ("Selecao recortada", icons::Icon::Cut, false, 700);
+                return true;
+            }
+        }
+
         if (ctrl && key == 'Z' && ! k.getModifiers().isShiftDown())
         {
             project.undo();
@@ -2088,6 +2167,10 @@ private:
             case roll::AutomationParameterType::PluginParameter:
                 label = juce::String::fromUTF8 (envelope.target.parameterName.c_str());
                 break;
+            case roll::AutomationParameterType::AudioClipGain: label = "Clip Gain"; break;
+            case roll::AutomationParameterType::AudioClipPitch: label = "Clip Pitch"; break;
+            case roll::AutomationParameterType::AudioClipFadeIn: label = "Fade In"; break;
+            case roll::AutomationParameterType::AudioClipFadeOut: label = "Fade Out"; break;
         }
         if (label.isNotEmpty())
         {
@@ -2298,6 +2381,16 @@ private:
                 if (automationPointValueText.isEmpty())
                     automationPointValueText = juce::String (value * 100.0, 1) + "%";
                 break;
+            case roll::AutomationParameterType::AudioClipGain:
+                automationPointValueText = juce::String (value, 1) + " dB";
+                break;
+            case roll::AutomationParameterType::AudioClipPitch:
+                automationPointValueText = juce::String (value, 1) + " st";
+                break;
+            case roll::AutomationParameterType::AudioClipFadeIn:
+            case roll::AutomationParameterType::AudioClipFadeOut:
+                automationPointValueText = juce::String (value, 2) + " beats";
+                break;
         }
     }
 
@@ -2507,9 +2600,19 @@ private:
                     && current.audio == selected.audio;
             });
         if (it == selectedClips.end())
+        {
             selectedClips.push_back (selected);
+            selectionAnchor = selected;
+        }
         else
+        {
             selectedClips.erase (it);
+            if (selectionAnchor.trackId == selected.trackId
+                && selectionAnchor.clipId == selected.clipId
+                && selectionAnchor.audio == selected.audio)
+                selectionAnchor = selectedClips.empty() ? ClipSelection {}
+                                                        : selectedClips.back();
+        }
 
         if (selectedClips.empty())
         {
@@ -2811,13 +2914,13 @@ private:
                 if (track.type == roll::TrackType::Audio)
                 {
                     for (const auto& clip : track.audioClips)
-                        if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                        if (clip->start < end - 1.0e-9 && clip->end() > start + 1.0e-9)
                             sources.push_back ({ track.id, clip->id, true });
                 }
                 else
                 {
                     for (const auto& clip : track.clips)
-                        if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
+                        if (clip->start < end - 1.0e-9 && clip->end() >= start + 1.0e-9)
                             sources.push_back ({ track.id, clip->id, false });
                 }
             }
@@ -2847,12 +2950,52 @@ private:
             if (source.audio)
             {
                 if (const auto* clip = track->findAudioClip (source.clipId))
-                    clipboard.push_back ({ trackOffset, clip->start - start, true, nullptr,
-                                           std::make_unique<roll::AudioPlacement> (*clip) });
+                {
+                    roll::AudioPlacement snapshot (*clip);
+                    const double clippedStart = std::max (snapshot.start, start);
+                    const double clippedEnd = std::min (snapshot.end(), end);
+                    const double overlap = clippedEnd - clippedStart;
+                    if (overlap <= 1.0e-9)
+                        continue;
+                    const double leftBeats = clippedStart - snapshot.start;
+                    snapshot.start = 0.0;
+                    snapshot.lengthBeats = overlap;
+                    snapshot.durationSeconds = overlap * 60.0 / std::max (snapshot.sourceBpm, 20.0);
+                    snapshot.sourceOffsetSeconds += leftBeats * 60.0 / std::max (snapshot.sourceBpm, 20.0);
+                    snapshot.fadeInBeats = std::min (snapshot.fadeInBeats, overlap);
+                    snapshot.fadeOutBeats = std::min (snapshot.fadeOutBeats, overlap);
+                    clipboard.push_back ({ trackOffset, clippedStart - start, true, nullptr,
+                                           std::make_unique<roll::AudioPlacement> (std::move (snapshot)) });
+                }
             }
             else if (const auto* clip = track->find (source.clipId))
-                clipboard.push_back ({ trackOffset, clip->start - start, false,
-                                       std::make_unique<roll::Placement> (*clip), nullptr });
+            {
+                roll::Placement snapshot (*clip);
+                const double clippedStart = std::max (snapshot.start, start);
+                const double clippedEnd = std::min (snapshot.end(), end);
+                const double overlap = clippedEnd - clippedStart;
+                if (overlap <= 1.0e-9)
+                    continue;
+                std::vector<roll::Note> clippedNotes;
+                for (const auto& note : snapshot.clip.notes())
+                {
+                    const double absoluteStart = snapshot.start + note.startBeats;
+                    const double absoluteEnd = absoluteStart + note.lengthBeats;
+                    if (absoluteEnd <= clippedStart + 1.0e-9 || absoluteStart >= clippedEnd - 1.0e-9)
+                        continue;
+                    roll::Note clipped = note;
+                    const double relativeStart = std::max (absoluteStart, clippedStart) - clippedStart;
+                    const double relativeEnd = std::min (absoluteEnd, clippedEnd) - clippedStart;
+                    clipped.startBeats = relativeStart;
+                    clipped.lengthBeats = std::max (1.0e-9, relativeEnd - relativeStart);
+                    clippedNotes.push_back (clipped);
+                }
+                snapshot.start = 0.0;
+                snapshot.clip.setLength (overlap);
+                snapshot.clip.setNotes (std::move (clippedNotes));
+                clipboard.push_back ({ trackOffset, clippedStart - start, false,
+                                       std::make_unique<roll::Placement> (std::move (snapshot)), nullptr });
+            }
         }
         if (clipboard.empty())
             return false;
@@ -2987,36 +3130,17 @@ private:
 
         const int first = std::min (rangeStartTrack, rangeEndTrack);
         const int last = std::max (rangeStartTrack, rangeEndTrack);
-        struct ClipAction { int trackId; int clipId; bool audio; };
-        std::vector<ClipAction> actions;
+        project.beginEdit();
+        bool changed = false;
         for (int row = first; row <= last && row < static_cast<int> (project.tracks.size()); ++row)
         {
             const auto* track = project.tracks[static_cast<std::size_t> (row)].get();
-            if (track->type == roll::TrackType::Audio)
-            {
-                for (const auto& clip : track->audioClips)
-                    if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
-                        actions.push_back ({ track->id, clip->id, true });
-            }
-            else
-            {
-                for (const auto& clip : track->clips)
-                    if (clip->start >= start - 1.0e-9 && clip->end() <= end + 1.0e-9)
-                        actions.push_back ({ track->id, clip->id, false });
-            }
-        }
-        if (actions.empty())
-            return;
-
-        project.beginEdit();
-        for (const auto& action : actions)
-        {
-            if (action.audio)
-                project.deleteAudioClip (action.trackId, action.clipId);
-            else
-                project.deleteClip (action.trackId, action.clipId);
+            if (project.deleteRange (track->id, start, end))
+                changed = true;
         }
         project.endEdit();
+        if (changed)
+            notifyAction ("Faixa removida", icons::Icon::Eraser, false, 700);
         repaint();
     }
 
@@ -3039,6 +3163,8 @@ private:
         const auto description = details.description.toString();
         const int target = trackIndexAt (details.localPosition.y);
         dragDropIsAudio = description.startsWith ("audio:");
+        const bool midiDrop = description.startsWith ("browser-item:")
+            && juce::File (description.substring (13)).hasFileExtension (".mid;.midi");
         dragTrackIndex = target;
         dragBeat = snapClipBeat (details.localPosition.x / owner.pixelsPerBeat);
         dragDropAllowed = false;
@@ -3046,6 +3172,12 @@ private:
         if (dragDropIsAudio)
             dragDropAllowed = owner.canAcceptAudioDrop
                            && owner.canAcceptAudioDrop (juce::File (description.substring (6)), trackId);
+        else if (midiDrop)
+        {
+            const auto* track = project.track (trackId);
+            dragDropAllowed = track != nullptr
+                && (track->type == roll::TrackType::Midi || trackId == 0);
+        }
         else if (description.startsWith ("plugin:"))
             dragDropAllowed = owner.canAcceptPluginDrop
                            && owner.canAcceptPluginDrop (description.substring (7), trackId);
@@ -3063,15 +3195,18 @@ private:
 
     void updateFileDragTarget (const juce::StringArray& files, int x, int y)
     {
-        dragDropIsAudio = true;
+        const juce::File file (files.size() == 1 ? files[0] : juce::String());
+        dragDropIsAudio = isAudioFile (file);
         dragTrackIndex = trackIndexAt (y);
         dragBeat = snapClipBeat (static_cast<double> (x) / owner.pixelsPerBeat);
         dragDropAllowed = false;
-        if (files.size() == 1 && owner.canAcceptAudioDrop)
+        if (files.size() == 1 && dragDropIsAudio && owner.canAcceptAudioDrop)
         {
             const int trackId = trackIdAt (dragTrackIndex);
-            dragDropAllowed = owner.canAcceptAudioDrop (juce::File (files[0]), trackId);
+            dragDropAllowed = owner.canAcceptAudioDrop (file, trackId);
         }
+        else if (files.size() == 1 && file.hasFileExtension (".mid;.midi"))
+            dragDropAllowed = true;
         setMouseCursor (dragDropAllowed ? juce::MouseCursor::CopyingCursor : juce::MouseCursor::NormalCursor);
         repaint();
     }
@@ -3120,8 +3255,11 @@ private:
         }
 
         const float right = static_cast<float> ((h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
-        setMouseCursor (position.x > right - 7.0f ? juce::MouseCursor::LeftRightResizeCursor
-                                                   : juce::MouseCursor::DraggingHandCursor);
+        const float left = static_cast<float> (
+            (h.audioClip != nullptr ? h.audioClip->start : h.clip->start) * owner.pixelsPerBeat);
+        setMouseCursor (position.x > right - 7.0f || position.x < left + 7.0f
+                            ? juce::MouseCursor::LeftRightResizeCursor
+                            : juce::MouseCursor::DraggingHandCursor);
     }
 
     Mode fadeModeAt (const Hit& h, juce::Point<float> position) const
@@ -3355,6 +3493,8 @@ private:
     bool hasRangeSelection = false;
     double rangeStartBeat = 0.0, rangeEndBeat = 0.0;
     int rangeStartTrack = 0, rangeEndTrack = 0;
+    double shiftRangeAnchorBeat = -1.0;
+    int shiftRangeAnchorTrack = -1;
     int multiDragAnchorTrackIndex = -1;
     int pendingRangeTrack = -1;
     std::vector<ClipSelection> selectedClips;
@@ -4140,6 +4280,7 @@ public:
         pan.setTooltip (theme::ui ("Panorama: esquerda (-100%) / direita (+100%); duplo clique centraliza; clique para habilitar a rodinha"));
         pan.setRange (-1.0, 1.0, 0.01);
         pan.centreValue = 0.0;
+        pan.bipolar = true;
         pan.setValue (t->pan, juce::dontSendNotification);
         pan.setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
         pan.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border().brighter (0.45f));
@@ -4163,7 +4304,7 @@ public:
         volume.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         volume.setTooltip (theme::ui ("Volume da trilha; clique para habilitar a rodinha do mouse"));
         volume.setRange (0.0, 1.5, 0.001);
-        volume.centreValue = 1.0;
+        volume.bipolar = false;
         volume.setValue (t->volume, juce::dontSendNotification);
         volume.setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
         volume.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border().brighter (0.45f));
@@ -4617,7 +4758,7 @@ public:
         foldButton.onClick = [this] { owner.toggleTrackCollapsed (0); };
         updateFoldButton();
 
-        volume.centreValue = 0.0;
+        volume.bipolar = false;
         volume.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         volume.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         volume.setRange (-60.0, 6.0, 0.1);
@@ -4654,6 +4795,8 @@ public:
         panValue.setColour (juce::Label::textColourId, theme::textDim());
         panValue.setJustificationType (juce::Justification::centredRight);
         pan.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        pan.centreValue = 0.0;
+        pan.bipolar = true;
         pan.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         pan.setRange (-1.0, 1.0, 0.01);
         pan.setValue (project.masterTrack != nullptr ? project.masterTrack->pan : 0.0,
@@ -5319,6 +5462,7 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     };
 
     project.addChangeListener (this);
+    setAdaptiveGrid (true);
     refresh();
     updateLocatorControls();
     updateAutomationTargetButton();
@@ -5539,6 +5683,52 @@ void ArrangementView::selectMixerAutomationParameter (
         updateAutomationStatus();
         lanes->repaint();
     }
+}
+
+void ArrangementView::selectAudioClipAutomationParameter (
+    int trackId, int clipId, roll::AutomationParameterType type, double value)
+{
+    roll::AutomationTarget target;
+    target.type = type;
+    target.clipId = clipId;
+    target.currentValue = value;
+    if (trackId != 0)
+        project.selectTrack (trackId);
+    automationTargetTrackId = trackId;
+    automationTarget = target;
+    if (automationMode)
+    {
+        const auto* track = trackId == 0 ? project.masterTrack.get() : project.track (trackId);
+        const auto* clip = track != nullptr ? track->findAudioClip (clipId) : nullptr;
+        if (clip != nullptr)
+        {
+            const auto existing = std::find_if (track->automation.begin(), track->automation.end(),
+                [this] (const auto& envelope) { return envelope.target == automationTarget; });
+            roll::AutomationEnvelope envelope;
+            if (existing != track->automation.end())
+                envelope = *existing;
+            else
+            {
+                envelope.target = automationTarget;
+                envelope.points = { { clip->start, value }, { clip->end(), value } };
+            }
+
+            const double beat = std::clamp (playhead, clip->start, clip->end());
+            const auto point = std::lower_bound (envelope.points.begin(), envelope.points.end(), beat,
+                [] (const roll::AutomationPoint& candidate, double position)
+                {
+                    return candidate.beat < position;
+                });
+            if (point != envelope.points.end() && std::abs (point->beat - beat) < 1.0e-9)
+                point->value = value;
+            else
+                envelope.points.insert (point, { beat, value });
+            project.setAutomationEnvelope (trackId, std::move (envelope));
+        }
+    }
+    updateAutomationTargetButton();
+    updateAutomationStatus();
+    lanes->repaint();
 }
 
 void ArrangementView::selectPluginAutomationParameter (

@@ -1,6 +1,12 @@
 #include "AudioFileBrowser.h"
 #include "FavoriteColorPalette.h"
 #include "FreedomModalDialog.h"
+#if defined(_WIN32)
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+#endif
 #include <algorithm>
 #include <array>
 #include <filesystem>
@@ -847,6 +853,8 @@ void AudioFileBrowser::showFileMenu (const juce::File& file, juce::Point<int> sc
     }
     else if (file.existsAsFile())
         menu.addItem (22, "Mover arquivo para a Lixeira...");
+    if (file.exists())
+        menu.addItem (24, "Localizar no Explorer");
 
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
     const juce::PopupMenu::Options options;
@@ -865,7 +873,30 @@ void AudioFileBrowser::showFileMenu (const juce::File& file, juce::Point<int> sc
                 safeThis->moveItemToTrash (file);
             else if (result == 23 && file.isDirectory())
                 safeThis->moveItemToTrash (file);
+            else if (result == 24)
+                safeThis->locateInExplorer (file);
         });
+}
+
+void AudioFileBrowser::locateInExplorer (const juce::File& file)
+{
+#if defined(_WIN32)
+    const juce::String path = file.existsAsFile()
+        ? file.getFullPathName()
+        : file.isDirectory() ? file.getFullPathName()
+                             : juce::String();
+    if (path.isEmpty())
+        return;
+
+    const juce::String command = file.existsAsFile()
+        ? juce::String ("/select,\"") + path + juce::String ("\"")
+        : juce::String ("/e,\"") + path + juce::String ("\"");
+    ShellExecuteW (nullptr, L"open", L"explorer.exe",
+                   command.toWideCharPointer(),
+                   nullptr, SW_SHOWNORMAL);
+#else
+    juce::ignoreUnused (file);
+#endif
 }
 
 void AudioFileBrowser::createFolderInDirectory (const juce::File& directory)

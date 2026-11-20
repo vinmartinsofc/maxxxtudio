@@ -72,6 +72,7 @@ public:
     std::function<void (int trackId)> onTrackAdded, onTrackRemoved;   // removed: antes de apagar
     std::function<void (int trackId)> onTrackNotes;                   // notas da trilha mudaram
     std::function<void (int trackId)> onAudioClipsChanged;
+    std::function<void (int trackId)> onAudioClipAutomationChanged;
     std::function<void()> onMixerChanged;
     std::function<void()> onSelectionChanged;                         // trilha/clip selecionados mudaram
     std::function<void()> onLoopChanged;
@@ -117,12 +118,23 @@ public:
     int copyAudioClipReplacingRange (const roll::AudioPlacement& source, int toTrack, double start);
     int duplicateAudioClip (int trackId, int clipId);
     int splitAudioClip (int trackId, int clipId, double beat);
+    bool joinAudioClips (int trackId, int leftClipId, int rightClipId);
     bool resizeAudioClip (int trackId, int clipId, double length);
+    bool resizeAudioClipStart (int trackId, int clipId, double start, double length);
+    bool resizeClipStart (int trackId, int clipId, double start, double length);
+    bool joinMidiClips (int trackId, int leftClipId, int rightClipId);
     bool setAudioClipFades (int trackId, int clipId, double fadeInBeats, double fadeOutBeats);
     bool setAudioClipFadeCurves (int trackId, int clipId, double fadeInCurve, double fadeOutCurve);
     bool setAudioClipSourceBpm (int trackId, int clipId, double sourceBpm);
+    bool setAudioClipWarpMarkers (int trackId, int clipId,
+                                  const std::vector<roll::AudioWarpMarker>& markers);
     bool setAudioClipWarpEnabled (int trackId, int clipId, bool enabled);
+    bool setAudioClipPlayback (
+        int trackId, int clipId, double pitchSemitones, double pitchCents,
+        double gainDb, int warpMode, bool reverse);
     bool setClipEnabled (int trackId, int clipId, bool audio, bool enabled);
+    bool deleteRange (int trackId, double start, double end);
+    bool cropRange (int trackId, double start, double end);
     bool setAutomationEnvelope (int trackId, roll::AutomationEnvelope);
     bool removeAutomationEnvelope (int trackId, const roll::AutomationTarget&);
     // Move para outra trilha/posicao, substituindo apenas o trecho sobreposto.

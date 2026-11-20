@@ -7,6 +7,7 @@
 #include "Icons.h"
 #include "MainComponent.h"
 #include "Theme.h"
+#include "ThemeKnobSlider.h"
 #include "WindowPlacement.h"
 #include <limits>
 
@@ -67,6 +68,8 @@ public:
     void initialise (const juce::String& commandLine) override
     {
         theme::load();
+        static ThemeKnobLookAndFeel themeKnobLookAndFeel;
+        juce::LookAndFeel::setDefaultLookAndFeel (&themeKnobLookAndFeel);
 #if defined(_WIN32)
         const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
         const bool pfsRegistered = registerProjectFileAssociation (
@@ -85,11 +88,15 @@ public:
                                     theme::border(), theme::text(), theme::control(),
                                     juce::Colours::black, theme::accent(), theme::text() });
             laf->setColour (juce::ResizableWindow::backgroundColourId, theme::background());
+            laf->setColour (juce::BubbleComponent::backgroundColourId, theme::panel());
+            laf->setColour (juce::BubbleComponent::outlineColourId, theme::border());
             laf->setColour (juce::TextButton::buttonColourId, theme::control());
             laf->setColour (juce::TextButton::buttonOnColourId, theme::accent());
             laf->setColour (juce::TextButton::textColourOffId, theme::text());
             laf->setColour (juce::TextButton::textColourOnId, theme::text());
+            laf->setColour (juce::TooltipWindow::backgroundColourId, theme::panel());
             laf->setColour (juce::TooltipWindow::textColourId, theme::text());
+            laf->setColour (juce::TooltipWindow::outlineColourId, theme::border());
             laf->setColour (juce::AlertWindow::backgroundColourId, theme::panel());
             laf->setColour (juce::AlertWindow::textColourId, theme::text());
             laf->setColour (juce::AlertWindow::outlineColourId, theme::accent());

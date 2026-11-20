@@ -173,6 +173,46 @@ TEST_CASE ("Project files preserve mixer and plugin automation envelopes")
     REQUIRE (envelope.points == data.project.tracks[0].automation[0].points);
 }
 
+TEST_CASE ("Project files preserve audio clip automation targets")
+{
+    TemporaryProjectFolder temporary;
+    const auto source = temporary.folder.getChildFile ("source.wav");
+    REQUIRE (source.replaceWithText ("audio asset"));
+
+    ProjectFileData data;
+    data.project.master.id = AudioEngine::masterTrackId;
+    roll::Track track;
+    track.id = 1;
+    track.type = roll::TrackType::Audio;
+    auto* clip = track.addAudioClip (0.0, 4.0, source.getFullPathName().toStdString(),
+                                     "Audio", {}, 2.0, 120.0);
+    REQUIRE (clip != nullptr);
+    clip->warpMarkers = { { 0.0, 0.0 }, { 1.25, 2.0 }, { 2.0, 4.0 } };
+
+    roll::AutomationEnvelope envelope;
+    envelope.target.type = roll::AutomationParameterType::AudioClipGain;
+    envelope.target.clipId = clip->id;
+    envelope.target.currentValue = 3.0;
+    envelope.points = { { 0.0, 0.0 }, { 4.0, 6.0 } };
+    track.automation.push_back (envelope);
+    data.project.tracks.push_back (track);
+
+    const auto file = temporary.folder.getChildFile ("audio_automation.pfs");
+    REQUIRE (ProjectFile::save (file, data).wasOk());
+    ProjectFileData loaded;
+    REQUIRE (ProjectFile::load (file, loaded).wasOk());
+
+    REQUIRE (loaded.project.tracks.size() == 1);
+    const auto& loadedTrack = loaded.project.tracks.front();
+    REQUIRE (loadedTrack.audioClips.size() == 1);
+    CHECK (loadedTrack.audioClips.front()->warpMarkers == clip->warpMarkers);
+    REQUIRE (loadedTrack.automation.size() == 1);
+    CHECK (loadedTrack.automation.front().target.type
+           == roll::AutomationParameterType::AudioClipGain);
+    CHECK (loadedTrack.automation.front().target.clipId == clip->id);
+    CHECK (loadedTrack.automation.front().points == envelope.points);
+}
+
 TEST_CASE ("Project files migrate legacy Volume Master gain and rate automation")
 {
     TemporaryProjectFolder temporary;

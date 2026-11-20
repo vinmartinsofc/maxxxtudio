@@ -404,6 +404,86 @@ TEST_CASE ("Dropping audio onto occupied content replaces only the overlapped ra
     }));
 }
 
+TEST_CASE ("Adjacent split MIDI clips can be joined")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Midi);
+    REQUIRE (track != nullptr);
+
+    auto* left = project.addClip (track->id, 0.0, 4.0);
+    REQUIRE (left != nullptr);
+    left->clip.addNote ({ 60, 0.0, 1.0, 100 });
+
+    const int rightId = project.splitClip (track->id, left->id, 2.0);
+    REQUIRE (rightId > 0);
+    auto* right = track->find (rightId);
+    REQUIRE (right != nullptr);
+    right->clip.addNote ({ 64, 0.5, 1.0, 90 });
+
+    REQUIRE (project.joinMidiClips (track->id, left->id, rightId));
+    const auto* joined = track->find (left->id);
+    REQUIRE (joined != nullptr);
+    REQUIRE (joined->clip.length() == Catch::Approx (4.0));
+    REQUIRE (joined->clip.notes().size() == 2);
+    REQUIRE (track->find (rightId) == nullptr);
+}
+
+TEST_CASE ("Adjacent split audio clips can be joined")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Audio);
+    REQUIRE (track != nullptr);
+
+    auto* left = project.addAudioClip (
+        track->id, 0.0, 4.0, "C:/audio/recover.wav", "recover.wav",
+        { { -0.5f, 0.5f }, { -0.4f, 0.4f } }, 2.0, 120.0);
+    REQUIRE (left != nullptr);
+    left->sourceOffsetSeconds = 0.25;
+
+    const int rightId = project.splitAudioClip (track->id, left->id, 2.0);
+    REQUIRE (rightId > 0);
+    REQUIRE (project.joinAudioClips (track->id, left->id, rightId));
+
+    const auto* joined = track->findAudioClip (left->id);
+    REQUIRE (joined != nullptr);
+    REQUIRE (joined->lengthBeats == Catch::Approx (4.0));
+    REQUIRE (joined->durationSeconds == Catch::Approx (2.0));
+    REQUIRE (joined->sourceOffsetSeconds == Catch::Approx (0.25));
+    REQUIRE (track->findAudioClip (rightId) == nullptr);
+}
+
+TEST_CASE ("Audio warp markers stay aligned across split and join")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Audio);
+    REQUIRE (track != nullptr);
+    auto* clip = project.addAudioClip (
+        track->id, 0.0, 4.0, "C:/audio/warped.wav", "warped.wav", {}, 2.0, 120.0);
+    REQUIRE (clip != nullptr);
+    clip->sourceOffsetSeconds = 0.25;
+    const std::vector<roll::AudioWarpMarker> markers {
+        { 0.25, 0.0 }, { 1.5, 2.0 }, { 2.25, 4.0 }
+    };
+
+    REQUIRE (project.setAudioClipWarpMarkers (track->id, clip->id, markers));
+    CHECK (roll::audioSourceSecondsAtBeat (*clip, 1.0) == Catch::Approx (0.875));
+    const int rightId = project.splitAudioClip (track->id, clip->id, 2.0);
+    REQUIRE (rightId > 0);
+    const auto* left = track->findAudioClip (clip->id);
+    const auto* right = track->findAudioClip (rightId);
+    REQUIRE (left != nullptr);
+    REQUIRE (right != nullptr);
+    REQUIRE (left->warpMarkers.size() == 2);
+    REQUIRE (right->warpMarkers.size() == 2);
+    CHECK (left->durationSeconds == Catch::Approx (1.25));
+    CHECK (right->sourceOffsetSeconds == Catch::Approx (1.5));
+
+    REQUIRE (project.joinAudioClips (track->id, left->id, rightId));
+    const auto* joined = track->findAudioClip (clip->id);
+    REQUIRE (joined != nullptr);
+    CHECK (joined->warpMarkers == markers);
+}
+
 TEST_CASE ("Imported audio can receive short non-overlapping edge fades")
 {
     ProjectModel project;
@@ -552,6 +632,34 @@ TEST_CASE ("ProjectModel validates automation and includes it in undo and redo")
     envelope.points[1].value = 2.0;
     REQUIRE_FALSE (model.setAutomationEnvelope (trackId, envelope));
     REQUIRE (model.track (trackId)->automation.size() == 1);
+}
+
+TEST_CASE ("Audio clip automation requires an existing audio clip and supports undo")
+{
+    ProjectModel model;
+    const auto* midiTrack = model.addTrack (roll::TrackType::Midi);
+    REQUIRE (midiTrack != nullptr);
+    const int midiTrackId = midiTrack->id;
+
+    roll::AutomationEnvelope envelope;
+    envelope.target.type = roll::AutomationParameterType::AudioClipGain;
+    envelope.target.clipId = 1;
+    envelope.points = { { 0.0, 0.0 }, { 4.0, 6.0 } };
+    REQUIRE_FALSE (model.setAutomationEnvelope (midiTrackId, envelope));
+
+    const auto* audioTrack = model.addTrack (roll::TrackType::Audio);
+    REQUIRE (audioTrack != nullptr);
+    const int audioTrackId = audioTrack->id;
+    const auto* clip = model.addAudioClip (audioTrackId, 0.0, 4.0,
+                                           "audio.wav", "Audio", {}, 2.0, 120.0);
+    REQUIRE (clip != nullptr);
+    envelope.target.clipId = clip->id;
+    REQUIRE (model.setAutomationEnvelope (audioTrackId, envelope));
+    REQUIRE (model.track (audioTrackId)->automation.size() == 1);
+    REQUIRE (model.undo());
+    REQUIRE (model.track (audioTrackId)->automation.empty());
+    REQUIRE (model.redo());
+    REQUIRE (model.track (audioTrackId)->automation.size() == 1);
 }
 
 TEST_CASE ("ProjectModel stores track colours and includes them in undo and redo")

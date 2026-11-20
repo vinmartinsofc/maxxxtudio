@@ -37,6 +37,7 @@ target_sources(ProjectFreedom PRIVATE
     NativeEffectProcessors.cpp
     OptionsWindow.cpp
     AudioClipEditor.cpp
+    ThemeKnobSlider.cpp
     AudioFileBrowser.cpp
     PluginScanner.cpp
     BrowserPanel.cpp

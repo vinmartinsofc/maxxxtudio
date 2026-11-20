@@ -182,8 +182,10 @@ struct AudioFileData
     juce::File file;
     std::shared_ptr<juce::AudioBuffer<float>> samples;
     std::vector<roll::WaveformRange> waveform;
+    std::vector<double> transientSeconds;
     double sampleRate = 0.0;
     double durationSeconds = 0.0;
+    double estimatedBpm = 0.0;
 };
 
 struct AudioClipPlayback
@@ -196,8 +198,15 @@ struct AudioClipPlayback
     double fadeOutBeats = 0.0;
     double fadeInCurve = 0.0;
     double fadeOutCurve = 0.0;
+    double pitchSemitones = 0.0;
+    double gainDb = 0.0;
+    int warpMode = 0;
     std::shared_ptr<const AudioFileData> source;
     bool warpEnabled = true;
+    bool reverse = false;
+    std::vector<roll::AutomationEnvelope> automation;
+    double durationSeconds = 0.0;
+    std::vector<roll::AudioWarpMarker> warpMarkers;
 };
 
 class TrackAudioSource : public juce::AudioProcessor
@@ -269,6 +278,7 @@ class AudioEngine : private juce::ChangeListener
 {
 public:
     enum class IsolatedEditorResult { notIsolated, opened, noEditor, failed };
+    static double estimateAudioBpm (const juce::AudioBuffer<float>&, double sampleRate);
     std::function<void (int trackId, int deviceId, const juce::String& pluginName)> onPluginCrashed;
 
     static constexpr int masterTrackId = 0;

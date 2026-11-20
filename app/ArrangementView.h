@@ -39,6 +39,7 @@ public:
     std::function<void (const juce::String& pluginIdentifier, int trackId, double beats)> onPluginDropped;
     std::function<bool (const juce::File&, int trackId)> canAcceptAudioDrop;
     std::function<void (const juce::File&, int trackId, double beats)> onAudioDropped;
+    std::function<void (const juce::File&, int trackId, double beats)> onMidiDropped;
     std::function<void (const juce::File&)> onLocateAudioFileRequested;
     std::function<void (int trackId, int clipId)> onAudioClipDoubleClicked;
     std::function<void (int trackId)> onTrackDuplicateRequested;
@@ -56,12 +57,14 @@ public:
     std::function<void (const juce::String&, icons::Icon, bool active, int holdMilliseconds)> onInteractionChanged;
 
     void setPlayhead (double beats);
+    double getPlayhead() const noexcept { return playhead; }
     void scrollToBeat (double beats);
     void setBpm (double beatsPerMinute);
     void setLoopEnabled (bool on);
     void setGridBeat (double beats);
     bool getTimeSelectionStart (double& startBeat) const;
     bool hasSelectionToDuplicate() const;
+    bool getAutomationMode() const noexcept { return automationMode; }
     void duplicateSelection();
     void refresh();                       // recria os cabecalhos
     void refreshMidiMappingInfo();
@@ -69,6 +72,8 @@ public:
     void toggleAutomationMode();
     void toggleAutomationModeFromKey();
     void selectPluginAutomationParameter (int trackId, const roll::AutomationTarget&);
+    void selectAudioClipAutomationParameter (
+        int trackId, int clipId, roll::AutomationParameterType type, double value);
     void zoom (double factor);
     double gridBeats() const { return gridBeat; }
     double snapBeat (double beat) const;

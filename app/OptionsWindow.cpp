@@ -232,7 +232,7 @@ public:
         addAndMakeVisible (title);
 
         description.setText (
-            "Escolha o contraste da interface. Preto + laranja e cinza grafite + laranja possuem texto claro; branco + laranja possui texto escuro.",
+            "Escolha o contraste da interface. Os temas escuros usam texto claro; o tema branco usa texto escuro.",
             juce::dontSendNotification);
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::topLeft);
@@ -241,15 +241,27 @@ public:
         themeBox.addItem ("Cinza grafite + laranja", 1);
         themeBox.addItem ("Preto + laranja", 2);
         themeBox.addItem ("Branco + laranja", 3);
+        themeBox.addItem ("Cinza grafite + azul", 4);
+        themeBox.addItem ("Preto + azul", 5);
+        themeBox.addItem ("Matrix 1", 6);
+        themeBox.addItem ("Matrix 2", 7);
         themeBox.setSelectedId (theme::current() == theme::Palette::GraphiteOrange ? 1
-                               : theme::current() == theme::Palette::BlackOrange ? 2 : 3,
+                               : theme::current() == theme::Palette::BlackOrange ? 2
+                               : theme::current() == theme::Palette::WhiteOrange ? 3
+                               : theme::current() == theme::Palette::GraphiteBlue ? 4
+                               : theme::current() == theme::Palette::BlackBlue ? 5
+                               : theme::current() == theme::Palette::MatrixGraphite ? 6 : 7,
                                juce::dontSendNotification);
         themeBox.onChange = [this]
         {
             const theme::Palette palette =
                 themeBox.getSelectedId() == 1 ? theme::Palette::GraphiteOrange
                 : themeBox.getSelectedId() == 2 ? theme::Palette::BlackOrange
-                                                : theme::Palette::WhiteOrange;
+                : themeBox.getSelectedId() == 3 ? theme::Palette::WhiteOrange
+                : themeBox.getSelectedId() == 4 ? theme::Palette::GraphiteBlue
+                : themeBox.getSelectedId() == 5 ? theme::Palette::BlackBlue
+                : themeBox.getSelectedId() == 6 ? theme::Palette::MatrixGraphite
+                                                : theme::Palette::MatrixBlack;
             if (changed)
                 changed (palette);
         };
