@@ -1,5 +1,5 @@
 #include "DrumRackEditor.h"
-#include "FreedomModalDialog.h"
+#include "AppModalDialog.h"
 #include "Theme.h"
 
 namespace
@@ -84,12 +84,12 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
     clearButton.onClick = [this]
     {
         juce::Component::SafePointer<DrumRackEditor> safeThis (this);
-        FreedomModalDialog::show (
+        AppModalDialog::show (
             *this, "Limpar todos os pads?",
             "Isso remove os samples dos 15 pads. Use Desfazer para restaurar.",
-            FreedomModalDialog::Icon::Warning,
-            { { "Limpar todos", 1, FreedomModalDialog::ButtonStyle::Primary },
-              { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+            AppModalDialog::Icon::Warning,
+            { { "Limpar todos", 1, AppModalDialog::ButtonStyle::Primary },
+              { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
             [safeThis] (int result)
             {
                 if (safeThis == nullptr || result == 0)
@@ -374,9 +374,9 @@ void DrumRackEditor::chooseSample()
             juce::String error;
             if (! safeThis->processor.loadPadFromFile (safeThis->selectedPad, file, error))
             {
-                FreedomModalDialog::show (
-                    *safeThis.getComponent(), "Drum Rack", error, FreedomModalDialog::Icon::Warning,
-                    { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+                AppModalDialog::show (
+                    *safeThis.getComponent(), "Drum Rack", error, AppModalDialog::Icon::Warning,
+                    { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                 return;
             }
             safeThis->refreshPadLabels();
@@ -500,9 +500,9 @@ bool DrumRackEditor::loadSampleIntoPad (int pad, const juce::File& file)
     juce::String error;
     if (! processor.loadPadFromFile (pad, file, error))
     {
-        FreedomModalDialog::show (
-            *this, "Drum Rack", error, FreedomModalDialog::Icon::Warning,
-            { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+        AppModalDialog::show (
+            *this, "Drum Rack", error, AppModalDialog::Icon::Warning,
+            { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
         refreshPadLabels();
         return false;
     }

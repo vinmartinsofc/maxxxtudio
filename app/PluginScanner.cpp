@@ -5,8 +5,8 @@
 #include <cmath>
 #include <mutex>
 
-#ifndef PROJECT_FREEDOM_PLUGIN_WORKER_PATH
- #define PROJECT_FREEDOM_PLUGIN_WORKER_PATH ""
+#ifndef MAXXXTUDIO_PLUGIN_WORKER_PATH
+ #define MAXXXTUDIO_PLUGIN_WORKER_PATH ""
 #endif
 
 struct PluginScanner::ScanState
@@ -18,7 +18,7 @@ struct PluginScanner::ScanState
 
 juce::File PluginScanner::dataDirectory()
 {
-    auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("ProjectFreedom");
+    auto dir = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("MaXXXtudio");
     dir.createDirectory();
     return dir;
 }
@@ -277,7 +277,7 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
     };
 
     const auto sessionId = juce::Uuid().toString().removeCharacters ("{}");
-    const auto prefix = "project-freedom-scan-" + sessionId + "-";
+    const auto prefix = "maxxx-tudio-scan-" + sessionId + "-";
     const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory);
     const auto inputFile = temp.getChildFile (prefix + "input.xml");
     const auto outputFile = temp.getChildFile (prefix + "output.xml");
@@ -300,7 +300,10 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
     bool success = false;
     std::shared_ptr<juce::XmlElement> resultXml;
     juce::ChildProcess child;
-    auto workerExecutable = juce::File (PROJECT_FREEDOM_PLUGIN_WORKER_PATH);
+    auto workerExecutable = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
+                                .getSiblingFile ("MaXXXtudio Plugin Worker.exe");
+    if (! workerExecutable.existsAsFile())
+        workerExecutable = juce::File (MAXXXTUDIO_PLUGIN_WORKER_PATH);
     if (workerExecutable.existsAsFile() && config->writeTo (inputFile))
     {
         juce::StringArray arguments;

@@ -16,7 +16,7 @@ public:
     static constexpr int numPads = 15;
     static constexpr int automatablePadParameterCount = 7;
     static constexpr int visiblePadCount = numPads;
-    static constexpr const char* pluginIdentifier = "ProjectFreedom.DrumRack";
+    static constexpr const char* pluginIdentifier = "MaXXXtudio.DrumRack";
     static constexpr std::array<std::pair<int, int>, numPads> computerMidiKeyboardMap {{
         { 'A', 0 }, { 'W', 1 }, { 'S', 2 }, { 'E', 3 }, { 'D', 4 },
         { 'F', 5 }, { 'T', 6 }, { 'G', 7 }, { 'Y', 8 }, { 'H', 9 },

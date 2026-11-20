@@ -8,7 +8,7 @@
 class UtilityProcessor final : public juce::AudioProcessor
 {
 public:
-    static constexpr const char* pluginIdentifier = "ProjectFreedom.Utility";
+    static constexpr const char* pluginIdentifier = "MaXXXtudio.Utility";
     static constexpr float minimumRateHz = 0.01f;
     static constexpr float maximumRateHz = 100.0f;
 
@@ -59,7 +59,7 @@ private:
 class AutoPanProcessor final : public juce::AudioProcessor
 {
 public:
-    static constexpr const char* pluginIdentifier = "ProjectFreedom.AutoPan";
+    static constexpr const char* pluginIdentifier = "MaXXXtudio.AutoPan";
 
     AutoPanProcessor();
     const juce::String getName() const override { return "Pan Master"; }

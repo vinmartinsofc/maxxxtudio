@@ -1,6 +1,6 @@
 #include "AudioFileBrowser.h"
 #include "FavoriteColorPalette.h"
-#include "FreedomModalDialog.h"
+#include "AppModalDialog.h"
 #if defined(_WIN32)
  #ifndef NOMINMAX
   #define NOMINMAX
@@ -398,9 +398,9 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
 
     juce::Desktop::getInstance().addGlobalMouseListener (this);
     juce::PropertiesFile::Options options;
-    options.applicationName = "ProjectFreedomAudioFavorites";
+    options.applicationName = "MaXXXtudioAudioFavorites";
     options.filenameSuffix = ".settings";
-    options.folderName = "ProjectFreedom";
+    options.folderName = "MaXXXtudio";
     options.osxLibrarySubFolder = "Application Support";
     favoriteProperties.setStorageParameters (options);
     favoriteSettings = favoriteProperties.getUserSettings();
@@ -908,10 +908,10 @@ void AudioFileBrowser::createFolderInDirectory (const juce::File& directory)
     }
 
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
-    FreedomModalDialog::showInput (
+    AppModalDialog::showInput (
         *this, "Criar pasta", "Digite o nome da nova pasta:", {}, "Nome",
-        { { "Criar", 1, FreedomModalDialog::ButtonStyle::Primary },
-          { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+        { { "Criar", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, directory] (int result, juce::String input)
         {
             if (safeThis == nullptr || result != 1)
@@ -966,10 +966,10 @@ void AudioFileBrowser::moveItemToTrash (const juce::File& file)
         ? "A pasta \"" + file.getFileName() + "\" e todo o seu conteudo serao movidos para a Lixeira do sistema."
         : "O arquivo \"" + file.getFileName() + "\" sera movido para a Lixeira do sistema.";
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
-    FreedomModalDialog::show (
-        *this, "Mover para a Lixeira?", itemDescription, FreedomModalDialog::Icon::Warning,
-        { { "Mover para a Lixeira", 1, FreedomModalDialog::ButtonStyle::Primary },
-          { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+    AppModalDialog::show (
+        *this, "Mover para a Lixeira?", itemDescription, AppModalDialog::Icon::Warning,
+        { { "Mover para a Lixeira", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, file] (int result)
         {
             if (safeThis == nullptr || result == 0)

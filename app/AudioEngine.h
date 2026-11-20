@@ -282,9 +282,9 @@ public:
     std::function<void (int trackId, int deviceId, const juce::String& pluginName)> onPluginCrashed;
 
     static constexpr int masterTrackId = 0;
-    static constexpr const char* drumRackPluginIdentifier = "ProjectFreedom.DrumRack";
-    static constexpr const char* utilityPluginIdentifier = "ProjectFreedom.Utility";
-    static constexpr const char* autoPanPluginIdentifier = "ProjectFreedom.AutoPan";
+    static constexpr const char* drumRackPluginIdentifier = "MaXXXtudio.DrumRack";
+    static constexpr const char* utilityPluginIdentifier = "MaXXXtudio.Utility";
+    static constexpr const char* autoPanPluginIdentifier = "MaXXXtudio.AutoPan";
 
     AudioEngine();
     ~AudioEngine();

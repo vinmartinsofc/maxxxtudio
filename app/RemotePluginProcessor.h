@@ -78,7 +78,8 @@ private:
     std::function<void (const juce::String&)> onFailure;
     bool processRequestPending = false;
     std::uint32_t processRequestStartTime = 0;
-    HANDLE mapping = nullptr, requestEvent = nullptr, responseEvent = nullptr, workerProcess = nullptr;
+    HANDLE mapping = nullptr, requestEvent = nullptr, responseEvent = nullptr;
+    HANDLE workerProcess = nullptr, workerJob = nullptr;
     DWORD workerProcessId = 0;
     pluginworker::SharedData* shared = nullptr;
 };

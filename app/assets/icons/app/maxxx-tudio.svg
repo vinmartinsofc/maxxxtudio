@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect x="4" y="4" width="248" height="248" rx="48" fill="#171719"
+        stroke="#34353B" stroke-width="8"/>
+  <path d="M28 105h78M150 151h78" fill="none" stroke="#FF6B00" stroke-linecap="round"
+        stroke-width="5"/>
+  <text x="34" y="82" fill="#FF6B00" font-family="Segoe UI, Arial, sans-serif"
+        font-size="46" font-weight="700" letter-spacing="-3">MX</text>
+  <text x="228" y="217" fill="#F2F2F3" font-family="Segoe UI, Arial, sans-serif"
+        font-size="44" font-weight="700" letter-spacing="-2" text-anchor="end">Studio</text>
+</svg>

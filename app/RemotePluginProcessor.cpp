@@ -8,20 +8,20 @@
 #include <set>
 #include <vector>
 
-#ifndef PROJECT_FREEDOM_PLUGIN_WORKER_PATH
- #define PROJECT_FREEDOM_PLUGIN_WORKER_PATH ""
+#ifndef MAXXXTUDIO_PLUGIN_WORKER_PATH
+ #define MAXXXTUDIO_PLUGIN_WORKER_PATH ""
 #endif
 
 namespace
 {
-constexpr std::uint32_t stalledProcessTimeoutMs = 1000;
+constexpr std::uint32_t stalledProcessTimeoutMs = 5000;
 
 juce::CriticalSection workerProcessIdsLock;
 std::set<DWORD> workerProcessIds;
 
 juce::String objectName (const juce::String& sessionId, const juce::String& suffix)
 {
-    return "Local\\ProjectFreedomPlugin_" + sessionId + "_" + suffix;
+    return "Local\\MaXXXtudioPlugin_" + sessionId + "_" + suffix;
 }
 
 juce::String quoteArgument (const juce::String& argument)
@@ -238,7 +238,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     shared->sampleRate = sampleRate;
     shared->blockSize = sampleBlockSize;
     const auto stateFile = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                               .getChildFile ("project-freedom-plugin-state-" + sessionId + ".bin");
+                               .getChildFile ("maxxx-tudio-plugin-state-" + sessionId + ".bin");
     pluginworker::writeText (shared->stateFilePath, pluginworker::statePathLength,
                              stateFile.getFullPathName().toRawUTF8());
     const auto descriptionXml = description.createXml();
@@ -257,9 +257,9 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
                              descriptionText.toRawUTF8());
 
     auto workerExecutable = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
-                                .getSiblingFile ("Project Freedom Plugin Worker.exe");
+                                .getSiblingFile ("MaXXXtudio Plugin Worker.exe");
     if (! workerExecutable.existsAsFile())
-        workerExecutable = juce::File (PROJECT_FREEDOM_PLUGIN_WORKER_PATH);
+        workerExecutable = juce::File (MAXXXTUDIO_PLUGIN_WORKER_PATH);
     if (! workerExecutable.existsAsFile())
     {
         error = "O executavel de isolamento de plugins nao foi encontrado: "
@@ -277,16 +277,65 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     STARTUPINFOW startup {};
     startup.cb = sizeof (startup);
     PROCESS_INFORMATION process {};
+    HANDLE processJob = CreateJobObjectW (nullptr, nullptr);
+    if (processJob == nullptr)
+    {
+        juce::Logger::writeToLog (
+            "RemotePluginProcessor: nao foi possivel criar o job de encerramento do worker.");
+    }
+    else
+    {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobLimits {};
+        jobLimits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        if (SetInformationJobObject (processJob, JobObjectExtendedLimitInformation,
+                                     &jobLimits, sizeof (jobLimits)) == FALSE)
+        {
+            juce::Logger::writeToLog (
+                "RemotePluginProcessor: nao foi possivel configurar o job de encerramento do worker.");
+            CloseHandle (processJob);
+            processJob = nullptr;
+        }
+    }
+
     const bool created = CreateProcessW (workerExecutable.getFullPathName().toWideCharPointer(),
                                          mutableCommand.data(), nullptr, nullptr, FALSE,
-                                         CREATE_NO_WINDOW, nullptr,
+                                         CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr,
                                          workerExecutable.getParentDirectory().getFullPathName().toWideCharPointer(),
                                          &startup, &process) != FALSE;
     if (! created)
     {
+        if (processJob != nullptr)
+            CloseHandle (processJob);
         error = "Nao foi possivel iniciar o processo isolado do plugin.";
         return false;
     }
+
+    if (processJob != nullptr && AssignProcessToJobObject (processJob, process.hProcess) != FALSE)
+    {
+        workerJob = processJob;
+    }
+    else if (processJob != nullptr)
+    {
+        juce::Logger::writeToLog (
+            "RemotePluginProcessor: nao foi possivel associar o worker ao job de encerramento.");
+        CloseHandle (processJob);
+    }
+
+    if (ResumeThread (process.hThread) == static_cast<DWORD> (-1))
+    {
+        TerminateProcess (process.hProcess, 1);
+        WaitForSingleObject (process.hProcess, 1000);
+        CloseHandle (process.hThread);
+        CloseHandle (process.hProcess);
+        if (workerJob != nullptr)
+        {
+            CloseHandle (workerJob);
+            workerJob = nullptr;
+        }
+        error = "Nao foi possivel iniciar o processo isolado do plugin.";
+        return false;
+    }
+
     CloseHandle (process.hThread);
     workerProcess = process.hProcess;
     workerProcessId = process.dwProcessId;
@@ -335,8 +384,17 @@ RemotePluginProcessor::~RemotePluginProcessor()
     {
         if (WaitForSingleObject (workerProcess, 0) == WAIT_TIMEOUT)
             TerminateProcess (workerProcess, 0);
+    }
+    if (workerJob != nullptr)
+    {
+        CloseHandle (workerJob);
+        workerJob = nullptr;
+    }
+    if (workerProcess != nullptr)
+    {
         WaitForSingleObject (workerProcess, 2000);
         CloseHandle (workerProcess);
+        workerProcess = nullptr;
     }
     if (shared != nullptr) UnmapViewOfFile (shared);
     if (responseEvent != nullptr) CloseHandle (responseEvent);
@@ -344,7 +402,7 @@ RemotePluginProcessor::~RemotePluginProcessor()
     if (mapping != nullptr) CloseHandle (mapping);
     if (sessionId.isNotEmpty())
         juce::File::getSpecialLocation (juce::File::tempDirectory)
-            .getChildFile ("project-freedom-plugin-state-" + sessionId + ".bin").deleteFile();
+            .getChildFile ("maxxx-tudio-plugin-state-" + sessionId + ".bin").deleteFile();
 #endif
 }
 
@@ -550,7 +608,7 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     const double blockDurationMs = sampleRate > 0.0
         ? 1000.0 * samples / sampleRate : 20.0;
-    const int timeoutMs = std::clamp (static_cast<int> (std::ceil (blockDurationMs * 4.0)), 20, 250);
+    const int timeoutMs = std::clamp (static_cast<int> (std::ceil (blockDurationMs)), 1, 50);
     ResetEvent (responseEvent);
     InterlockedExchange (&shared->command, static_cast<LONG> (pluginworker::Command::process));
     SetEvent (requestEvent);

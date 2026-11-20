@@ -245,7 +245,7 @@ std::vector<double> detectTransientSeconds (const juce::AudioBuffer<float>& samp
 juce::File audioDeviceSettingsFile()
 {
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                         .getChildFile ("ProjectFreedom");
+                         .getChildFile ("MaXXXtudio");
     directory.createDirectory();
     return directory.getChildFile ("audio-device-settings.xml");
 }

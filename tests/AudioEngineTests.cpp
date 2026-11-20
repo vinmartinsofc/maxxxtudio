@@ -15,7 +15,7 @@ struct TemporaryWavFile
 {
     TemporaryWavFile()
         : file (juce::File::getSpecialLocation (juce::File::tempDirectory)
-                    .getNonexistentChildFile ("project_freedom_master_render", ".wav", false))
+                    .getNonexistentChildFile ("maxxx_tudio_master_render", ".wav", false))
     {
     }
 
@@ -28,7 +28,7 @@ struct TemporarySampleFile
 {
     TemporarySampleFile()
         : file (juce::File::getSpecialLocation (juce::File::tempDirectory)
-                    .getNonexistentChildFile ("project_freedom_drum_rack_sample", ".wav", false))
+                    .getNonexistentChildFile ("maxxx_tudio_drum_rack_sample", ".wav", false))
     {
         std::ofstream output (file.getFullPathName().toStdString(), std::ios::binary);
         const auto write16 = [&output] (std::uint16_t value)
@@ -455,7 +455,7 @@ TEST_CASE ("Drum Rack triggers loaded samples from its MIDI pad notes")
     REQUIRE (output.getSample (0, 5) > 0.4f);
     REQUIRE (output.getSample (1, 5) > 0.4f);
     REQUIRE (midi.isEmpty());
-    REQUIRE (processor.padName (0).contains ("project_freedom_drum_rack_sample"));
+    REQUIRE (processor.padName (0).contains ("maxxx_tudio_drum_rack_sample"));
 }
 
 TEST_CASE ("Drum Rack editor initializes its pad controls before resizing")
@@ -626,7 +626,7 @@ TEST_CASE ("Drum Rack maps the computer keyboard's fifteen chromatic notes")
     processor.processBlock (output, midi);
 
     REQUIRE (output.getSample (0, 0) > 0.4f);
-    REQUIRE (processor.padName (14).contains ("project_freedom_drum_rack_sample"));
+    REQUIRE (processor.padName (14).contains ("maxxx_tudio_drum_rack_sample"));
 }
 
 TEST_CASE ("Drum Rack applies per-pad gain and sample trim")
@@ -742,7 +742,7 @@ TEST_CASE ("Drum Rack migrates legacy sixteen-pad state to its MIDI note bank")
     DrumRackProcessor processor;
     REQUIRE (processor.restoreStateXml (legacy));
     REQUIRE (processor.padSampleLength (0) == 1024);
-    REQUIRE (processor.padName (0).contains ("project_freedom_drum_rack_sample"));
+    REQUIRE (processor.padName (0).contains ("maxxx_tudio_drum_rack_sample"));
     REQUIRE (processor.padName (1).contains ("vazio"));
     REQUIRE (processor.padSettings (0).endSample == 1024);
     REQUIRE (processor.padSettings (0).mode == DrumRackProcessor::PlaybackMode::Classic);
@@ -761,7 +761,7 @@ TEST_CASE ("Drum Rack maps the previous default MIDI bank into its keyboard slot
     DrumRackProcessor processor;
     REQUIRE (processor.restoreStateXml (legacy));
     REQUIRE (processor.padSampleLength (0) == 1024);
-    REQUIRE (processor.padName (0).contains ("project_freedom_drum_rack_sample"));
+    REQUIRE (processor.padName (0).contains ("maxxx_tudio_drum_rack_sample"));
 }
 
 TEST_CASE ("Classic Drum Rack pads stop looping after MIDI note-off")
@@ -1159,15 +1159,15 @@ TEST_CASE ("Cancelling an offline WAV export removes the partial file")
 #if defined(_WIN32)
 TEST_CASE ("Remote VST3 processing runs outside the host process", "[integration][plugin-worker]")
 {
-    const auto pluginName = juce::SystemStats::getEnvironmentVariable ("PROJECT_FREEDOM_TEST_PLUGIN", {});
+    const auto pluginName = juce::SystemStats::getEnvironmentVariable ("MAXXXTUDIO_TEST_PLUGIN", {});
     if (pluginName.isEmpty())
     {
-        SUCCEED ("Set PROJECT_FREEDOM_TEST_PLUGIN to a cached VST3 name to run this integration test.");
+        SUCCEED ("Set MAXXXTUDIO_TEST_PLUGIN to a cached VST3 name to run this integration test.");
         return;
     }
 
     const auto pluginListFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                                    .getChildFile ("ProjectFreedom").getChildFile ("plugins.xml");
+                                    .getChildFile ("MaXXXtudio").getChildFile ("plugins.xml");
     const auto pluginListXml = juce::XmlDocument::parse (pluginListFile);
     REQUIRE (pluginListXml != nullptr);
 
@@ -1203,11 +1203,11 @@ TEST_CASE ("Plugin scanning runs in the isolated worker", "[integration][plugin-
 {
     const auto sessionId = juce::Uuid().toString().removeCharacters ("{}");
     const auto temp = juce::File::getSpecialLocation (juce::File::tempDirectory);
-    const auto prefix = "project-freedom-scan-" + sessionId + "-";
+    const auto prefix = "maxxx-tudio-scan-" + sessionId + "-";
     const auto configFile = temp.getChildFile (prefix + "input.xml");
     const auto outputFile = temp.getChildFile (prefix + "output.xml");
     const auto progressFile = temp.getChildFile (prefix + "progress.txt");
-    const auto emptyPath = temp.getChildFile ("project-freedom-empty-plugin-scan-" + sessionId);
+    const auto emptyPath = temp.getChildFile ("maxxx-tudio-empty-plugin-scan-" + sessionId);
     struct Cleanup
     {
         juce::File config, output, progress, directory;
@@ -1231,7 +1231,7 @@ TEST_CASE ("Plugin scanning runs in the isolated worker", "[integration][plugin-
 
     juce::ChildProcess child;
     juce::StringArray arguments;
-    arguments.add (PROJECT_FREEDOM_PLUGIN_WORKER_PATH);
+    arguments.add (MAXXXTUDIO_PLUGIN_WORKER_PATH);
     arguments.add ("--plugin-scan-worker");
     arguments.add (sessionId);
     arguments.add (juce::String (GetCurrentProcessId()));

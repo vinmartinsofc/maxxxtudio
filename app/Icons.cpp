@@ -72,7 +72,7 @@ const juce::Drawable* get (Icon icon, juce::Colour colour, int size)
 juce::Image appIcon()
 {
     int dataSize = 0;
-    const auto* data = BinaryData::getNamedResource ("projectfreedom_png", dataSize);
+    const auto* data = BinaryData::getNamedResource ("maxxxtudio_png", dataSize);
     if (data == nullptr || dataSize <= 0)
         return {};
 

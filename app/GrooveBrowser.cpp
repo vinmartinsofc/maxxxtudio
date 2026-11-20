@@ -44,9 +44,9 @@ public:
         autoPreviewButton.setButtonText ("Auto preview");
         autoPreviewButton.setTooltip ("Tocar automaticamente o groove selecionado.");
         juce::PropertiesFile::Options options;
-        options.applicationName = "ProjectFreedomGrooveBrowser";
+        options.applicationName = "MaXXXtudioGrooveBrowser";
         options.filenameSuffix = ".settings";
-        options.folderName = "ProjectFreedom";
+        options.folderName = "MaXXXtudio";
         grooveProperties.setStorageParameters (options);
         grooveSettings = grooveProperties.getUserSettings();
         autoPreviewButton.setToggleState (

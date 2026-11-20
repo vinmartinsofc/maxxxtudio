@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="app/assets/icons/app/project-freedom.png" alt="Identidade visual do Project Freedom" width="240">
+  <img src="app/assets/icons/app/maxxx-tudio.png" alt="Identidade visual do MaXXXtudio" width="240">
 </p>
 
-<h1 align="center">Project Freedom</h1>
+<h1 align="center">MaXXXtudio</h1>
 
 <p align="center">
   Uma estação de áudio digital para criar, organizar, processar e mixar música.
 </p>
 
-O Project Freedom é um DAW open source para Windows e Linux, desenvolvido em C++20
+O MaXXXtudio é um DAW open source para Windows e Linux, desenvolvido em C++20
 com JUCE. O projeto está em evolução e reúne ferramentas essenciais de produção,
 instrumentos, efeitos e edição musical em uma interface própria.
 
@@ -25,7 +25,7 @@ instrumentos, efeitos e edição musical em uma interface própria.
 - **Drum Rack:** 16 pads, carregamento de samples, modos One-Shot e Classic, pitch, volume, início, fim, reverso, loop e efeitos por pad.
 - **MIDI Learn:** mapeamento de controles MIDI para volume, pan, mute e solo.
 - **Teclado MIDI:** execução pelo teclado do computador, oitavas e velocidade.
-- **Projetos:** salvar e abrir `.pfs`, histórico de undo/redo, recuperação e exportação do Master como WAV.
+- **Projetos:** salvar e abrir `.std`, histórico de undo/redo, recuperação e exportação do Master como WAV.
 - **Temas:** preto, cinza grafite e branco com laranja; cinza/preto com azul; Matrix 1 e Matrix 2 com verde.
 - **Interface:** tooltips acessíveis, ícones vetoriais, estados ativos, hover e texto legível por tema.
 
@@ -59,7 +59,7 @@ cmake -S . -B build
 cmake --build build --config Release
 ```
 
-Executável: `build\app\ProjectFreedom_artefacts\Release\Project Freedom.exe`
+Executável: `build\app\MaXXXtudio_artefacts\Release\MaXXXtudio.exe`
 
 **Linux (Ubuntu/Debian):**
 

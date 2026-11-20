@@ -1,7 +1,7 @@
 #pragma once
 #include <juce_graphics/juce_graphics.h>
 
-// Grafite e laranja do Project Freedom.
+// Grafite e laranja da identidade MaXXXtudio.
 namespace theme
 {
 // Texto da interface em UTF-8 (acentos corretos em qualquer compilador).
@@ -39,12 +39,12 @@ inline void setCurrent (Palette palette)
     selectedPalette() = palette;
 
     const auto xmlFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("ProjectFreedom/preferences.xml");
+                             .getChildFile ("MaXXXtudio/preferences.xml");
     xmlFile.getParentDirectory().createDirectory();
 
     auto xml = juce::XmlDocument::parse (xmlFile);
-    if (xml == nullptr || ! xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES"))
-        xml = std::make_unique<juce::XmlElement> ("PROJECT_FREEDOM_PREFERENCES");
+    if (xml == nullptr || ! xml->hasTagName ("MAXXXTUDIO_PREFERENCES"))
+        xml = std::make_unique<juce::XmlElement> ("MAXXXTUDIO_PREFERENCES");
 
     const char* value = "graphite-orange";
     if (palette == Palette::BlackOrange)
@@ -68,9 +68,9 @@ inline void setCurrent (Palette palette)
 inline void load()
 {
     const auto xmlFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("ProjectFreedom/preferences.xml");
+                             .getChildFile ("MaXXXtudio/preferences.xml");
     const auto xml = juce::XmlDocument::parse (xmlFile);
-    if (xml == nullptr || ! xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES"))
+    if (xml == nullptr || ! xml->hasTagName ("MAXXXTUDIO_PREFERENCES"))
     {
         selectedPalette() = Palette::BlackOrange;
         return;

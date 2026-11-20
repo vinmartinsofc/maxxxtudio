@@ -48,7 +48,7 @@ PluginScanRuntime::~PluginScanRuntime()
 juce::File PluginScanRuntime::fileFor (const juce::String& suffix) const
 {
     return juce::File::getSpecialLocation (juce::File::tempDirectory)
-        .getChildFile ("project-freedom-scan-" + sessionId + "-" + suffix);
+        .getChildFile ("maxxx-tudio-scan-" + sessionId + "-" + suffix);
 }
 
 void PluginScanRuntime::run()

@@ -6,7 +6,7 @@
 class PluginWorkerApplication final : public juce::JUCEApplication
 {
 public:
-    const juce::String getApplicationName() override { return "Project Freedom Plugin Worker"; }
+    const juce::String getApplicationName() override { return "MaXXXtudio Plugin Worker"; }
     const juce::String getApplicationVersion() override { return "1"; }
     bool moreThanOneInstanceAllowed() override { return true; }
 

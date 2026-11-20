@@ -1,5 +1,5 @@
 #include "ArrangementView.h"
-#include "FreedomModalDialog.h"
+#include "AppModalDialog.h"
 #include "Icons.h"
 #include "ThemeKnobSlider.h"
 #include "WaveformDisplay.h"
@@ -4020,12 +4020,12 @@ private:
             return;
 
         juce::Component::SafePointer<Ruler> safeThis (this);
-        FreedomModalDialog::showInput (
+        AppModalDialog::showInput (
             *this, editInfo ? "Editar informacoes do locator" : "Renomear locator",
             editInfo ? "Informacoes do locator:" : "Nome do locator:",
             juce::String (editInfo ? marker->info : marker->name), {},
-            { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary },
-              { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+            { { "OK", 1, AppModalDialog::ButtonStyle::Primary },
+              { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
             [safeThis, id, editInfo] (int result, juce::String value)
             {
                 if (safeThis != nullptr && result == 1)

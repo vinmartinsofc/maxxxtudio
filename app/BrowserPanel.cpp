@@ -258,12 +258,12 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
       drumRackCard ("Drum Rack", "Arraste para o canal MIDI desejado",
                     "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier)),
       utilityCard ("Volume Master", theme::ui ("Volume, estereo, mono, fase e modulacao"),
-                   "plugin:" + juce::String ("ProjectFreedom.Utility"))
+                   "plugin:" + juce::String ("MaXXXtudio.Utility"))
 {
     juce::PropertiesFile::Options options;
-    options.applicationName = "ProjectFreedomPluginFavorites";
+    options.applicationName = "MaXXXtudioPluginFavorites";
     options.filenameSuffix = ".settings";
-    options.folderName = "ProjectFreedom";
+    options.folderName = "MaXXXtudio";
     options.osxLibrarySubFolder = "Application Support";
     pluginFavoriteProperties.setStorageParameters (options);
     pluginFavoriteSettings = pluginFavoriteProperties.getUserSettings();
@@ -274,7 +274,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     title.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (title);
 
-    for (auto* tab : { &vstTab, &projectFreedomTab })
+    for (auto* tab : { &vstTab, &maXXXtudioTab })
     {
         tab->setClickingTogglesState (true);
         tab->setRadioGroupId (4710);
@@ -285,8 +285,8 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         addAndMakeVisible (tab);
     }
     vstTab.setToggleState (true, juce::dontSendNotification);
-    vstTab.onClick = [this] { setProjectFreedomTab (false); };
-    projectFreedomTab.onClick = [this] { setProjectFreedomTab (true); };
+    vstTab.onClick = [this] { setMaXXXtudioTab (false); };
+    maXXXtudioTab.onClick = [this] { setMaXXXtudioTab (true); };
 
     search.setTextToShowWhenEmpty ("Buscar (nome ou fabricante)", theme::textDim());
     search.setColour (juce::TextEditor::backgroundColourId, theme::control());
@@ -328,10 +328,10 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
 
-    projectFreedomDescription.setText ("Instrumentos e efeitos nativos.", juce::dontSendNotification);
-    projectFreedomDescription.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-    projectFreedomDescription.setColour (juce::Label::textColourId, theme::text());
-    addAndMakeVisible (projectFreedomDescription);
+    maXXXtudioDescription.setText ("Instrumentos e efeitos nativos.", juce::dontSendNotification);
+    maXXXtudioDescription.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    maXXXtudioDescription.setColour (juce::Label::textColourId, theme::text());
+    addAndMakeVisible (maXXXtudioDescription);
     drumRackCard.onClick = [this]
     {
         if (onAddDrumRackRequested)
@@ -344,7 +344,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     };
     addAndMakeVisible (drumRackCard);
     addAndMakeVisible (utilityCard);
-    setProjectFreedomTab (false);
+    setMaXXXtudioTab (false);
 
     scanner.list().addChangeListener (this);
     refresh();
@@ -358,7 +358,7 @@ BrowserPanel::~BrowserPanel()
 
 void BrowserPanel::grabFocus()
 {
-    if (showingProjectFreedomTools)
+    if (showingMaXXXtudioTools)
         drumRackCard.grabKeyboardFocus();
     else
         tree->grabKeyboardFocus();
@@ -366,7 +366,7 @@ void BrowserPanel::grabFocus()
 
 bool BrowserPanel::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
-    if (! showingProjectFreedomTools && key.getModifiers().isCommandDown()
+    if (! showingMaXXXtudioTools && key.getModifiers().isCommandDown()
         && juce::CharacterFunctions::toLowerCase (key.getKeyCode()) == 'f')
     {
         search.grabKeyboardFocus();
@@ -384,12 +384,12 @@ void BrowserPanel::setFilter (Filter f)
     refresh();
 }
 
-void BrowserPanel::setProjectFreedomTab (bool showTools)
+void BrowserPanel::setMaXXXtudioTab (bool showTools)
 {
-    showingProjectFreedomTools = showTools;
+    showingMaXXXtudioTools = showTools;
     vstTab.setToggleState (! showTools, juce::dontSendNotification);
-    projectFreedomTab.setToggleState (showTools, juce::dontSendNotification);
-    title.setText (showTools ? "Ferramentas do Project Freedom" : "Plugins VST",
+    maXXXtudioTab.setToggleState (showTools, juce::dontSendNotification);
+    title.setText (showTools ? "Ferramentas do MaXXXtudio" : "Plugins VST",
                    juce::dontSendNotification);
     search.setVisible (! showTools);
     allButton.setVisible (! showTools);
@@ -397,7 +397,7 @@ void BrowserPanel::setProjectFreedomTab (bool showTools)
     effectsButton.setVisible (! showTools);
     favoritesButton.setVisible (! showTools);
     tree->setVisible (! showTools);
-    projectFreedomDescription.setVisible (showTools);
+    maXXXtudioDescription.setVisible (showTools);
     drumRackCard.setVisible (showTools);
     utilityCard.setVisible (showTools);
     resized();
@@ -406,7 +406,7 @@ void BrowserPanel::setProjectFreedomTab (bool showTools)
 juce::File BrowserPanel::treeStateFile (Filter stateFilter) const
 {
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                         .getChildFile ("ProjectFreedom");
+                         .getChildFile ("MaXXXtudio");
     directory.createDirectory();
     juce::String filename = "plugin-tree-state";
     switch (stateFilter)
@@ -894,12 +894,12 @@ void BrowserPanel::resized()
     auto tabs = area.removeFromTop (26);
     vstTab.setBounds (tabs.removeFromLeft (62));
     tabs.removeFromLeft (4);
-    projectFreedomTab.setBounds (tabs.removeFromLeft (144));
+    maXXXtudioTab.setBounds (tabs.removeFromLeft (144));
 
-    if (showingProjectFreedomTools)
+    if (showingMaXXXtudioTools)
     {
         area.removeFromTop (12);
-        projectFreedomDescription.setBounds (area.removeFromTop (24));
+        maXXXtudioDescription.setBounds (area.removeFromTop (24));
         area.removeFromTop (8);
         drumRackCard.setBounds (area.removeFromTop (78));
         area.removeFromTop (8);
@@ -928,5 +928,5 @@ void BrowserPanel::resized()
 
     area.removeFromTop (6);
     status.setBounds (area.removeFromBottom (20));
-    tree->setBounds (showingProjectFreedomTools ? juce::Rectangle<int>() : area);
+    tree->setBounds (showingMaXXXtudioTools ? juce::Rectangle<int>() : area);
 }

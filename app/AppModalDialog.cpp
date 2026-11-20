@@ -1,4 +1,4 @@
-#include "FreedomModalDialog.h"
+#include "AppModalDialog.h"
 #include "Theme.h"
 #include <algorithm>
 #include <memory>
@@ -37,7 +37,7 @@ void drawWarningTriangle (juce::Graphics& g, juce::Rectangle<float> bounds,
 }
 }
 
-class FreedomModalDialog::DialogButton final : public juce::TextButton
+class AppModalDialog::DialogButton final : public juce::TextButton
 {
 public:
     DialogButton (const Action& action, std::function<void()> callback)
@@ -81,7 +81,7 @@ private:
     ButtonStyle style;
 };
 
-FreedomModalDialog::FreedomModalDialog (juce::Component& owner,
+AppModalDialog::AppModalDialog (juce::Component& owner,
                                         juce::String dialogTitle,
                                         juce::String dialogMessage,
                                         Icon dialogIcon,
@@ -119,7 +119,7 @@ FreedomModalDialog::FreedomModalDialog (juce::Component& owner,
     for (const auto& action : actions)
     {
         const auto result = action.result;
-        const juce::Component::SafePointer<FreedomModalDialog> safeThis (this);
+        const juce::Component::SafePointer<AppModalDialog> safeThis (this);
         auto button = std::make_unique<DialogButton> (action, [safeThis, result]
         {
             juce::MessageManager::callAsync ([safeThis, result]
@@ -133,13 +133,13 @@ FreedomModalDialog::FreedomModalDialog (juce::Component& owner,
     }
 }
 
-FreedomModalDialog::~FreedomModalDialog()
+AppModalDialog::~AppModalDialog()
 {
     if (auto* owner = parent.getComponent())
         owner->removeComponentListener (this);
 }
 
-void FreedomModalDialog::show (juce::Component& parent,
+void AppModalDialog::show (juce::Component& parent,
                                juce::String title,
                                juce::String message,
                                Icon icon,
@@ -148,7 +148,7 @@ void FreedomModalDialog::show (juce::Component& parent,
 {
     auto& owner = parent.getTopLevelComponent() != nullptr
         ? *parent.getTopLevelComponent() : parent;
-    auto* dialog = new FreedomModalDialog (owner, std::move (title), std::move (message),
+    auto* dialog = new AppModalDialog (owner, std::move (title), std::move (message),
                                           icon, std::move (actions), std::move (onResult));
     owner.addAndMakeVisible (dialog);
     dialog->setBounds (owner.getLocalBounds());
@@ -156,7 +156,7 @@ void FreedomModalDialog::show (juce::Component& parent,
     dialog->enterModalState (true);
 }
 
-void FreedomModalDialog::showInput (juce::Component& parent,
+void AppModalDialog::showInput (juce::Component& parent,
                                     juce::String title,
                                     juce::String message,
                                     juce::String initialValue,
@@ -166,7 +166,7 @@ void FreedomModalDialog::showInput (juce::Component& parent,
 {
     auto& owner = parent.getTopLevelComponent() != nullptr
         ? *parent.getTopLevelComponent() : parent;
-    auto* dialog = new FreedomModalDialog (
+    auto* dialog = new AppModalDialog (
         owner, std::move (title), std::move (message), Icon::None, std::move (actions), {},
         std::move (initialValue), std::move (placeholder), std::move (onResult));
     owner.addAndMakeVisible (dialog);
@@ -176,7 +176,7 @@ void FreedomModalDialog::showInput (juce::Component& parent,
     dialog->input.grabKeyboardFocus();
 }
 
-void FreedomModalDialog::paint (juce::Graphics& g)
+void AppModalDialog::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff101012).withAlpha (0.58f));
 
@@ -232,7 +232,7 @@ void FreedomModalDialog::paint (juce::Graphics& g)
                       juce::Justification::topLeft, 4);
 }
 
-void FreedomModalDialog::resized()
+void AppModalDialog::resized()
 {
     const int width = std::max (280, std::min (520, getWidth() - 32));
     const int height = std::max (180, std::min (244, getHeight() - 32));
@@ -258,7 +258,7 @@ void FreedomModalDialog::resized()
     }
 }
 
-bool FreedomModalDialog::keyPressed (const juce::KeyPress& key)
+bool AppModalDialog::keyPressed (const juce::KeyPress& key)
 {
     if (key == juce::KeyPress::escapeKey)
     {
@@ -287,14 +287,14 @@ bool FreedomModalDialog::keyPressed (const juce::KeyPress& key)
     return false;
 }
 
-void FreedomModalDialog::componentMovedOrResized (juce::Component& component,
+void AppModalDialog::componentMovedOrResized (juce::Component& component,
                                                   bool, bool wasResized)
 {
     if (wasResized && parent != nullptr && &component == parent.getComponent())
         setBounds (component.getLocalBounds());
 }
 
-void FreedomModalDialog::dismiss (int result)
+void AppModalDialog::dismiss (int result)
 {
     auto callback = std::move (onResult);
     auto inputCallback = std::move (onInputResult);

@@ -49,7 +49,7 @@ private:
 
     bool keyPressed (const juce::KeyPress&, juce::Component*) override;
     bool loadSelectedPlugin();
-    void setProjectFreedomTab (bool);
+    void setMaXXXtudioTab (bool);
     void changeListenerCallback (juce::ChangeBroadcaster*) override { refresh(); }
     void load (const juce::PluginDescription&);
     void showPluginMenu (const juce::PluginDescription&, juce::Point<int>);
@@ -73,10 +73,10 @@ private:
     juce::Label title { {}, "Plugins" };
     juce::TextEditor search;
     std::unique_ptr<PluginTree> tree;
-    juce::TextButton vstTab { "VST" }, projectFreedomTab { "Project Freedom" };
+    juce::TextButton vstTab { "VST" }, maXXXtudioTab { "MaXXXtudio" };
     NativeToolCard drumRackCard;
     NativeToolCard utilityCard;
-    juce::Label projectFreedomDescription { {}, "Ferramentas do Project Freedom" };
+    juce::Label maXXXtudioDescription { {}, "Ferramentas do MaXXXtudio" };
     juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" },
                       effectsButton { "Efeitos" }, favoritesButton { "Favoritos" };
     Filter filter = Filter::All;
@@ -84,7 +84,7 @@ private:
     juce::Label status;
     std::unique_ptr<juce::XmlElement> opennessBeforeSearch;
     bool searchActive = false, rebuildingTree = false;
-    bool showingProjectFreedomTools = false;
+    bool showingMaXXXtudioTools = false;
     Filter renderedFilter = Filter::All;
     juce::ApplicationProperties pluginFavoriteProperties;
     juce::PropertiesFile* pluginFavoriteSettings = nullptr;

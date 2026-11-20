@@ -59,7 +59,7 @@ bool registerProjectFileAssociation (const juce::String& extension,
 #endif
 }
 
-class FreedomApplication : public juce::JUCEApplication
+class MaXXXtudioApplication : public juce::JUCEApplication
 {
 public:
     const juce::String getApplicationName() override    { return JUCE_APPLICATION_NAME_STRING; }
@@ -72,12 +72,10 @@ public:
         juce::LookAndFeel::setDefaultLookAndFeel (&themeKnobLookAndFeel);
 #if defined(_WIN32)
         const auto executable = juce::File::getSpecialLocation (juce::File::currentApplicationFile);
-        const bool pfsRegistered = registerProjectFileAssociation (
-            ".pfs", "ProjectFreedomProject", "Project Freedom Session", executable);
-        const bool legacyRegistered = registerProjectFileAssociation (
-            ".freedom", "ProjectFreedomLegacyProject", "Project Freedom Legacy Session", executable);
-        if (! pfsRegistered || ! legacyRegistered)
-            juce::Logger::writeToLog ("ProjectFreedom: nao foi possivel registrar as associacoes de projeto.");
+        const bool stdRegistered = registerProjectFileAssociation (
+            ".std", "MaXXXtudioProject", "MaXXXtudio Session", executable);
+        if (! stdRegistered)
+            juce::Logger::writeToLog ("MaXXXtudio: nao foi possivel registrar as associacoes de projeto.");
         else
             SHChangeNotify (SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 #endif
@@ -144,7 +142,7 @@ private:
         {
             const juce::File file (argument.unquoted());
             const auto extension = file.getFileExtension();
-            if (extension.equalsIgnoreCase (".pfs") || extension.equalsIgnoreCase (".freedom"))
+            if (extension.equalsIgnoreCase (".std"))
             {
                 if (window != nullptr)
                     window->openProject (file);
@@ -162,7 +160,7 @@ private:
             juce::PropertiesFile::Options options;
             options.applicationName = name;
             options.filenameSuffix = ".settings";
-            options.folderName = "ProjectFreedom";
+            options.folderName = "MaXXXtudio";
             options.osxLibrarySubFolder = "Application Support";
             appProperties.setStorageParameters (options);
             userSettings = appProperties.getUserSettings();
@@ -359,4 +357,4 @@ private:
     std::unique_ptr<MainWindow> window;
 };
 
-START_JUCE_APPLICATION (FreedomApplication)
+START_JUCE_APPLICATION (MaXXXtudioApplication)

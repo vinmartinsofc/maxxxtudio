@@ -12,7 +12,7 @@ struct TemporaryGrooveFolder
 {
     TemporaryGrooveFolder()
         : folder (juce::File::getSpecialLocation (juce::File::tempDirectory)
-                      .getNonexistentChildFile ("project_freedom_grooves", "", false))
+                      .getNonexistentChildFile ("maxxx_tudio_grooves", "", false))
     {
         folder.createDirectory();
     }

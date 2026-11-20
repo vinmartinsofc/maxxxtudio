@@ -5,7 +5,7 @@
 #include <memory>
 #include <vector>
 
-class FreedomModalDialog final : public juce::Component,
+class AppModalDialog final : public juce::Component,
                                 private juce::ComponentListener
 {
 public:
@@ -33,7 +33,7 @@ public:
                           std::vector<Action>,
                           std::function<void (int, juce::String)> onResult);
 
-    ~FreedomModalDialog() override;
+    ~AppModalDialog() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -42,7 +42,7 @@ public:
 private:
     class DialogButton;
 
-    FreedomModalDialog (juce::Component&, juce::String, juce::String, Icon,
+    AppModalDialog (juce::Component&, juce::String, juce::String, Icon,
                         std::vector<Action>, std::function<void (int)>,
                         juce::String = {}, juce::String = {},
                         std::function<void (int, juce::String)> = {});

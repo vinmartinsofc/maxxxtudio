@@ -572,7 +572,7 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
         totalWork += data.plugins.size();
         ProgressReporter progress (std::move (onProgress), totalWork);
 
-        auto xml = std::make_unique<juce::XmlElement> ("ProjectFreedom");
+        auto xml = std::make_unique<juce::XmlElement> ("MaXXXtudio");
         xml->setAttribute ("version", 1);
         xml->setAttribute ("bpm", data.bpm);
         xml->setAttribute ("transportPosition", data.transportPosition);
@@ -662,13 +662,13 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
 juce::File ProjectFile::recoveryDirectory()
 {
     return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-        .getChildFile ("ProjectFreedom").getChildFile ("autosave");
+        .getChildFile ("MaXXXtudio").getChildFile ("autosave");
 }
 
 std::vector<juce::File> ProjectFile::recoveryFiles (const juce::File& directory)
 {
     juce::Array<juce::File> files;
-    directory.findChildFiles (files, juce::File::findFiles, false, "Recovery-*.pfs");
+    directory.findChildFiles (files, juce::File::findFiles, false, "Recovery-*.std");
     std::sort (files.begin(), files.end(), [] (const juce::File& left, const juce::File& right)
     {
         const auto leftTime = left.getLastModificationTime();
@@ -688,7 +688,7 @@ juce::Result ProjectFile::saveRecovery (const juce::File& directory, const Proje
     const auto baseName = "Recovery-" + juce::String (juce::Time::getCurrentTime().toMilliseconds())
                         + "-" + juce::String (recoverySequence.fetch_add (1, std::memory_order_relaxed));
     const auto temporaryFile = directory.getChildFile (baseName + ".tmp");
-    const auto recoveryFile = directory.getChildFile (baseName + ".pfs");
+    const auto recoveryFile = directory.getChildFile (baseName + ".std");
     const auto assetFolder = directory.getChildFile (baseName + "_Files");
 
     const auto result = save (temporaryFile, data);
@@ -731,7 +731,7 @@ void ProjectFile::clearIncompleteRecoveryFiles (const juce::File& directory)
 void ProjectFile::clearRecoveryFiles (const juce::File& directory)
 {
     juce::Array<juce::File> files;
-    directory.findChildFiles (files, juce::File::findFiles, false, "Recovery-*.pfs");
+    directory.findChildFiles (files, juce::File::findFiles, false, "Recovery-*.std");
     for (const auto& file : files)
     {
         file.deleteFile();
@@ -746,7 +746,7 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
     if (onProgress)
         onProgress (-1.0);
     const auto xml = juce::XmlDocument::parse (file);
-    if (xml == nullptr || ! xml->hasTagName ("ProjectFreedom")
+    if (xml == nullptr || ! xml->hasTagName ("MaXXXtudio")
         || xml->getIntAttribute ("version", 0) != 1)
         return juce::Result::fail ("Invalid or unsupported project file.");
 

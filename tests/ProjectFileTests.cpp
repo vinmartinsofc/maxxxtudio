@@ -10,7 +10,7 @@ struct TemporaryProjectFolder
 {
     TemporaryProjectFolder()
         : folder (juce::File::getSpecialLocation (juce::File::tempDirectory)
-                      .getNonexistentChildFile ("project_freedom_group_roundtrip", "", false))
+                      .getNonexistentChildFile ("maxxx_tudio_group_roundtrip", "", false))
     {
         folder.createDirectory();
     }
@@ -43,7 +43,7 @@ TEST_CASE ("Project files preserve flat group bus membership")
     child.colour = 0xff2196f3;
     data.project.tracks.push_back (child);
 
-    const auto file = temporary.folder.getChildFile ("group_test.pfs");
+    const auto file = temporary.folder.getChildFile ("group_test.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
 
     ProjectFileData loaded;
@@ -71,7 +71,7 @@ TEST_CASE ("Project files preserve mixer MIDI mappings")
           MidiMappingMessageType::ControlChange, 1, 16 }
     };
 
-    const auto file = temporary.folder.getChildFile ("midi_mappings.pfs");
+    const auto file = temporary.folder.getChildFile ("midi_mappings.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
 
     ProjectFileData loaded;
@@ -116,7 +116,7 @@ TEST_CASE ("Project files collect Drum Rack samples and restore their paths")
     plugin.state.replaceWith (stateStream.getData(), stateStream.getDataSize());
     data.plugins.push_back (std::move (plugin));
 
-    const auto file = temporary.folder.getChildFile ("drum_rack_test.pfs");
+    const auto file = temporary.folder.getChildFile ("drum_rack_test.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
     ProjectFileData loaded;
     REQUIRE (ProjectFile::load (file, loaded).wasOk());
@@ -152,7 +152,7 @@ TEST_CASE ("Project files preserve mixer and plugin automation envelopes")
     });
     data.project.tracks.push_back (track);
 
-    const auto file = temporary.folder.getChildFile ("automation_test.pfs");
+    const auto file = temporary.folder.getChildFile ("automation_test.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
 
     ProjectFileData loaded;
@@ -197,7 +197,7 @@ TEST_CASE ("Project files preserve audio clip automation targets")
     track.automation.push_back (envelope);
     data.project.tracks.push_back (track);
 
-    const auto file = temporary.folder.getChildFile ("audio_automation.pfs");
+    const auto file = temporary.folder.getChildFile ("audio_automation.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
     ProjectFileData loaded;
     REQUIRE (ProjectFile::load (file, loaded).wasOk());
@@ -269,7 +269,7 @@ TEST_CASE ("Project files migrate legacy Volume Master gain and rate automation"
     rangeTwoPlugin.state.replaceAll (rangeTwoStream.getData(), rangeTwoStream.getDataSize());
     data.plugins.push_back (std::move (rangeTwoPlugin));
 
-    const auto file = temporary.folder.getChildFile ("legacy_gain_automation.pfs");
+    const auto file = temporary.folder.getChildFile ("legacy_gain_automation.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
 
     ProjectFileData loaded;
@@ -303,7 +303,7 @@ TEST_CASE ("Project files migrate legacy Volume Master gain and rate automation"
     REQUIRE (std::abs (migratedRate->getDoubleAttribute ("value")
                        - UtilityProcessor::migrateLegacyRate (0.1f)) < 0.000001);
 
-    const auto migratedFile = temporary.folder.getChildFile ("migrated_gain_automation.pfs");
+    const auto migratedFile = temporary.folder.getChildFile ("migrated_gain_automation.std");
     REQUIRE (ProjectFile::save (migratedFile, loaded).wasOk());
     ProjectFileData reloaded;
     REQUIRE (ProjectFile::load (migratedFile, reloaded).wasOk());
@@ -335,7 +335,7 @@ TEST_CASE ("Project files preserve non-destructive MIDI groove settings")
     clip->clip.setGroove (groove);
     data.project.tracks.push_back (track);
 
-    const auto file = temporary.folder.getChildFile ("groove_test.pfs");
+    const auto file = temporary.folder.getChildFile ("groove_test.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
 
     ProjectFileData loaded;
@@ -370,7 +370,7 @@ TEST_CASE ("Project files keep Piano Roll locators per MIDI clip and separate fr
     track.addClip (16.0, 4.0);
     data.project.tracks.push_back (track);
 
-    const auto file = temporary.folder.getChildFile ("piano_locators_test.pfs");
+    const auto file = temporary.folder.getChildFile ("piano_locators_test.std");
     REQUIRE (ProjectFile::save (file, data).wasOk());
 
     ProjectFileData loaded;

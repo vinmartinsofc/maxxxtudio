@@ -11,7 +11,7 @@ namespace
 {
 juce::String objectName (const juce::String& sessionId, const juce::String& suffix)
 {
-    return "Local\\ProjectFreedomPlugin_" + sessionId + "_" + suffix;
+    return "Local\\MaXXXtudioPlugin_" + sessionId + "_" + suffix;
 }
 
 HWND findParentWindow (DWORD processId)
@@ -84,15 +84,15 @@ void setNativeWindowIcon (juce::DocumentWindow& window)
         return;
 
     const auto instance = GetModuleHandleW (nullptr);
-    auto largeIcon = static_cast<HICON> (LoadImageW (instance, L"IDI_PROJECT_FREEDOM", IMAGE_ICON,
+    auto largeIcon = static_cast<HICON> (LoadImageW (instance, L"IDI_MAXXXTUDIO", IMAGE_ICON,
                                                       0, 0, LR_DEFAULTSIZE | LR_SHARED));
     if (largeIcon == nullptr)
     {
-        juce::Logger::writeToLog ("PluginWorker: nao foi possivel carregar o icone do Project Freedom.");
+        juce::Logger::writeToLog ("PluginWorker: nao foi possivel carregar o icone do MaXXXtudio.");
         return;
     }
 
-    auto smallIcon = static_cast<HICON> (LoadImageW (instance, L"IDI_PROJECT_FREEDOM", IMAGE_ICON,
+    auto smallIcon = static_cast<HICON> (LoadImageW (instance, L"IDI_MAXXXTUDIO", IMAGE_ICON,
                                                       GetSystemMetrics (SM_CXSMICON),
                                                       GetSystemMetrics (SM_CYSMICON), LR_SHARED));
     if (smallIcon == nullptr)
@@ -339,7 +339,10 @@ void PluginWorkerRuntime::run()
     {
         const auto result = WaitForMultipleObjects (2, handles, FALSE, INFINITE);
         if (result == WAIT_OBJECT_0 + 1)
+        {
+            juce::MessageManager::callAsync ([] { juce::JUCEApplication::getInstance()->quit(); });
             break;
+        }
         if (result != WAIT_OBJECT_0)
         {
             publishError ("Falha de comunicacao com o processo principal.");

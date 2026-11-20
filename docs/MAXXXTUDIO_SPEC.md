@@ -1,9 +1,9 @@
-# Project Freedom — Especificação, Estado Atual e Plano
+# MaXXXtudio — Especificação, Estado Atual e Plano
 
 > **Documento mestre para Spec-Driven Development (SDD).**
 > Pensado para ser entregue a *qualquer* modelo de IA (ou pessoa) que vá continuar o projeto **sem ter visto a conversa original**.
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
-> Salve como `docs/SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
+> Salve como `docs/MAXXXTUDIO_SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
 - **Versão do documento:** 1.50 (histórico do Drum Rack, transporte em foco e autoplay de grooves)
 - **⚠️ Ordem de trabalho vigente:** fila de pendências do usuário no §4.3. O documento `PLANO_DE_ACAO_FASE_4.md`, citado em versões antigas, não está presente no repositório. O §4.3 prevalece sobre o roadmap legado do §14.
@@ -39,8 +39,8 @@ Ao concluir uma tarefa: troque `- [ ]` por `- [x]` em §14, atualize a matriz de
 ### 0.4 Prompt de abertura para colar em outro modelo
 
 ```text
-Você vai continuar o desenvolvimento do "Project Freedom", um DAW open source em C++20 + JUCE 8 + CMake,
-inspirado no fluxo do Ableton Live 10/11 (somente Arrangement View). O documento docs/SPEC.md é a fonte
+Você vai continuar o desenvolvimento do "MaXXXtudio", um DAW open source em C++20 + JUCE 8 + CMake,
+inspirado no fluxo do Ableton Live 10/11 (somente Arrangement View). O documento docs/MAXXXTUDIO_SPEC.md é a fonte
 da verdade: leia-o inteiro antes de qualquer coisa. Siga o fluxo SDD da seção 0.1.
 Trabalhe UMA tarefa por vez, começando pela primeira pendência aberta em §4.3, a menos que o dono indique outra.
 Responda em português (Brasil), em linguagem simples: o dono está aprendendo C++ (vem de Java/OOP).
@@ -54,7 +54,7 @@ Antes de codar, me mostre um plano curto (arquivos que vai tocar + testes que va
 
 ### 1.1 O que é
 
-**Project Freedom** é um DAW (Digital Audio Workstation) minimalista, gratuito e open source, focado em **produção MIDI com instrumentos/efeitos VST3 de terceiros**. É um **"Live-like"**: reproduz o *fluxo de trabalho*, os *atalhos* e o *comportamento* do Ableton Live 10/11, mas com **identidade visual e código próprios**.
+**MaXXXtudio** é um DAW (Digital Audio Workstation) minimalista, gratuito e open source, focado em **produção MIDI com instrumentos/efeitos VST3 de terceiros**. É um **"Live-like"**: reproduz o *fluxo de trabalho*, os *atalhos* e o *comportamento* do Ableton Live 10/11, mas com **identidade visual e código próprios**.
 
 ### 1.2 Por que existe
 
@@ -92,7 +92,7 @@ Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch d
 - Trabalha no **Windows** (PowerShell). Já tem Visual Studio 2026 Community com a carga "Desenvolvimento para desktop com C++".
 - Prefere receber **o projeto completo como `.zip`** para sobrescrever a pasta, com instruções exatas de build.
 - Dá feedback em listas curtas após testar; valorize **fidelidade ao Live** e **usabilidade**.
-- Cuida **pessoalmente da identidade visual** (logo F/R/E/E, paleta grafite, biblioteca de ícones SVG): tratar o design dele como **especificação**, não como sugestão.
+- Cuida **pessoalmente da identidade visual**: a marca MaXXXtudio usa a assinatura `MX`, o domínio `DAW` no ícone e preto/laranja elétrico; tratar a especificação vigente como **requisito**.
 - Tem acesso ao **Ableton Live** instalado, então pode **conferir comportamentos duvidosos** lá — quando houver ambiguidade, peça para ele testar e relatar.
 - Possui o **manual de referência do Live em PDF** (na verdade é o **Live 12**, mesmo com nome de arquivo "live11"). Use-o para validar atalhos/comportamentos, mas lembre: o alvo é **Live 10/11**; algumas coisas do 12 podem não existir no 11.
 - Tem uso limitado de modelos de IA (limites de uso), por isso este documento existe: **cada sessão deve render o máximo possível** — seja objetivo, entregue incrementos compiláveis.
@@ -106,18 +106,18 @@ Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch d
 Abrir **Developer PowerShell for VS** (menu Iniciar). O CMake do MSYS2/UCRT64 **não serve**.
 
 ```powershell
-cd C:\FILES\project-freedom\rolldaw          # raiz do repositório (a pasta com CMakeLists.txt)
+cd C:\path\to\maxxxtudio                # raiz do repositório (a pasta com CMakeLists.txt)
 Remove-Item -Recurse -Force build            # só quando a estrutura de CMake/grafo mudou
 cmake -S . -B build -G "Visual Studio 18 2026"
 cmake --build build --config Release
 .\build\tests\Release\roll_tests.exe          # testes do core
 ctest --test-dir build -C Release             # (opcional)
-.\build\app\ProjectFreedom_artefacts\Release\"Project Freedom.exe"
+.\build\app\MaXXXtudio_artefacts\Release\"MaXXXtudio.exe"
 ```
 
 - Primeiro build baixa JUCE e Catch2 (alguns minutos).
 - Se o gerador não for reconhecido: `cmake --help` e usar o nome exato listado em "Visual Studio ...".
-- A pasta do projeto no disco ainda se chama `rolldaw` (nome antigo). O produto é **Project Freedom**.
+- O produto é **MaXXXtudio**; execute os comandos na raiz do repositório.
 
 ### 3.2 Linux (usado para verificação automatizada)
 
@@ -138,7 +138,7 @@ Opções úteis do CMake: `-DROLL_BUILD_APP=OFF` (só core + testes, build em se
 ```bash
 apt install xvfb imagemagick xdotool
 Xvfb :77 -screen 0 1500x900x24 &            # em processo separado (use setsid)
-DISPLAY=:77 "build/app/ProjectFreedom_artefacts/Release/Project Freedom" &
+DISPLAY=:77 "build/app/MaXXXtudio_artefacts/Release/MaXXXtudio" &
 DISPLAY=:77 import -window root shot.png    # captura
 DISPLAY=:77 xdotool mousemove X Y click --repeat 2 --delay 90 1   # duplo clique
 ```
@@ -147,7 +147,7 @@ DISPLAY=:77 xdotool mousemove X Y click --repeat 2 --delay 90 1   # duplo clique
 - Se a captura for **reduzida** ao ser exibida (ex.: 1500x900 → 1400x840), as coordenadas lidas na imagem precisam ser **multiplicadas pelo fator de escala** antes de ir ao `xdotool`. (Já causou falsos "bugs" de clique.)
 - Sem gerenciador de janelas não há barra de título; sem placa de som aparece `ALSA lib ... seq_hw` (inofensivo).
 - Processo de build em segundo plano com `nohup ... &` pode morrer junto com o shell; use `setsid`.
-- **Nunca** use `pkill -f "Project Freedom"` dentro do mesmo comando de shell (o padrão casa com a própria linha de comando); use `pkill -x`.
+- **Nunca** use `pkill -f "MaXXXtudio"` dentro do mesmo comando de shell (o padrão casa com a própria linha de comando); use `pkill -x`.
 - **O ambiente de verificação não tem placa de som nem plugins VST3**: áudio e hospedagem real **não podem ser testados** lá.
 
 ---
@@ -177,7 +177,7 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Plugins | Navegador com busca e filtros Todos/Instrumentos/Efeitos/Favoritos; Favoritos agrupa plugins por cor; estrela e menu de contexto gerenciam favoritos persistidos; duplo clique carrega | ✅ UI / 🟡 carregamento e QA manual |
 | Plugins | Cadeia por trilha (1 instrumento + N efeitos), UI do plugin em janela (minimizar+fechar; janelas permanecem à frente enquanto o app está ativo) | 🟡 |
 | Plugins | Favoritos de plugins | Implementado: estrela/menu de contexto, categorias por cor e persistência por identificador VST3; falta QA manual |
-| Arranjo | Cores customizáveis para trilhas MIDI/áudio e Master | Implementado: paleta nos menus dos cabeçalhos, cor salva no `.pfs`, undo/redo e clips acompanham a trilha; falta QA manual |
+| Arranjo | Cores customizáveis para trilhas MIDI/áudio e Master | Implementado: paleta nos menus dos cabeçalhos, cor salva no `.std`, undo/redo e clips acompanham a trilha; falta QA manual |
 | Plugins | Host e scan VST3 | ✅ |
 | Plugins | Pastas de busca customizadas VST3, persistidas e editáveis pelo navegador | 🟡 |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
@@ -185,7 +185,7 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Áudio | Editor de clip com BPM de origem e Warp ligado/desligado; o playback atual equivale a Re-Pitch e não preserva formantes | 🟡 (controles e integração presentes; pitch independente e modos Beats/Tones/Texture/Complex/Complex Pro pendentes) |
 | Áudio | Mixer por trilha: volume, pan, mute, medidor; Solo exclusivo, por seleção múltipla e Ctrl+clique aditivo | 🟡 (build/testes; falta validação manual na UI) |
 | Áudio | Grupos planos como barramentos reais: faixas-filhas → mixer/efeitos do grupo → Master ou Ext. Out; Solo respeita grupo e filhos | 🟡 (build/testes; falta validação manual com plugins) |
-| Automação | Modo `A`, escolha de volume/pan/mute ou parâmetro VST3 por slot, edição de breakpoints no Arrangement, atualização dos controles de mixer durante playback e persistência `.pfs` | Implementado; falta QA manual com plugins reais |
+| Automação | Modo `A`, escolha de volume/pan/mute ou parâmetro VST3 por slot, edição de breakpoints no Arrangement, atualização dos controles de mixer durante playback e persistência `.std` | Implementado; falta QA manual com plugins reais |
 | Arranjo | Selecionar múltiplas faixas com Shift/Ctrl+clique, com destaque visual | Shift-clique seleciona o intervalo entre a âncora e a faixa clicada; Ctrl/Cmd-clique continua aditivo. Build/testes passaram; falta QA manual na UI. |
 | Arranjo | Excluir simultaneamente as faixas selecionadas e identificar visualmente faixas-filhas de grupo | Delete/Backspace remove todas as faixas selecionadas; o conector colorido indica a relação com o grupo. O projeto mantém ao menos uma faixa. |
 | Arranjo | Clique seleciona o clip inteiro; arrastar seleção múltipla MIDI/áudio move o conjunto, Ctrl+arrastar copia | Prévia mostra todos os destinos; posições relativas são preservadas e regiões ocupadas são substituídas. Falta QA manual na UI. |
@@ -206,8 +206,8 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Piano roll | Zoom H/V (botões, Ctrl+roda, Alt+roda, arrastar régua, +/−), grade 1/64–1 compasso + tripleto | ✅ |
 | Piano roll | Marcador de inserção (clique no fundo), Preview on/off | ✅ |
 | Piano roll | Tecla `0` ativa/desativa as notas selecionadas sem removê-las | 🟡 (build/testes; falta teste manual na UI) |
-| Projeto | **Salvar/abrir** (`.pfs`, leitura legada `.freedom`, progresso global) | ✅ |
-| Projeto | **Autosave de recuperação** a cada 2 min em `%APPDATA%\ProjectFreedom\autosave`, com duas gerações e oferta de restauração na próxima inicialização | ✅ |
+| Projeto | **Salvar/abrir** (`.std`, progresso global) | ✅ |
+| Projeto | **Autosave de recuperação** a cada 2 min em `%APPDATA%\MaXXXtudio\autosave`, com duas gerações e oferta de restauração na próxima inicialização | ✅ |
 | Projeto | **Desfazer global** (arranjo/mixer/dispositivos) | ⬜ |
 | Entrada | Teclado do computador: modo M; notas A–L com teclas pretas; Z/X oitava; C/V velocidade | ✅ (pendente teste sonoro manual) |
 | Entrada | MIDI de teclado/controlador, gravação | ⬜ |
@@ -230,14 +230,14 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | Navegador de áudio, pré-escuta e drag/drop de áudio | Concluído |
 | Canais, grupos/barramentos, roteamento e comportamento de solo/Ctrl | Concluído |
 | Ctrl+D de regiões substitui o destino sem deslocar outras faixas; copiar/colar entre faixas e seleção múltipla | Concluído |
-| Abrir `.pfs` por duplo clique; Ctrl+L para alternar loop; Shift+Espaço para retomar | Concluído |
+| Abrir `.std` por duplo clique; Ctrl+L para alternar loop; Shift+Espaço para retomar | Concluído |
 | Consolidar áudio após a cadeia de dispositivos da faixa e antes do mixer/Master | Implementado; falta QA com VST3 real |
 | Grade adaptativa (“narrow”) e recolhimento individual de trilhas; recolher grupo oculta suas filhas | Implementado; falta QA visual manual |
 | Excluir várias faixas selecionadas com Delete/Backspace | Implementado; mantém ao menos uma faixa no projeto; falta QA manual |
 | Indicador visual de faixas-filhas pertencentes a um grupo | Implementado com conector colorido alinhado ao recuo das filhas; falta QA manual |
 | Seleção de clip inteiro versus foco/seleção de tempo | Clique na faixa superior seleciona o clip inteiro; clique no conteúdo posiciona o playhead naquele ponto; arrastar no conteúdo seleciona um intervalo que pode atravessar vários clips/faixas, incluindo fragmentos de áudio. O indicador diferencia clip inteiro, região e playhead; Play inicia conforme esse estado. |
 | Menu de preferências | Botão Opções na barra superior, menu Projeto ou `Ctrl+,`; abas Áudio, Plugins VST3 e Record/Warp/Launch; permite configurar dispositivo/buffer/canais, adicionar/remover pastas VST3, reescanear plugins e habilitar fades de borda de 4 ms em novos áudios importados. |
-| Recuperação de sessão | Autosave a cada 2 minutos em `%APPDATA%\ProjectFreedom\autosave`; mantém duas cópias completas, pergunta na inicialização e remove os snapshots ao salvar ou fechar normalmente. |
+| Recuperação de sessão | Autosave a cada 2 minutos em `%APPDATA%\MaXXXtudio\autosave`; mantém duas cópias completas, pergunta na inicialização e remove os snapshots ao salvar ou fechar normalmente. |
 | Groove MIDI | **Concluído**: suporte a importação de `.agr`, carregamento de grooves da biblioteca do Ableton, pré-escuta, aplicação ao clip MIDI selecionado e persistência no projeto. Verificados em `GrooveLibraryTests` e pela integração em `MainComponent`/`core/Groove.h`. |
 
 **Pendências — ordem original do usuário, com duplicatas agrupadas**
@@ -252,9 +252,9 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | 6 | Drag/drop de MIDI/áudio sobre conteúdo existente para substituí-lo | Ao mover/copiar clips e soltar arquivos de áudio em trilhas de áudio, só a região sobreposta é substituída e o restante é preservado. Importar arquivos MIDI continua sendo uma feature futura separada. |
 | 7 | Grade sincronizada ao BPM | A grade musical do Arrangement e do editor de áudio já usa beats e o BPM do projeto; falta confirmar se o pedido significa outro comportamento. |
 | 8 | Favoritos de plugins | Implementado no navegador VST; falta QA manual com plugins reais. |
-| 9 | Cores customizáveis para trilhas MIDI/áudio e Master | Implementado com paleta nos menus dos cabeçalhos e persistência no `.pfs`; falta QA manual. |
+| 9 | Cores customizáveis para trilhas MIDI/áudio e Master | Implementado com paleta nos menus dos cabeçalhos e persistência no `.std`; falta QA manual. |
 | 10 | Iniciar reprodução/escuta de trechos específicos pelo Piano Roll | Pendente; clicar na régua reposiciona o playhead, mas não inicia reprodução local. |
-| 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | `A` exibe os parâmetros automatizáveis e seus valores atuais; todas as curvas salvas ficam visíveis, com o parâmetro ativo destacado. Os controles de volume, pan e mute do mixer acompanham os valores automatizados; o AudioEngine aplica parâmetros VST3 durante a reprodução, restaura o valor manual ao parar e protege bindings ao remover/reordenar plugins. Persistido no `.pfs`; falta QA manual com plugins reais. |
+| 11 | Automação de parâmetros (tecla A, plugins, volume e efeitos) | `A` exibe os parâmetros automatizáveis e seus valores atuais; todas as curvas salvas ficam visíveis, com o parâmetro ativo destacado. Os controles de volume, pan e mute do mixer acompanham os valores automatizados; o AudioEngine aplica parâmetros VST3 durante a reprodução, restaura o valor manual ao parar e protege bindings ao remover/reordenar plugins. Persistido no `.std`; falta QA manual com plugins reais. |
 | 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp on/off existem; playback é atualmente Re-Pitch, sem modos de time-stretch nem transpose independente. |
 | 13 | Groove MIDI (8th/16th e ritmos não quantizados) | **Concluído** no código atual: `GrooveLibrary`/`GrooveBrowser` importam `.agr`, reproduzem automaticamente por padrão ao navegar e aplicam grooves sem alterar as notas originais; qualquer revisão futura deve validar o comportamento manual real em UI. |
 | Nova | Ferramentas de sampler e efeitos nativos | Drum Rack limitado às 15 notas do teclado do computador. Volume Master reúne ganho, largura/balanço, modos de canal, mono, inversão de fase, Auto Pan, Bass Mono, mute e DC; controles expostos à automação. |
@@ -379,7 +379,7 @@ TrackSource(MIDI) ──midi──► [instrumento] ──audio──► [efeito
 
 ### 6.6 `app/` — Demais
 
-- `PluginScanner`: thread própria; `PluginDirectoryScanner` com locais padrão e pastas VST3 customizadas; arquivo *dead-man's pedal* `scan-crash-guard.txt` bloqueia automaticamente plugins que travam o scan; lista e pastas customizadas salvas em `%APPDATA%\ProjectFreedom` (`userApplicationDataDirectory/ProjectFreedom`).
+- `PluginScanner`: thread própria; `PluginDirectoryScanner` com locais padrão e pastas VST3 customizadas; arquivo *dead-man's pedal* `scan-crash-guard.txt` bloqueia automaticamente plugins que travam o scan; lista e pastas customizadas salvas em `%APPDATA%\MaXXXtudio` (`userApplicationDataDirectory/MaXXXtudio`).
 - `BrowserPanel`: plugins VST3 agrupados por pasta; menu `Pastas` para adicionar/remover locais customizados; filtros; marca roxa nos efeitos; Enter/duplo clique carrega.
 - `DeviceView`: caixas de dispositivos com Abrir/remover.
 - `TransportBar`: `IconButton` desenhado à mão (sem fontes/emoji); posição em "compasso . beat . 16avo".
@@ -567,7 +567,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 ### Concluído na fila atual do usuário
 
 - [x] Favoritos de plugins VST, com filtro e persistência nas configurações do usuário.
-- [x] Cores customizáveis para trilhas MIDI/áudio e Master, com persistência no `.pfs` e inclusão em undo/redo.
+- [x] Cores customizáveis para trilhas MIDI/áudio e Master, com persistência no `.std` e inclusão em undo/redo.
 
 ### Trilha paralela V — Identidade visual e ícones (independente dos marcos de funcionalidade)
 
@@ -606,7 +606,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
   - Esquema (v1):
     ```json
     {
-      "app": "ProjectFreedom", "formatVersion": 1,
+      "app": "MaXXXtudio", "formatVersion": 1,
       "bpm": 120.0, "loop": { "enabled": true, "start": 0.0, "end": 16.0 },
       "tracks": [{
         "id": 1, "name": "1 MIDI", "volume": 0.8, "pan": 0.0, "mute": false, "solo": false,
@@ -620,12 +620,12 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
   - **Testes:** *round-trip* (serializar → parsear → igual), arquivo corrompido, versão desconhecida, campos opcionais ausentes (usar padrões).
 - [ ] **T4.3 — Salvar/abrir na UI**
   - Ctrl+S / Ctrl+Shift+S / Ctrl+O / Ctrl+N (padrão do Live/Windows); `FileChooser` assíncrono; extensão `.pfp`.
-  - Título da janela: `Project Freedom - nome.pfp *` (asterisco = alterações não salvas); confirmação ao fechar/abrir/novo com alterações.
+  - Título da janela: `MaXXXtudio - nome.pfp *` (asterisco = alterações não salvas); confirmação ao fechar/abrir/novo com alterações.
   - Estado do plugin: `AudioPluginInstance::getStateInformation` → `MemoryBlock::toBase64Encoding()`; restaurar com `setStateInformation` **após** o plugin carregar.
   - Plugin ausente ao abrir: manter um dispositivo "plugin ausente" **preservando o estado** e avisar; não perder dados.
   - **Aceite:** salvar, fechar, abrir → mesmas trilhas, clips, notas, loop, BPM, mixer e **sons dos plugins** (preset recuperado).
 - [x] **T4.4 — Cópia de segurança / autosave**
-  - A cada 2 minutos grava uma sessão completa em `%APPDATA%\ProjectFreedom\autosave`, publica o snapshot só depois de concluir a gravação, mantém duas gerações e oferece recuperar na inicialização após falha. Snapshots são removidos após salvamento ou fechamento normal.
+  - A cada 2 minutos grava uma sessão completa em `%APPDATA%\MaXXXtudio\autosave`, publica o snapshot só depois de concluir a gravação, mantém duas gerações e oferece recuperar na inicialização após falha. Snapshots são removidos após salvamento ou fechamento normal.
 
 ### Marco 5 — Desfazer/refazer global
 
@@ -664,7 +664,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
   - Consolidação de seleção de áudio implementada: renderiza a cadeia de plugins da própria faixa e substitui os clips no trecho; falta validação manual com plugin VST3 real.
 - [ ] **T8.3 — Seleção por tempo** arrastando em área vazia; comandos "Duplicar tempo", etc.
 - [ ] **T8.4 — Reordenar trilhas** (arrastar cabeçalho); altura de trilha; "zoom para caber".
-  - Recolhimento/expansão individual de trilhas pelo cabeçalho foi implementado; altura compacta persiste no `.pfs`. Ajuste de altura e "zoom para caber" continuam pendentes.
+  - Recolhimento/expansão individual de trilhas pelo cabeçalho foi implementado; altura compacta persiste no `.std`. Ajuste de altura e "zoom para caber" continuam pendentes.
 - [ ] **T8.5 — Pan na UI** (knob/slider); lei de pan *constant-power*; medidor com *clip indicator*.
 - [ ] **T8.6 — Assinatura de compasso** (D5): `numerador/denominador` no projeto; régua, grade e relógio parametrizados (testes de `core/`).
 - [ ] **T8.7 — Marcadores/localizadores** (opcional).
@@ -736,7 +736,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 **Janelas e foco**
 - [ ] Janela do plugin tem **minimizar e fechar**; fechar não derruba o programa.
-- [ ] Ao voltar ao Project Freedom, janelas abertas de plugins ficam à frente da janela principal; janelas minimizadas continuam minimizadas.
+- [ ] Ao voltar ao MaXXXtudio, janelas abertas de plugins ficam à frente da janela principal; janelas minimizadas continuam minimizadas.
 - [ ] Espaço e Shift+Espaço controlam play/pause/retomada mesmo com o foco dentro da janela de um plugin.
 - [ ] Espaço funciona depois de clicar em qualquer botão; F6 alterna painéis.
 
@@ -756,10 +756,11 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.60** | Marca atualizada para MaXXXtudio; identidade do ícone `MX` + `DAW` em preto/laranja; nome exibido e executáveis atualizados, preservando IDs e dados legados |
 | **Doc 1.59** | Seleção múltipla de favoritos para aplicar cores/remover em lote; restauração da expansão e seleção da árvore após alterações |
 | **Doc 1.58** | Favoritos de plugins usam a mesma paleta e árvore de categorias coloridas do navegador de arquivos |
 | **Doc 1.56** | Favoritos de plugins exibidos em lista plana; canal Master agora permite escolher e salvar uma cor |
-| **Doc 1.55** | Favoritos VST com filtro/persistência; paleta de cores por trilha salva em `.pfs`, aplicada aos clips e integrada a undo/redo |
+| **Doc 1.55** | Favoritos VST com filtro/persistência; paleta de cores por trilha salva em `.std`, aplicada aos clips e integrada a undo/redo |
 | **Doc 1.54** | Volume Master: ganho ampliado a +24 dB; Amount/Rate/Phase/Shape contínuos, modulação L/R com fase estéreo e visualização em tempo real |
 | **Doc 1.53** | Volume Master: ganho de -60 a +12 dB com migração de automações antigas; indicador de balanço centralizado; controle Bass Freq removido |
 | **Doc 1.52** | Volume Master unificado com Auto Pan e recursos Utility; Pan Master removido como efeito separado, projetos e automações legados migrados |
@@ -770,7 +771,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 | **Doc 1.47** | Autosave de sessão completa a cada 2 minutos, duas gerações em AppData, recuperação oferecida na inicialização e remoção após saída normal |
 | **Doc 1.46** | Fade de segurança curto (4 ms) no início dos clips de áudio; controles de mixer acompanham em tempo real os valores automatizados de volume, pan e mute |
 | **Doc 1.45** | Monitor ao vivo de automação e curvas simultâneas; atualização segura de parâmetros VST3 e restauração de valores ao parar; roteamento de áudio tolerante a plugins sem canais de áudio |
-| **Doc 1.44** | Automação por breakpoints no Arrangement para mixer e parâmetros VST3; atalho A, edição com snap e persistência de envelopes em `.pfs` |
+| **Doc 1.44** | Automação por breakpoints no Arrangement para mixer e parâmetros VST3; atalho A, edição com snap e persistência de envelopes em `.std` |
 | **Doc 1.43** | Menu de preferências com dispositivo/buffer/canais de áudio, pastas e scan VST3, e opção persistente de fades curtos nas bordas de áudio importado |
 | **Doc 1.42** | Clique na parte superior seleciona o clip inteiro; clique no conteúdo MIDI/áudio posiciona o playhead no ponto, e arraste seleciona tempo através de vários clips/faixas; indicadores distintos para clip, região e playhead |
 | **Doc 1.41** | Ao selecionar um clip MIDI/áudio, Play inicia do seu começo, em vez da posição arbitrária do clique dentro dele |
@@ -786,7 +787,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 | **Doc 1.31** | Ctrl+arrastar copia clips sobre conteúdo ocupado com substituição parcial; inclui prévia visual de destino e aplica substituição parcial a drops de áudio |
 | **Doc 1.30** | Movimento de clips MIDI/áudio substitui apenas a região sobreposta e preserva as partes restantes; documenta que drops de arquivos externos ainda precisam ser tratados |
 | **Doc 1.29** | Fila de features do usuário consolidada em §4.3; documenta itens concluídos, parciais e pendentes e substitui a referência a um plano ausente |
-| **Doc 1.28** | Recolher/expandir trilhas individualmente; ao recolher grupo, ocultar as trilhas-filhas; estado persistido em `.pfs` |
+| **Doc 1.28** | Recolher/expandir trilhas individualmente; ao recolher grupo, ocultar as trilhas-filhas; estado persistido em `.std` |
 | **Doc 1.27** | Ctrl+D com clips/intervalo selecionados substitui o conteúdo no destino sem deslocar clips em outras faixas |
 | **Doc 1.26** | Grade adaptativa do Arrangement acompanha o zoom; Ctrl+5 alterna entre grade adaptativa e fixa |
 | **Doc 1.25** | Ctrl+D sem clips selecionados duplica a faixa MIDI/áudio com clips, mixer, roteamento e plugins; opção adicionada ao menu de contexto |
@@ -794,8 +795,8 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 | **Doc 1.23** | Seleção múltipla de faixas pelo cabeçalho; Solo aplica-se às faixas selecionadas e Ctrl+clique permite solos aditivos |
 | **Doc 1.22** | Consolidar seleção de áudio renderiza a faixa após seus plugins e antes do mixer/Master; inclui progresso, cancelamento e teste offline |
 | **Doc 1.21** | Ctrl+L desativa o loop quando já está ligado; quando desligado, define o loop pelo clip/trilha selecionado e o ativa |
-| **Doc 1.20** | Janelas de plugins ficam no topo enquanto o Project Freedom está ativo, sem restaurar minimizadas; Espaço e Shift+Espaço controlam o transporte mesmo com o foco no editor de plugin |
-| **Doc 1.19** | Janelas abertas de plugins voltam à frente da janela principal ao ativar o Project Freedom; janelas minimizadas não são restauradas |
+| **Doc 1.20** | Janelas de plugins ficam no topo enquanto o MaXXXtudio está ativo, sem restaurar minimizadas; Espaço e Shift+Espaço controlam o transporte mesmo com o foco no editor de plugin |
+| **Doc 1.19** | Janelas abertas de plugins voltam à frente da janela principal ao ativar o MaXXXtudio; janelas minimizadas não são restauradas |
 | **Doc 1.18** | Shift+Espaço retoma diretamente da posição capturada ao pausar ou pressionar Stop, inclusive com loop e seleção |
 | **Doc 1.17** | Atalho `0` no Piano Roll aceita teclado numérico e encaminha a ação para as notas selecionadas quando a grade tem foco |
 | **Doc 1.16** | Ctrl+C/X/V para clips de áudio e MIDI, com colagem em outra trilha compatível |
@@ -808,7 +809,7 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 | **Doc 1.9** | Visão geral navegável no topo do Arrangement, rolagem inferior removida, gesto vertical de zoom com direção revisada e marcador de locator com ícone de bandeira |
 | **Doc 1.6 / Etapa c** | Escaneamento VST3 em `ThreadPool`, progresso no registry, cancelamento e encerramento seguro do worker |
 | **Doc 1.7 / Etapa d** | Parse/serialização de projeto no worker, progresso global e tarefa mantida até restaurar áudio/plugins |
-| **Doc 1.8** | Zoom e navegação por arrasto nas réguas do Arrangement e Piano Roll; sessões salvas como `.pfs`, com leitura legada de `.freedom` |
+| **Doc 1.8** | Zoom e navegação por arrasto nas réguas do Arrangement e Piano Roll; sessões salvas como `.std` |
 | **Doc 1.5 / Etapa b** | Carregamento assíncrono de plugin usa `TaskScope` e mostra indicador no slot da faixa; `DeviceView` dá cursor de cópia durante o drag |
 | **Doc 1.4 / Etapa a** | `TaskRegistry`/`TaskScope`, indicadores por target, barra global cancelável e simulação em worker; gestos de edição não geram avisos centrais |
 | **Marco 1** | Host VST3 mínimo + piano roll básico + modo escala; núcleo com testes |
@@ -825,10 +826,10 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 ### 18.1 Estrutura de pastas
 
 ```
-rolldaw/                      (raiz do repositório; renomear para project-freedom quando conveniente)
+maxxxtudio/                   (raiz do repositório)
 ├─ CMakeLists.txt             (JUCE 8.0.15 + Catch2 v3.16.1 via FetchContent)
 ├─ README.md   .gitignore
-├─ docs/SPEC.md               (este documento)
+├─ docs/MAXXXTUDIO_SPEC.md    (este documento)
 ├─ core/                      (C++ puro)
 │   ├─ Note.h  Clip.h/.cpp  Scale.h/.cpp  History.h/.cpp
 │   ├─ Sequencer.h/.cpp       (TransportClock + Sequencer)
@@ -908,9 +909,10 @@ Observações de acessibilidade: o **vermelho** passa no mínimo de 3:1 para **�
 
 1. 24 px é o tamanho-base; 16–18 px em botões compactos; 28–32 px em destaque.
 2. Área clicável maior que o desenho (botão de 36–40 px).
-3. Preservar o **logo F/R/E/E** como marca; ícones funcionais **não** repetem o monograma.
-4. Se o renderizador não herdar cor: gerar variantes com `stroke`/`fill` explícitos (é o caso do JUCE — ver §12.13).
+3. No ícone do aplicativo, `MX` fica pequeno no canto superior esquerdo e `DAW` maior no canto inferior direito; a hierarquia diagonal identifica a família visual.
+4. Preto absoluto e laranja elétrico são a direção da marca do ícone; os temas da interface podem variar por produto.
+5. Se o renderizador não herdar cor: gerar variantes com `stroke`/`fill` explícitos (é o caso do JUCE — ver §12.13).
 
 ### 19.5 Logo
 
-Monograma em quadrantes (**F | R / E | E**) separado por uma cruz de linhas finas, com a legenda "PROJECT FREEDOM" em caixa alta espaçada; texto grafite sobre papel claro texturizado. Arquivo atual: `first_logo.jpg` (raster, com textura de papel — **não serve** como ícone de aplicativo; ver tarefa V5).
+**MaXXXtudio** combina “Max” e “Studio” e é pronunciado “maks-túdio”. A assinatura visual curta é `MX`; para este DAW, o ícone associa `MX` a `DAW`. A grafia da marca não deve ser confundida com seus identificadores internos legados (`MaXXXtudio`).

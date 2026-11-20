@@ -7,7 +7,7 @@
 #endif
 
 #include "MainComponent.h"
-#include "FreedomModalDialog.h"
+#include "AppModalDialog.h"
 #include "OptionsWindow.h"
 #include "WindowPlacement.h"
 #include "DrumRackEditor.h"
@@ -142,7 +142,7 @@ void refreshThemeColours (juce::Component& component,
 juce::File userPreferencesFile()
 {
     auto directory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                         .getChildFile ("ProjectFreedom");
+                         .getChildFile ("MaXXXtudio");
     directory.createDirectory();
     return directory.getChildFile ("preferences.xml");
 }
@@ -150,14 +150,14 @@ juce::File userPreferencesFile()
 bool loadCreateFadesOnClipEdges()
 {
     const auto xml = juce::XmlDocument::parse (userPreferencesFile());
-    return xml != nullptr && xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES")
+    return xml != nullptr && xml->hasTagName ("MAXXXTUDIO_PREFERENCES")
         && xml->getBoolAttribute ("createFadesOnClipEdges", false);
 }
 
 double loadArrangementRatio()
 {
     const auto xml = juce::XmlDocument::parse (userPreferencesFile());
-    const double ratio = xml != nullptr && xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES")
+    const double ratio = xml != nullptr && xml->hasTagName ("MAXXXTUDIO_PREFERENCES")
         ? xml->getDoubleAttribute ("arrangementRatio", 0.42) : 0.42;
     return std::isfinite (ratio) ? std::clamp (ratio, 0.15, 0.75) : 0.42;
 }
@@ -165,15 +165,15 @@ double loadArrangementRatio()
 int loadArrangementHeight()
 {
     const auto xml = juce::XmlDocument::parse (userPreferencesFile());
-    return xml != nullptr && xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES")
+    return xml != nullptr && xml->hasTagName ("MAXXXTUDIO_PREFERENCES")
         ? std::max (-1, xml->getIntAttribute ("arrangementHeight", -1)) : -1;
 }
 
 std::unique_ptr<juce::XmlElement> loadUserPreferences()
 {
     auto xml = juce::XmlDocument::parse (userPreferencesFile());
-    if (xml == nullptr || ! xml->hasTagName ("PROJECT_FREEDOM_PREFERENCES"))
-        xml = std::make_unique<juce::XmlElement> ("PROJECT_FREEDOM_PREFERENCES");
+    if (xml == nullptr || ! xml->hasTagName ("MAXXXTUDIO_PREFERENCES"))
+        xml = std::make_unique<juce::XmlElement> ("MAXXXTUDIO_PREFERENCES");
     return xml;
 }
 
@@ -243,7 +243,7 @@ std::shared_ptr<AudioFileData> createGroovePreviewAudio (const roll::GrooveTempl
 bool isProjectFile (const juce::File& file)
 {
     const auto extension = file.getFileExtension();
-    return extension.equalsIgnoreCase (".pfs") || extension.equalsIgnoreCase (".freedom");
+    return extension.equalsIgnoreCase (".std");
 }
 
 bool isTextEditorFocused()
@@ -840,12 +840,12 @@ MainComponent::MainComponent()
         {
             browser.setStatus ("O plugin " + pluginName
                                + " falhou e foi encerrado; a faixa foi protegida.");
-            FreedomModalDialog::show (
+            AppModalDialog::show (
                 *this, "Falha de plugin",
                 "O plugin " + pluginName
-                    + " falhou e foi encerrado. A faixa foi protegida e o Project Freedom continua aberto.",
-                FreedomModalDialog::Icon::Error,
-                { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+                    + " falhou e foi encerrado. A faixa foi protegida e o MaXXXtudio continua aberto.",
+                AppModalDialog::Icon::Error,
+                { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
         }
     };
 
@@ -2719,7 +2719,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
             overlappingIds.push_back (clip->id);
 
     auto outputDirectory = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-                              .getChildFile ("ProjectFreedom").getChildFile ("Consolidated");
+                              .getChildFile ("MaXXXtudio").getChildFile ("Consolidated");
     if (const auto error = outputDirectory.createDirectory(); error.failed())
     {
         audioBrowser.setStatus ("Consolidar: nao foi possivel criar a pasta de destino: " + error.getErrorMessage());
@@ -3692,7 +3692,7 @@ void MainComponent::chooseWavExportFile()
     const auto suggestedFile = currentProjectFile.existsAsFile()
         ? currentProjectFile.withFileExtension (".wav")
         : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
-              .getChildFile ("Project Freedom.wav");
+              .getChildFile ("MaXXXtudio.wav");
     audioExportChooser = std::make_unique<juce::FileChooser> (
         "Exportar Master como WAV", suggestedFile, "*.wav");
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
@@ -3718,11 +3718,11 @@ void MainComponent::chooseWavExportFile()
 void MainComponent::showWavRenderOptions (const juce::File& file)
 {
     juce::Component::SafePointer<MainComponent> safeThis (this);
-    FreedomModalDialog::showInput (
+    AppModalDialog::showInput (
         *this, "Exportar Master como WAV",
         "Cauda apos o fim do Arrangement (segundos):", "2.0", "Segundos",
-        { { "Exportar", 1, FreedomModalDialog::ButtonStyle::Primary },
-          { "Cancelar", 0, FreedomModalDialog::ButtonStyle::Tertiary } },
+        { { "Exportar", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, file] (int result, juce::String tailText)
         {
             if (safeThis == nullptr || result != 1)
@@ -3860,12 +3860,12 @@ void MainComponent::offerRecoveryBeforeOpening (std::function<void()> continueSt
     }
 
     const juce::Component::SafePointer<MainComponent> safeThis (this);
-    FreedomModalDialog::show (
+    AppModalDialog::show (
         *this, "Sessao de recuperacao encontrada",
-        "O Project Freedom encontrou uma copia automatica recente. Deseja recupera-la?",
-        FreedomModalDialog::Icon::Question,
-        { { "Recuperar", 1, FreedomModalDialog::ButtonStyle::Primary },
-          { "Descartar", 2, FreedomModalDialog::ButtonStyle::Secondary } },
+        "O MaXXXtudio encontrou uma copia automatica recente. Deseja recupera-la?",
+        AppModalDialog::Icon::Question,
+        { { "Recuperar", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Descartar", 2, AppModalDialog::ButtonStyle::Secondary } },
         [safeThis, recoveryFile = files.front(), continueStartup = std::move (continueStartup)] (int result) mutable
         {
             if (safeThis == nullptr)
@@ -3894,13 +3894,13 @@ void MainComponent::requestClose (std::function<void()> onCloseApproved)
     }
 
     const juce::Component::SafePointer<MainComponent> safeThis (this);
-    FreedomModalDialog::show (
+    AppModalDialog::show (
         *this, "Salvar projeto?",
         "Deseja salvar o projeto antes de fechar?",
-        FreedomModalDialog::Icon::Question,
-        { { "Salvar", 1, FreedomModalDialog::ButtonStyle::Primary },
-          { "Nao salvar", 2, FreedomModalDialog::ButtonStyle::Secondary },
-          { "Cancelar", 3, FreedomModalDialog::ButtonStyle::Tertiary } },
+        AppModalDialog::Icon::Question,
+        { { "Salvar", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Nao salvar", 2, AppModalDialog::ButtonStyle::Secondary },
+          { "Cancelar", 3, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, onCloseApproved = std::move (onCloseApproved)] (int result) mutable
         {
             if (safeThis == nullptr)
@@ -3935,7 +3935,7 @@ void MainComponent::chooseProjectFile (bool open, std::function<void (bool)> onS
         ? currentProjectFile : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
     projectFileChooser = std::make_unique<juce::FileChooser> (
         open ? "Abrir projeto" : "Salvar projeto",
-        start, open ? "*.pfs;*.freedom" : "*.pfs");
+        start, "*.std");
     const auto chooserFlags = open ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                                    : juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles;
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
@@ -3974,8 +3974,8 @@ void MainComponent::saveProject (const juce::File& requestedFile, std::function<
     }
 
     auto file = requestedFile;
-    if (file.getFileExtension().compareIgnoreCase (".pfs") != 0)
-        file = file.withFileExtension (".pfs");
+    if (file.getFileExtension().compareIgnoreCase (".std") != 0)
+        file = file.withFileExtension (".std");
 
     projectFileOperationInProgress = true;
     auto task = std::make_shared<TaskScope> (
@@ -5383,10 +5383,10 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 auto description = scanner.list().getTypeForIdentifierString (identifier);
                 if (description == nullptr || description->isInstrument)
                 {
-                    FreedomModalDialog::show (
+                    AppModalDialog::show (
                         *this, "Efeito do pad", "Arraste um plugin de efeito de audio para o pad.",
-                        FreedomModalDialog::Icon::Warning,
-                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+                        AppModalDialog::Icon::Warning,
+                        { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
                 }
 
@@ -5399,9 +5399,9 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                             return;
                         if (error.isNotEmpty())
                         {
-                            FreedomModalDialog::show (
-                                *this, "Efeito do pad", error, FreedomModalDialog::Icon::Warning,
-                                { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+                            AppModalDialog::show (
+                                *this, "Efeito do pad", error, AppModalDialog::Icon::Warning,
+                                { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                             return;
                         }
                         if (safeEditor != nullptr)
@@ -5425,18 +5425,18 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 }
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
                 {
-                    FreedomModalDialog::show (
+                    AppModalDialog::show (
                         *this, "Efeito do pad", "Este efeito nao possui uma interface grafica.",
-                        FreedomModalDialog::Icon::Question,
-                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+                        AppModalDialog::Icon::Question,
+                        { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
                 }
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::failed)
                 {
-                    FreedomModalDialog::show (
+                    AppModalDialog::show (
                         *this, "Efeito do pad", "O processo isolado deste efeito foi encerrado.",
-                        FreedomModalDialog::Icon::Error,
-                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+                        AppModalDialog::Icon::Error,
+                        { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
                 }
 
@@ -5453,10 +5453,10 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 auto editor = engine.createPadEffectEditor (trackId, deviceId, pad, effectIndex);
                 if (editor == nullptr)
                 {
-                    FreedomModalDialog::show (
+                    AppModalDialog::show (
                         *this, "Efeito do pad", "Este efeito nao possui uma interface grafica.",
-                        FreedomModalDialog::Icon::Question,
-                        { { "OK", 1, FreedomModalDialog::ButtonStyle::Primary } });
+                        AppModalDialog::Icon::Question,
+                        { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
                 }
 
