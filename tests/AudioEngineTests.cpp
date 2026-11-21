@@ -70,7 +70,9 @@ struct TemporarySampleFile
 
 struct TemporaryReferenceFile
 {
-    TemporaryReferenceFile()
+    explicit TemporaryReferenceFile (double mainFrequency = 440.0,
+                                     double harmonicFrequency = 0.0,
+                                     double harmonicAmplitude = 0.0)
         : file (juce::File::getSpecialLocation (juce::File::tempDirectory)
                     .getNonexistentChildFile ("maxxx_tudio_reference_analysis", ".wav", false))
     {
@@ -106,9 +108,12 @@ struct TemporaryReferenceFile
         write32 (dataSize);
         for (std::uint32_t index = 0; index < sampleCount; ++index)
         {
-            const double phase = 2.0 * juce::MathConstants<double>::pi * 440.0
+            const double phase = 2.0 * juce::MathConstants<double>::pi * mainFrequency
                                * index / sampleRate;
-            const auto value = static_cast<std::int16_t> (std::sin (phase) * 16000.0);
+            const double harmonicPhase = 2.0 * juce::MathConstants<double>::pi
+                * harmonicFrequency * index / sampleRate;
+            const auto value = static_cast<std::int16_t> (
+                (std::sin (phase) + harmonicAmplitude * std::sin (harmonicPhase)) * 16000.0);
             write16 (static_cast<std::uint16_t> (value));
         }
     }
@@ -948,7 +953,7 @@ TEST_CASE ("Reference analysis is isolated from previews and produces a spectrum
         std::shared_ptr<const AudioFileData> data;
     };
 
-    const auto load = [&] (bool analyzeReference)
+    const auto load = [&] (const juce::File& file, bool analyzeReference)
     {
         auto result = std::make_shared<AsyncResult>();
         const auto callback = [result] (const juce::String& error,
@@ -959,9 +964,9 @@ TEST_CASE ("Reference analysis is isolated from previews and produces a spectrum
             result->complete = true;
         };
         if (analyzeReference)
-            engine.analyzeAudioFileAsync (audioFile.file, callback);
+            engine.analyzeAudioFileAsync (file, callback);
         else
-            engine.loadAudioFileAsync (audioFile.file, callback);
+            engine.loadAudioFileAsync (file, callback);
 
         const auto startTime = juce::Time::getMillisecondCounter();
         while (! result->complete
@@ -977,16 +982,27 @@ TEST_CASE ("Reference analysis is isolated from previews and produces a spectrum
         return result->data;
     };
 
-    const auto preview = load (false);
+    const auto preview = load (audioFile.file, false);
     CHECK (preview->estimatedKey.isEmpty());
     CHECK (preview->spectrum.empty());
+    CHECK (preview->waveformColumns.empty());
 
-    const auto analysis = load (true);
+    const auto analysis = load (audioFile.file, true);
     CHECK (analysis->estimatedKey.isNotEmpty());
-    CHECK (analysis->spectrumColumns == 512);
+    CHECK (analysis->spectrumColumns == 4096);
     CHECK (analysis->spectrumRows == 72);
-    CHECK (analysis->spectrum.size() == 512u * 72u);
+    CHECK (analysis->spectrum.size() == 4096u * 72u);
+    REQUIRE (analysis->waveformColumns.size() == 345u);
+    CHECK (analysis->waveformColumns.front().peak > 0.45f);
+    CHECK (analysis->waveformColumns.front().centroid > 400.0f);
+    CHECK (analysis->waveformColumns.front().centroid < 480.0f);
+    CHECK (analysis->waveformColumns.front().flatness < 0.2f);
     CHECK (analysis->waveformRms.size() == analysis->waveform.size());
+
+    TemporaryReferenceFile bassWithHarmonics (60.0, 5000.0, 0.25);
+    const auto bassAnalysis = load (bassWithHarmonics.file, true);
+    REQUIRE_FALSE (bassAnalysis->waveformColumns.empty());
+    CHECK (bassAnalysis->waveformColumns.front().centroid < 250.0f);
 }
 
 TEST_CASE ("Audio preview deck preserves playback position across pause and seek")
@@ -1095,10 +1111,22 @@ TEST_CASE ("Reference Master keeps playback active after a waveform click")
     REQUIRE (content->getNumChildComponents() > 0);
     auto* deck = content->getChildComponent (content->getNumChildComponents() - 1);
     REQUIRE (deck != nullptr);
-    REQUIRE (deck->getNumChildComponents() == 1);
-    auto* seekOverlay = deck->getChildComponent (0);
+    REQUIRE (deck->getNumChildComponents() == 2);
+    REQUIRE (deck->getHeight() > 0);
+    juce::Component* seekOverlay = nullptr;
+    juce::Component* visualizerShield = nullptr;
+    for (int i = 0; i < deck->getNumChildComponents(); ++i)
+    {
+        auto* child = deck->getChildComponent (i);
+        if (child->getY() < deck->getHeight() / 2)
+            seekOverlay = child;
+        else
+            visualizerShield = child;
+    }
     REQUIRE (seekOverlay != nullptr);
     REQUIRE (seekOverlay->getWidth() > 0);
+    REQUIRE (visualizerShield != nullptr);
+    REQUIRE (visualizerShield->getHeight() > 0);
 
     const auto point = juce::Point<float> (seekOverlay->getWidth() * 0.6f,
                                            seekOverlay->getHeight() * 0.5f);
@@ -1116,6 +1144,23 @@ TEST_CASE ("Reference Master keeps playback active after a waveform click")
     CHECK (preview.isPlaying());
     CHECK (requestedPosition > 0.55);
     CHECK (requestedPosition < 0.7);
+
+    const auto visualizerPoint = juce::Point<float> (
+        visualizerShield->getWidth() * 0.5f, visualizerShield->getHeight() * 0.5f);
+    CHECK (deck->getComponentAt (juce::roundToInt (visualizerShield->getX()
+                                                  + visualizerPoint.x),
+                                 juce::roundToInt (visualizerShield->getY()
+                                                  + visualizerPoint.y))
+           == visualizerShield);
+    const int seeksBeforeVisualizerClick = seekRequests;
+    const juce::MouseEvent visualizerClick (
+        juce::Desktop::getInstance().getMainMouseSource(), visualizerPoint,
+        juce::ModifierKeys::leftButtonModifier, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+        visualizerShield, visualizerShield, now, visualizerPoint, now, 1, false);
+    visualizerShield->mouseDown (visualizerClick);
+    visualizerShield->mouseUp (visualizerClick);
+    CHECK (seekRequests == seeksBeforeVisualizerClick);
+    CHECK (preview.isPlaying());
 
     preview.processBlock (output, midi);
     CHECK (preview.isPlaying());

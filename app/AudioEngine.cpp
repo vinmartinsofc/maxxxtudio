@@ -3,6 +3,7 @@
 #include "RemotePluginProcessor.h"
 #include "NativeEffectProcessors.h"
 #include <juce_dsp/juce_dsp.h>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -330,7 +331,7 @@ void buildReferenceSpectrum (const juce::AudioBuffer<float>& samples, double sam
 {
     constexpr int fftOrder = 11;
     constexpr int fftSize = 1 << fftOrder;
-    constexpr int columnCount = 512;
+    constexpr int columnCount = 4096;
     constexpr int rowCount = 72;
     juce::dsp::FFT fft (fftOrder);
     std::array<float, fftSize * 2> frame {};
@@ -359,8 +360,8 @@ void buildReferenceSpectrum (const juce::AudioBuffer<float>& samples, double sam
 
         for (int row = 0; row < rowCount; ++row)
         {
-            const double lowFrequency = 20.0 * std::pow (400.0, static_cast<double> (row) / rowCount);
-            const double highFrequency = 20.0 * std::pow (400.0, static_cast<double> (row + 1) / rowCount);
+            const double lowFrequency = 20.0 * std::pow (1000.0, static_cast<double> (row) / rowCount);
+            const double highFrequency = 20.0 * std::pow (1000.0, static_cast<double> (row + 1) / rowCount);
             const int lowBin = std::max (1, static_cast<int> (lowFrequency * fftSize / sampleRate));
             const int highBin = std::min (fftSize / 2 - 1,
                                           static_cast<int> (highFrequency * fftSize / sampleRate));
@@ -383,6 +384,124 @@ void buildReferenceSpectrum (const juce::AudioBuffer<float>& samples, double sam
         value = juce::jlimit (0.0f, 1.0f, (decibels + 60.0f) / 60.0f);
     }
 }
+
+class WaveformAnalyzer
+{
+public:
+    static std::vector<WaveformColumn> analyze (const juce::AudioBuffer<float>& samples,
+                                                 double sampleRate)
+    {
+        constexpr int fftOrder = 10;
+        constexpr int fftSize = 1 << fftOrder;
+        constexpr int hopSize = fftSize / 8;
+        const int sampleCount = samples.getNumSamples();
+        const int channelCount = samples.getNumChannels();
+        if (sampleCount <= 0 || channelCount <= 0 || sampleRate <= 0.0)
+            return {};
+
+        const double maxFrequency = std::min (16000.0, sampleRate * 0.5);
+        const int lastBin = std::min (fftSize / 2, static_cast<int> (
+            maxFrequency * fftSize / sampleRate));
+        if (lastBin < 1)
+            return {};
+
+        const int firstFlatnessBin = std::max (1, static_cast<int> (
+            std::ceil (40.0 * fftSize / sampleRate)));
+        const int columnCount = (sampleCount + hopSize - 1) / hopSize;
+        std::vector<WaveformColumn> columns;
+        columns.reserve (static_cast<std::size_t> (columnCount));
+        std::array<float, fftSize> monoFrame {};
+        std::array<float, fftSize * 2> fftFrame {};
+        juce::dsp::FFT fft (fftOrder);
+
+        for (int start = 0; start < sampleCount; start += hopSize)
+        {
+            const int frameSamples = std::min (fftSize, sampleCount - start);
+            float peak = 0.0f;
+            double mean = 0.0;
+            for (int i = 0; i < frameSamples; ++i)
+            {
+                float mono = 0.0f;
+                for (int channel = 0; channel < channelCount; ++channel)
+                    mono += samples.getSample (channel, start + i);
+                mono /= static_cast<float> (channelCount);
+                monoFrame[static_cast<std::size_t> (i)] = mono;
+                if (i < hopSize)
+                    peak = std::max (peak, std::abs (mono));
+                mean += mono;
+            }
+            mean /= frameSamples;
+
+            fftFrame.fill (0.0f);
+            for (int i = 0; i < frameSamples; ++i)
+            {
+                const float hann = 0.5f - 0.5f * std::cos (
+                    2.0f * juce::MathConstants<float>::pi * i / (fftSize - 1));
+                fftFrame[static_cast<std::size_t> (i)] =
+                    (monoFrame[static_cast<std::size_t> (i)] - static_cast<float> (mean)) * hann;
+            }
+            fft.performRealOnlyForwardTransform (fftFrame.data(), true);
+
+            double centroidMagnitudeSum = 0.0;
+            double weightedLogFrequency = 0.0;
+            double logMagnitudeSum = 0.0;
+            double flatnessMagnitudeSum = 0.0;
+            int flatnessBinCount = 0;
+            for (int bin = 0; bin <= lastBin; ++bin)
+            {
+                const float magnitude = std::hypot (fftFrame[static_cast<std::size_t> (bin * 2)],
+                                                    fftFrame[static_cast<std::size_t> (bin * 2 + 1)]);
+                if (bin >= firstFlatnessBin)
+                {
+                    const double frequency = static_cast<double> (bin) * sampleRate / fftSize;
+                    centroidMagnitudeSum += magnitude;
+                    weightedLogFrequency += magnitude * std::log (frequency);
+                    constexpr double magnitudeFloor = 1.0e-12;
+                    const double safeMagnitude = std::max (static_cast<double> (magnitude),
+                                                           magnitudeFloor);
+                    logMagnitudeSum += std::log (safeMagnitude);
+                    flatnessMagnitudeSum += magnitude;
+                    ++flatnessBinCount;
+                }
+            }
+
+            const double flatnessMean = flatnessBinCount > 0
+                ? flatnessMagnitudeSum / flatnessBinCount : 0.0;
+            const float flatness = flatnessMean > 1.0e-12
+                ? static_cast<float> (std::exp (logMagnitudeSum / flatnessBinCount) / flatnessMean)
+                : 0.0f;
+            columns.push_back ({
+                peak,
+                centroidMagnitudeSum > 1.0e-12
+                    ? static_cast<float> (std::exp (
+                        weightedLogFrequency / centroidMagnitudeSum)) : 0.0f,
+                juce::jlimit (0.0f, 1.0f, flatness)
+            });
+        }
+
+        for (std::size_t i = 0; i < columns.size(); ++i)
+        {
+            double weightedLogCentroid = 0.0;
+            double totalWeight = 0.0;
+            for (int offset = -1; offset <= 1; ++offset)
+            {
+                const auto neighbor = static_cast<std::ptrdiff_t> (i) + offset;
+                if (neighbor < 0 || neighbor >= static_cast<std::ptrdiff_t> (columns.size()))
+                    continue;
+                const auto centroid = columns[static_cast<std::size_t> (neighbor)].centroid;
+                if (centroid <= 0.0f)
+                    continue;
+                const double weight = offset == 0 ? 0.6 : 0.2;
+                weightedLogCentroid += std::log2 (centroid) * weight;
+                totalWeight += weight;
+            }
+            if (totalWeight > 0.0)
+                columns[i].centroid = static_cast<float> (
+                    std::exp2 (weightedLogCentroid / totalWeight));
+        }
+        return columns;
+    }
+};
 
 void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
                       bool includeReferenceAnalysis,
@@ -433,6 +552,7 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
         data->estimatedKey = estimateReferenceKey (*data->samples, data->sampleRate);
         buildReferenceSpectrum (*data->samples, data->sampleRate,
                                 data->spectrum, data->spectrumColumns, data->spectrumRows);
+        data->waveformColumns = WaveformAnalyzer::analyze (*data->samples, data->sampleRate);
     }
 
     constexpr int maxWaveformResolution = 16384;

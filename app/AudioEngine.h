@@ -177,12 +177,20 @@ struct PluginParameterGesture
     bool gestureIsStarting = false;
 };
 
+struct WaveformColumn
+{
+    float peak = 0.0f;
+    float centroid = 0.0f;
+    float flatness = 0.0f;
+};
+
 struct AudioFileData
 {
     juce::File file;
     std::shared_ptr<juce::AudioBuffer<float>> samples;
     std::vector<roll::WaveformRange> waveform;
     std::vector<float> waveformRms;
+    std::vector<WaveformColumn> waveformColumns;
     std::vector<float> spectrum;
     int spectrumColumns = 0;
     int spectrumRows = 0;

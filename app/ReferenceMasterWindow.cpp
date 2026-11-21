@@ -26,6 +26,25 @@ juce::String formatTime (double seconds)
          + juce::String (totalSeconds % 60).paddedLeft ('0', 2);
 }
 
+float waveformHue (float frequency)
+{
+    constexpr std::array<float, 7> frequencies { 40.0f, 100.0f, 220.0f, 600.0f,
+                                                  1500.0f, 5000.0f, 16000.0f };
+    constexpr std::array<float, 7> hues { 275.0f, 265.0f, 250.0f, 240.0f,
+                                          225.0f, 205.0f, 185.0f };
+    frequency = juce::jlimit (frequencies.front(), frequencies.back(), frequency);
+    for (std::size_t i = 1; i < frequencies.size(); ++i)
+    {
+        if (frequency <= frequencies[i])
+        {
+            const float proportion = std::log (frequency / frequencies[i - 1])
+                / std::log (frequencies[i] / frequencies[i - 1]);
+            return (hues[i - 1] + proportion * (hues[i] - hues[i - 1])) / 360.0f;
+        }
+    }
+    return hues.back() / 360.0f;
+}
+
 juce::Colour spectrumColour (float frequencyRatio, float intensity)
 {
     juce::Colour colour;
@@ -238,7 +257,7 @@ public:
         duration.setText (formatTime (analysis->durationSeconds), juce::dontSendNotification);
         seekSlider.setRange (0.0, std::max (0.001, analysis->durationSeconds), 0.001);
         seekSlider.setValue (0.0, juce::dontSendNotification);
-        deck.setAnalysis (analysis, bpmValue);
+        deck.setAnalysis (analysis);
         pauseButton.setEnabled (false);
         stopButton.setEnabled (true);
         halveBpmButton.setEnabled (bpmValue > 0.0);
@@ -248,7 +267,7 @@ public:
         zoomOutButton.setEnabled (true);
         zoomInButton.setEnabled (true);
         fitButton.setEnabled (true);
-        startTimerHz (30);
+        startTimerHz (60);
         setAnalysisStatus ("Analise pronta. BPM x2 e /2 ajustam a leitura; o audio permanece em velocidade normal.");
         updateTransport();
     }
@@ -347,10 +366,7 @@ public:
             if (isPlaying())
                 pausePlayback();
             else if (analysis != nullptr)
-            {
-                requestSeek (0.0);
                 playOrResume();
-            }
             return true;
         }
 
@@ -361,19 +377,19 @@ private:
     class DeckDisplay final : public juce::Component
     {
     public:
-        explicit DeckDisplay (Content& ownerToUse) : owner (ownerToUse), seekOverlay (*this)
+        explicit DeckDisplay (Content& ownerToUse)
+            : owner (ownerToUse), seekOverlay (*this), visualizerShield (*this)
         {
             addAndMakeVisible (seekOverlay);
+            addAndMakeVisible (visualizerShield);
         }
 
-        void setAnalysis (std::shared_ptr<const AudioFileData> data, double bpmToUse)
+        void setAnalysis (std::shared_ptr<const AudioFileData> data)
         {
             analysis = std::move (data);
-            bpm = bpmToUse;
             viewStartSeconds = 0.0;
             zoom = 1.0;
             positionSeconds = 0.0;
-            buildWaveformColours();
             buildSpectrumImage();
             repaint();
         }
@@ -381,18 +397,10 @@ private:
         void clearAnalysis()
         {
             analysis.reset();
-            waveformColours.clear();
             spectrumImage = {};
-            bpm = 0.0;
             zoom = 1.0;
             viewStartSeconds = 0.0;
             positionSeconds = 0.0;
-            repaint();
-        }
-
-        void setBpm (double value)
-        {
-            bpm = value;
             repaint();
         }
 
@@ -403,8 +411,13 @@ private:
             if (follow && zoom > 1.0 && ! seekOverlay.isInteracting())
             {
                 const double range = visibleDuration();
-                if (positionSeconds < viewStartSeconds || positionSeconds > viewStartSeconds + range)
-                    viewStartSeconds = std::clamp (positionSeconds - range * 0.22, 0.0,
+                const double leftFollowPoint = viewStartSeconds + range * 0.2;
+                const double rightFollowPoint = viewStartSeconds + range * 0.8;
+                if (positionSeconds < leftFollowPoint)
+                    viewStartSeconds = std::clamp (positionSeconds - range * 0.2, 0.0,
+                        std::max (0.0, analysis->durationSeconds - range));
+                else if (positionSeconds > rightFollowPoint)
+                    viewStartSeconds = std::clamp (positionSeconds - range * 0.8, 0.0,
                         std::max (0.0, analysis->durationSeconds - range));
             }
             repaint();
@@ -433,6 +446,7 @@ private:
         void resized() override
         {
             seekOverlay.setBounds (waveformBounds());
+            visualizerShield.setBounds (visualizerBounds());
         }
 
         void paint (juce::Graphics& g) override
@@ -520,6 +534,18 @@ private:
             return waveformSection.reduced (0, 1);
         }
 
+        juce::Rectangle<int> visualizerBounds() const
+        {
+            auto bounds = getLocalBounds().reduced (4);
+            if (bounds.isEmpty())
+                return {};
+            const int spectrumHeight = std::min (170, std::max (120, bounds.getHeight() / 2));
+            bounds.removeFromTop (
+                std::max (80, bounds.getHeight() - spectrumHeight - 8));
+            bounds.removeFromTop (7);
+            return bounds;
+        }
+
         void drawTimeRuler (juce::Graphics& g, juce::Rectangle<int> area) const
         {
             g.setColour (theme::panelLight());
@@ -555,11 +581,9 @@ private:
 
         void drawWaveform (juce::Graphics& g, juce::Rectangle<int> area) const
         {
-            g.setColour (juce::Colour (0xff07121d));
-            g.fillRoundedRectangle (area.toFloat(), 4.0f);
-            g.setColour (theme::border());
-            g.drawRoundedRectangle (area.toFloat(), 4.0f, 1.0f);
-            if (analysis == nullptr || analysis->waveform.empty() || area.isEmpty())
+            g.setColour (juce::Colour (0xff161616));
+            g.fillRect (area);
+            if (analysis == nullptr || analysis->waveformColumns.empty() || area.isEmpty())
             {
                 g.setColour (theme::textDim());
                 g.setFont (14.0f);
@@ -568,126 +592,117 @@ private:
                 return;
             }
 
-            const int centreY = area.getCentreY();
-            const int amplitude = std::max (1, area.getHeight() * 46 / 100);
-            g.setColour (theme::text().withAlpha (0.14f));
-            g.drawHorizontalLine (centreY, static_cast<float> (area.getX()),
+            const double range = visibleDuration();
+            if (range <= 0.0 || analysis->durationSeconds <= 0.0)
+                return;
+
+            const auto& columns = analysis->waveformColumns;
+            const float centreY = static_cast<float> (area.getCentreY());
+            const float amplitudeScale = static_cast<float> (area.getHeight()) * 0.46f;
+            g.setColour (juce::Colour (0xff353535));
+            g.drawHorizontalLine (juce::roundToInt (centreY), static_cast<float> (area.getX()),
                                   static_cast<float> (area.getRight()));
 
-            const double range = visibleDuration();
-            if (bpm > 0.0)
+            constexpr int columnStep = 2;
+            constexpr float barWidth = 1.5f;
+            const int displayColumns = (area.getWidth() + columnStep - 1) / columnStep;
+            for (int displayColumn = 0; displayColumn < displayColumns; ++displayColumn)
             {
-                const double beatSeconds = 60.0 / bpm;
-                const double pixelsPerBeat = beatSeconds * area.getWidth() / range;
-                const int beatStride = std::max (1, static_cast<int> (std::ceil (34.0 / pixelsPerBeat)));
-                const auto firstBeat = static_cast<std::int64_t> (
-                    std::ceil (viewStartSeconds / beatSeconds / beatStride) * beatStride);
-                const auto lastBeat = static_cast<std::int64_t> (
-                    std::floor ((viewStartSeconds + range) / beatSeconds));
-                for (auto beat = firstBeat; beat <= lastBeat; beat += beatStride)
-                {
-                    const double seconds = beat * beatSeconds;
-                    const float x = static_cast<float> (area.getX()
-                        + (seconds - viewStartSeconds) / range * area.getWidth());
-                    const bool bar = beat % (4 * beatStride) == 0;
-                    g.setColour (theme::border().withAlpha (bar ? 0.72f : 0.35f));
-                    g.drawVerticalLine (juce::roundToInt (x), static_cast<float> (area.getY()),
-                                        static_cast<float> (area.getBottom()));
-                }
-            }
+                const int xOffset = displayColumn * columnStep;
+                const int remainingWidth = area.getWidth() - xOffset;
+                const float x = static_cast<float> (area.getX() + xOffset);
+                const float width = std::min (barWidth, static_cast<float> (remainingWidth));
+                const double startRatio = static_cast<double> (xOffset) / area.getWidth();
+                const double endRatio = static_cast<double> (
+                    std::min (xOffset + columnStep, area.getWidth())) / area.getWidth();
+                const double startSeconds = viewStartSeconds + startRatio * range;
+                const double endSeconds = viewStartSeconds + endRatio * range;
+                const double sourceStart = startSeconds / analysis->durationSeconds
+                    * columns.size();
+                const double sourceEnd = endSeconds / analysis->durationSeconds
+                    * columns.size();
+                const auto first = std::min (columns.size() - 1, static_cast<std::size_t> (
+                    sourceStart));
+                const auto last = std::max (first + 1, std::min (columns.size(),
+                    static_cast<std::size_t> (std::ceil (sourceEnd))));
 
-            const auto& waveform = analysis->waveform;
-            const auto count = static_cast<int> (waveform.size());
-            juce::Path envelope;
-            std::vector<float> lowerEnvelope;
-            std::vector<float> upperEnvelope;
-            lowerEnvelope.reserve (static_cast<std::size_t> (area.getWidth()));
-            upperEnvelope.reserve (static_cast<std::size_t> (area.getWidth()));
-            const auto displayAmplitude = [] (float value)
-            {
-                const auto clamped = std::clamp (value, -1.0f, 1.0f);
-                return std::copysign (std::pow (std::abs (clamped), 0.72f), clamped);
-            };
-            for (int x = 0; x < area.getWidth(); ++x)
-            {
-                const double startSeconds = viewStartSeconds
-                    + static_cast<double> (x) / area.getWidth() * range;
-                const double endSeconds = viewStartSeconds
-                    + static_cast<double> (x + 1) / area.getWidth() * range;
-                int first = std::clamp (static_cast<int> (
-                    startSeconds / analysis->durationSeconds * count), 0, count - 1);
-                int last = std::clamp (static_cast<int> (std::ceil (
-                    endSeconds / analysis->durationSeconds * count)), first + 1, count);
-                float minimum = 0.0f;
-                float maximum = 0.0f;
-                double squaredEnergy = 0.0;
-                int energyCount = 0;
-                for (int index = first; index < last; ++index)
+                float peak = 0.0f;
+                double weightedCentroid = 0.0;
+                double weightedFlatness = 0.0;
+                double totalWeight = 0.0;
+                for (auto index = first; index < last; ++index)
                 {
-                    const auto waveformIndex = static_cast<std::size_t> (index);
-                    minimum = std::min (minimum, waveform[waveformIndex].minimum);
-                    maximum = std::max (maximum, waveform[waveformIndex].maximum);
-                    if (analysis->waveformRms.size() == waveform.size())
-                    {
-                        const double rms = analysis->waveformRms[waveformIndex];
-                        squaredEnergy += rms * rms;
-                        ++energyCount;
-                    }
+                    const auto& column = columns[index];
+                    peak = std::max (peak, column.peak);
+                    weightedCentroid += column.centroid * column.peak;
+                    weightedFlatness += column.flatness * column.peak;
+                    totalWeight += column.peak;
                 }
-                const float pixelX = static_cast<float> (area.getX() + x);
-                const float peak = std::max (std::abs (minimum), std::abs (maximum));
-                const float level = energyCount > 0
-                    ? std::max (static_cast<float> (std::sqrt (squaredEnergy / energyCount)),
-                                peak * 0.22f)
-                    : peak;
-                const float height = displayAmplitude (level) * amplitude;
-                const float top = static_cast<float> (centreY) - height;
-                const float bottom = static_cast<float> (centreY) + height;
-                if (x == 0)
-                    envelope.startNewSubPath (pixelX, top);
-                else
-                    envelope.lineTo (pixelX, top);
-                upperEnvelope.push_back (top);
-                lowerEnvelope.push_back (bottom);
-            }
-            for (int x = area.getWidth() - 1; x >= 0; --x)
-                envelope.lineTo (static_cast<float> (area.getX() + x),
-                                 lowerEnvelope[static_cast<std::size_t> (x)]);
-            envelope.closeSubPath();
-            g.setColour (juce::Colour (0xff36a8c2).withAlpha (0.2f));
-            g.fillPath (envelope);
-            g.setColour (juce::Colour (0xff36a8c2).withAlpha (0.28f));
-            g.strokePath (envelope, juce::PathStrokeType (3.0f));
-            for (int x = 0; x < area.getWidth(); ++x)
-            {
-                const double seconds = viewStartSeconds
-                    + static_cast<double> (x) / area.getWidth() * range;
-                const auto spectrumColumn = waveformColours.empty() ? 0
-                    : std::clamp (static_cast<int> (
-                        seconds / analysis->durationSeconds * waveformColours.size()),
-                        0, static_cast<int> (waveformColours.size()) - 1);
-                const auto colour = waveformColours.empty()
-                    ? juce::Colour (0xff36e3cf)
-                    : waveformColours[static_cast<std::size_t> (spectrumColumn)];
-                g.setColour (colour.withAlpha (0.95f));
-                g.drawLine (static_cast<float> (area.getX() + x), upperEnvelope[static_cast<std::size_t> (x)],
-                            static_cast<float> (area.getX() + x), lowerEnvelope[static_cast<std::size_t> (x)],
-                            1.35f);
+                float centroid = totalWeight > 0.0
+                    ? static_cast<float> (weightedCentroid / totalWeight) : 0.0f;
+                float flatness = totalWeight > 0.0
+                    ? juce::jlimit (0.0f, 1.0f,
+                        static_cast<float> (weightedFlatness / totalWeight)) : 0.0f;
+
+                const double sourceSpan = sourceEnd - sourceStart;
+                if (sourceSpan < 2.0)
+                {
+                    const double samplePosition = std::clamp (
+                        (sourceStart + sourceEnd) * 0.5 - 0.5, 0.0,
+                        static_cast<double> (columns.size() - 1));
+                    const auto sampleBefore = static_cast<std::size_t> (samplePosition);
+                    const auto sampleAfter = std::min (sampleBefore + 1, columns.size() - 1);
+                    const float interpolation = static_cast<float> (
+                        samplePosition - static_cast<double> (sampleBefore));
+                    const auto interpolate = [interpolation] (float a, float b)
+                    {
+                        return a + (b - a) * interpolation;
+                    };
+                    const float blend = static_cast<float> ((2.0 - sourceSpan) / 2.0);
+                    peak += (interpolate (columns[sampleBefore].peak,
+                                          columns[sampleAfter].peak) - peak) * blend;
+                    const float sampledCentroid = interpolate (
+                        columns[sampleBefore].centroid, columns[sampleAfter].centroid);
+                    const float sampledFlatness = interpolate (
+                        columns[sampleBefore].flatness, columns[sampleAfter].flatness);
+                    const float blendedCentroid = centroid
+                        + (sampledCentroid - centroid) * blend;
+                    const float blendedFlatness = flatness
+                        + (sampledFlatness - flatness) * blend;
+                    centroid = blendedCentroid;
+                    flatness = juce::jlimit (0.0f, 1.0f, blendedFlatness);
+                }
+
+                if (peak < 0.001f || centroid < 40.0f)
+                {
+                    g.setColour (juce::Colour (0xffa45bff));
+                    g.fillRect (x, centreY - 0.5f, width, 1.0f);
+                    continue;
+                }
+
+                const float frequency = juce::jlimit (40.0f, 16000.0f, centroid);
+                const float noiseAmount = juce::jlimit (0.0f, 1.0f,
+                    (flatness - 0.55f) / 0.30f);
+                const float peakLevel = juce::jlimit (0.0f, 1.0f, peak);
+                const float transientLevel = peakLevel * peakLevel * peakLevel;
+                const float saturation = juce::jmap (noiseAmount, 0.9f, 0.04f);
+                const float amplitudeLightness = juce::jmap (
+                    transientLevel, 0.28f, 0.68f);
+                const float lightness = juce::jmap (noiseAmount, amplitudeLightness, 0.88f);
+                g.setColour (juce::Colour::fromHSL (
+                    waveformHue (frequency), saturation, lightness, 1.0f));
+                const float halfHeight = std::max (0.75f, transientLevel * amplitudeScale);
+                g.fillRect (x, centreY - halfHeight, width, halfHeight * 2.0f);
             }
 
             const float playheadX = static_cast<float> (area.getX()
                 + (positionSeconds - viewStartSeconds) / range * area.getWidth());
             if (playheadX >= area.getX() && playheadX <= area.getRight())
             {
-                g.setColour (juce::Colour (0xffffbd59));
+                g.setColour (juce::Colour (0xffe33a45));
                 g.drawVerticalLine (juce::roundToInt (playheadX),
                                     static_cast<float> (area.getY()),
                                     static_cast<float> (area.getBottom()));
-                juce::Path marker;
-                marker.addTriangle (playheadX - 5.0f, static_cast<float> (area.getY()),
-                                    playheadX + 5.0f, static_cast<float> (area.getY()),
-                                    playheadX, static_cast<float> (area.getY() + 7));
-                g.fillPath (marker);
             }
         }
 
@@ -773,54 +788,6 @@ private:
                         ? juce::Colour (0xff07121d) : spectrumColour (frequency, intensity);
                     spectrumImage.setPixelAt (column, rows - row - 1, colour);
                 }
-            }
-        }
-
-        void buildWaveformColours()
-        {
-            waveformColours.clear();
-            if (analysis == nullptr || analysis->spectrumColumns <= 0
-                || analysis->spectrumRows <= 0
-                || analysis->spectrum.size() < static_cast<std::size_t> (
-                    analysis->spectrumColumns * analysis->spectrumRows))
-                return;
-
-            const int rows = analysis->spectrumRows;
-            const int columns = analysis->spectrumColumns;
-            const int lowEnd = rows / 3;
-            const int midEnd = rows * 2 / 3;
-            waveformColours.reserve (static_cast<std::size_t> (columns));
-            for (int column = 0; column < columns; ++column)
-            {
-                const auto bandEnergy = [this, column, columns] (int firstRow, int lastRow)
-                {
-                    float energy = 0.0f;
-                    for (int row = firstRow; row < lastRow; ++row)
-                        energy += analysis->spectrum[static_cast<std::size_t> (
-                            row * columns + column)];
-                    return energy / static_cast<float> (std::max (1, lastRow - firstRow));
-                };
-                const std::array<float, 3> bands {
-                    bandEnergy (0, lowEnd),
-                    bandEnergy (lowEnd, midEnd),
-                    bandEnergy (midEnd, rows)
-                };
-                const float strongest = std::max ({ bands[0], bands[1], bands[2] });
-                if (strongest < 0.035f)
-                {
-                    waveformColours.push_back (juce::Colour (0xff36a8c2));
-                    continue;
-                }
-
-                const float brightness = juce::jlimit (
-                    0.3f, 1.0f, 0.3f + 0.7f * std::pow (strongest, 0.7f));
-                const auto channel = [strongest, brightness] (float energy)
-                {
-                    return static_cast<juce::uint8> (juce::roundToInt (
-                        255.0f * std::pow (energy / strongest, 0.8f) * brightness));
-                };
-                waveformColours.push_back (juce::Colour::fromRGB (
-                    channel (bands[0]), channel (bands[1]), channel (bands[2])));
             }
         }
 
@@ -965,6 +932,10 @@ private:
 
             void paint (juce::Graphics&) override {}
             bool isInteracting() const { return panning || scrubbing; }
+            bool hitTest (int x, int y) override
+            {
+                return deck.waveformBounds().contains (x + getX(), y + getY());
+            }
 
             void mouseWheelMove (const juce::MouseEvent& event,
                                  const juce::MouseWheelDetails& wheel) override
@@ -1014,11 +985,32 @@ private:
             bool panning = false, scrubbing = false, resumeAfterScrub = false;
         };
 
+        class VisualizerShield final : public juce::Component
+        {
+        public:
+            explicit VisualizerShield (DeckDisplay& deckToUse) : deck (deckToUse)
+            {
+                setWantsKeyboardFocus (false);
+            }
+
+            void paint (juce::Graphics&) override {}
+            void mouseDown (const juce::MouseEvent&) override {}
+
+            void mouseWheelMove (const juce::MouseEvent& event,
+                                 const juce::MouseWheelDetails& wheel) override
+            {
+                deck.zoomAt (event.getEventRelativeTo (&deck).position.x, wheel.deltaY);
+            }
+
+        private:
+            DeckDisplay& deck;
+        };
+
         SeekOverlay seekOverlay;
+        VisualizerShield visualizerShield;
         std::shared_ptr<const AudioFileData> analysis;
         juce::Image spectrumImage;
-        std::vector<juce::Colour> waveformColours;
-        double bpm = 0.0, zoom = 1.0, viewStartSeconds = 0.0, positionSeconds = 0.0;
+        double zoom = 1.0, viewStartSeconds = 0.0, positionSeconds = 0.0;
     };
 
     void openFileChooser()
@@ -1106,7 +1098,6 @@ private:
     {
         bpm.setText (bpmValue > 0.0 ? juce::String (bpmValue, 1) : "--",
                      juce::dontSendNotification);
-        deck.setBpm (bpmValue);
     }
 
     void requestSeek (double seconds, bool keepPlaying = false)
@@ -1171,7 +1162,7 @@ private:
             return;
         }
         displayedPosition = position;
-        startTimerHz (30);
+        startTimerHz (60);
         updateTransport();
     }
 
