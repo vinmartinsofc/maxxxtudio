@@ -4,18 +4,18 @@
 
 namespace roll
 {
-// Desfazer/refazer por snapshots das notas do clip. Simples e robusto:
-// clips tem poucas centenas de notas, entao copiar a lista e barato.
+// Undo/redo using snapshots of clip notes. Simple and robust:
+// Clips have a few hundred notes, so copying the list is inexpensive.
 class History
 {
 public:
-    // Chame ANTES de modificar. Guarda o estado atual e invalida o "refazer".
+    // Call BEFORE modifying. Saves the current state and invalidates "redo".
     void record(const std::vector<Note>& before);
 
     bool canUndo() const { return !undoStack.empty(); }
     bool canRedo() const { return !redoStack.empty(); }
 
-    // Troca 'current' pelo estado anterior/seguinte. Retorna false se nao ha o que fazer.
+    // Replaces 'current' with the previous/next state. Returns false if there is nothing to do.
     bool undo(std::vector<Note>& current);
     bool redo(std::vector<Note>& current);
 

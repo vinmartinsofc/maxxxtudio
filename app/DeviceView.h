@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-// Cadeia de dispositivos (plugins) da trilha selecionada: instrumento primeiro, efeitos depois.
+// Device chain (plugins) for the selected track: instrument first, then effects.
 class DeviceView : public juce::Component, public juce::DragAndDropTarget,
                    public juce::KeyListener, private TaskRegistry::Listener,
                    private juce::ScrollBar::Listener

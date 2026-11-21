@@ -12,7 +12,7 @@ void TransportClock::plan (const TransportSettings& t, double sampleRate, int nu
     out.numSamples = numSamples;
     if (numSamples <= 0 || sampleRate <= 0.0 || t.bpm <= 0.0) return;
 
-    const double bps = t.bpm / 60.0 / sampleRate;           // beats por amostra
+    const double bps = t.bpm / 60.0 / sampleRate;           // Beats per sample.
     out.beatsPerSample = bps;
     const bool loopOk = t.loop && t.loopEnd > t.loopStart;
 
@@ -116,7 +116,7 @@ void Sequencer::process (const std::vector<Note>& notes, const BlockPlan& plan, 
                [] (const MidiEvent& x, const MidiEvent& y)
                {
                    if (x.offset != y.offset) return x.offset < y.offset;
-                   return !x.on && y.on;                    // note-off primeiro
+                   return !x.on && y.on;                    // Note-off first.
                });
 }
 } // namespace roll

@@ -8,7 +8,7 @@
 #include <set>
 #include <vector>
 
-// Lista de instrumentos detectados. Duplo clique (ou Enter) carrega na trilha.
+// List of detected instruments. Double-click (or press Enter) to load onto the track.
 class BrowserPanel : public juce::Component,
                      private juce::ChangeListener,
                      private juce::KeyListener
@@ -20,6 +20,8 @@ public:
     std::function<void (const juce::PluginDescription&)> onLoadRequested;
     std::function<juce::String()> onAddDrumRackRequested;
     std::function<juce::String()> onAddUtilityRequested;
+    std::function<juce::String()> onAddCompMasterRequested;
+    std::function<juce::String()> onAddEqMasterRequested;
     std::function<juce::String()> onOpenReferenceRequested;
 
     void setStatus (const juce::String& text) { status.setText (text, juce::dontSendNotification); }
@@ -77,10 +79,12 @@ private:
     juce::TextButton vstTab { "VST" }, maXXXtudioTab { "MaXXXtudio" };
     NativeToolCard drumRackCard;
     NativeToolCard utilityCard;
+    NativeToolCard compMasterCard;
+    NativeToolCard eqMasterCard;
     NativeToolCard referenceCard;
-    juce::Label maXXXtudioDescription { {}, "Ferramentas do MaXXXtudio" };
-    juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" },
-                      effectsButton { "Efeitos" }, favoritesButton { "Favoritos" };
+    juce::Label maXXXtudioDescription { {}, "MaXXXtudio Tools" };
+    juce::TextButton allButton { "All" }, instrumentsButton { "Instruments" },
+                      effectsButton { "Effects" }, favoritesButton { "Favorites" };
     Filter filter = Filter::All;
     void setFilter (Filter f);
     juce::Label status;

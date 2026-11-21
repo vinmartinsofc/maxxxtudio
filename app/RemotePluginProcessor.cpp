@@ -147,10 +147,10 @@ public:
         : AudioProcessorEditor (processor), owner (processor)
     {
         addAndMakeVisible (description);
-        description.setText ("A interface do plugin e executada em um processo isolado.", juce::dontSendNotification);
+        description.setText ("The plugin interface runs in an isolated process.", juce::dontSendNotification);
         description.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (openButton);
-        openButton.setButtonText ("Abrir interface do plugin");
+        openButton.setButtonText ("Open Plugin Interface");
         openButton.onClick = [this]
         {
             if (! owner.hasFailed())
@@ -193,7 +193,7 @@ std::unique_ptr<RemotePluginProcessor> RemotePluginProcessor::create (
 {
 #if ! defined(_WIN32)
     juce::ignoreUnused (description, sampleRate, blockSize);
-    error = "O isolamento de plugins esta disponivel apenas no Windows.";
+    error = "Plugin isolation is only available on Windows.";
     return nullptr;
 #else
     auto processor = std::unique_ptr<RemotePluginProcessor> (
@@ -219,7 +219,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     responseEvent = CreateEventW (nullptr, FALSE, FALSE, responseName.toWideCharPointer());
     if (mapping == nullptr || requestEvent == nullptr || responseEvent == nullptr)
     {
-        error = "Nao foi possivel criar o canal de comunicacao do plugin.";
+        error = "Could not create the plugin communication channel.";
         return false;
     }
 
@@ -227,7 +227,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
         MapViewOfFile (mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof (pluginworker::SharedData)));
     if (shared == nullptr)
     {
-        error = "Nao foi possivel mapear a memoria compartilhada do plugin.";
+        error = "Could not map plugin shared memory.";
         return false;
     }
 
@@ -244,13 +244,13 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     const auto descriptionXml = description.createXml();
     if (descriptionXml == nullptr)
     {
-        error = "Nao foi possivel preparar a descricao do plugin.";
+        error = "Could not prepare the plugin description.";
         return false;
     }
     const auto descriptionText = descriptionXml->toString();
     if (descriptionText.length() >= pluginworker::descriptionLength)
     {
-        error = "A descricao do plugin e grande demais para o protocolo.";
+        error = "The plugin description is too large for the protocol.";
         return false;
     }
     pluginworker::writeText (shared->pluginDescription, pluginworker::descriptionLength,
@@ -262,7 +262,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
         workerExecutable = juce::File (MAXXXTUDIO_PLUGIN_WORKER_PATH);
     if (! workerExecutable.existsAsFile())
     {
-        error = "O executavel de isolamento de plugins nao foi encontrado: "
+        error = "The plugin isolation executable was not found: "
               + workerExecutable.getFullPathName();
         return false;
     }
@@ -281,7 +281,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     if (processJob == nullptr)
     {
         juce::Logger::writeToLog (
-            "RemotePluginProcessor: nao foi possivel criar o job de encerramento do worker.");
+            "RemotePluginProcessor: Could not create the worker shutdown job.");
     }
     else
     {
@@ -291,7 +291,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
                                      &jobLimits, sizeof (jobLimits)) == FALSE)
         {
             juce::Logger::writeToLog (
-                "RemotePluginProcessor: nao foi possivel configurar o job de encerramento do worker.");
+                "RemotePluginProcessor: Could not configure the worker shutdown job.");
             CloseHandle (processJob);
             processJob = nullptr;
         }
@@ -306,7 +306,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     {
         if (processJob != nullptr)
             CloseHandle (processJob);
-        error = "Nao foi possivel iniciar o processo isolado do plugin.";
+        error = "Could not start the isolated plugin process.";
         return false;
     }
 
@@ -317,7 +317,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     else if (processJob != nullptr)
     {
         juce::Logger::writeToLog (
-            "RemotePluginProcessor: nao foi possivel associar o worker ao job de encerramento.");
+            "RemotePluginProcessor: Could not associate the worker with the shutdown job.");
         CloseHandle (processJob);
     }
 
@@ -332,7 +332,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
             CloseHandle (workerJob);
             workerJob = nullptr;
         }
-        error = "Nao foi possivel iniciar o processo isolado do plugin.";
+        error = "Could not start the isolated plugin process.";
         return false;
     }
 
@@ -348,7 +348,7 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     const auto waitResult = WaitForMultipleObjects (2, handles, FALSE, 60000);
     if (waitResult != WAIT_OBJECT_0 || InterlockedCompareExchange (&shared->state, 0, 0) != 1)
     {
-        const auto* workerError = shared->error[0] != '\0' ? shared->error : "O plugin nao iniciou a tempo.";
+        const auto* workerError = shared->error[0] != '\0' ? shared->error : "The plugin did not start in time.";
         error = juce::String::fromUTF8 (workerError);
         if (workerProcess != nullptr)
         {
@@ -499,7 +499,7 @@ void RemotePluginProcessor::failWorker()
         const auto callback = onFailure;
         const auto name = pluginName;
         if (! juce::MessageManager::callAsync ([callback, name] { callback (name); }))
-            juce::Logger::writeToLog ("RemotePluginProcessor: nao foi possivel notificar a falha do plugin.");
+            juce::Logger::writeToLog ("RemotePluginProcessor: Could not report the plugin failure.");
     }
 }
 
@@ -681,7 +681,7 @@ void RemotePluginProcessor::getStateInformation (juce::MemoryBlock& destination)
         juce::String::fromUTF8 (shared->stateFilePath));
     if (! stateFile.loadFileAsData (destination))
     {
-        juce::Logger::writeToLog ("RemotePluginProcessor: nao foi possivel ler o estado do plugin.");
+        juce::Logger::writeToLog ("RemotePluginProcessor: Could not read plugin state.");
         const juce::ScopedLock lock (stateLock);
         destination.replaceAll (cachedState.getData(), cachedState.getSize());
         return;
@@ -709,7 +709,7 @@ void RemotePluginProcessor::setStateInformation (const void* data, int size)
         juce::FileOutputStream stream (stateFile);
         if (! stream.openedOk() || (size > 0 && ! stream.write (data, static_cast<std::size_t> (size))))
         {
-            juce::Logger::writeToLog ("RemotePluginProcessor: nao foi possivel gravar o estado do plugin.");
+            juce::Logger::writeToLog ("RemotePluginProcessor: Could not write plugin state.");
             return;
         }
         stream.flush();

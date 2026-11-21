@@ -5,7 +5,7 @@
 #include "Theme.h"
 #include <functional>
 
-// Botao vetorial com estados visuais e nome acessivel.
+// Vector button with visual states and an accessible name.
 class IconButton : public juce::Button
 {
 public:
@@ -33,7 +33,7 @@ private:
     icons::Icon icon;
 };
 
-// Barra de transporte: play/pause, stop, loop, BPM e posicao (compasso.beat.16avo).
+// Transport bar: play/pause, stop, loop, BPM, and position (bar.beat.sixteenth).
 class TransportBar : public juce::Component, private juce::Timer
 {
 public:
@@ -50,7 +50,7 @@ public:
     std::function<void (bool)> onFavoritesToggled;
     std::function<void (bool)> onPianoRollToggled;
     std::function<void (bool)> onComputerMidiKeyboardToggled;
-    std::function<void (double beats)> onPosition;   // chamado ~30x/s com o playhead
+    std::function<void (double beats)> onPosition;   // Called about 30 times per second with the playhead.
     std::function<void()> onGoToStart, onGoToEnd;
     std::function<void (double bpm)> onBpmChanged;
     std::function<void()> onBeforePlay;
@@ -80,20 +80,20 @@ private:
     void updateButtons();
 
     SequencerGraph& graph;
-    IconButton playButton { icons::Icon::Play, "Reproduzir" };
-    IconButton stopButton { icons::Icon::Stop, "Parar" };
-    IconButton startButton { icons::Icon::Rewind, "Ir para o inicio" };
-    IconButton endButton { icons::Icon::FastForward, "Ir para o final" };
-    IconButton projectButton { icons::Icon::Folder, "Projeto" };
-    IconButton optionsButton { icons::Icon::Settings, "Opcoes" };
-    IconToggleButton metronomeButton { icons::Icon::Metronome, "Metronomo" };
+    IconButton playButton { icons::Icon::Play, "Play" };
+    IconButton stopButton { icons::Icon::Stop, "Stop" };
+    IconButton startButton { icons::Icon::Rewind, "Go to Start" };
+    IconButton endButton { icons::Icon::FastForward, "Go to End" };
+    IconButton projectButton { icons::Icon::Folder, "Project" };
+    IconButton optionsButton { icons::Icon::Settings, "Options" };
+    IconToggleButton metronomeButton { icons::Icon::Metronome, "Metronome" };
     juce::Slider metronomeVolumeSlider;
     IconToggleButton loopButton { icons::Icon::Loop, "Loop" };
-    IconToggleButton browserButton { icons::Icon::Vst, "Plugins VST" };
+    IconToggleButton browserButton { icons::Icon::Vst, "VST Plugins" };
     IconToggleButton fileBrowserButton { icons::Icon::AudioFile, "Audio" };
-    IconToggleButton favoritesButton { icons::Icon::Favorites, "Favoritos" };
+    IconToggleButton favoritesButton { icons::Icon::Favorites, "Favorites" };
     IconToggleButton pianoRollButton { icons::Icon::PianoRoll, "Piano Roll" },
-                     computerKeyboardButton { icons::Icon::ComputerKeyboard, "Teclado MIDI do computador" };
+                     computerKeyboardButton { icons::Icon::ComputerKeyboard, "Computer MIDI Keyboard" };
     juce::Label bpmLabel, positionLabel, bpmCaption { {}, "BPM" };
     juce::Rectangle<int> cpuMeterBounds;
     CpuTooltipButton cpuTooltipArea;

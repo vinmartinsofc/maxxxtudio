@@ -88,17 +88,17 @@ public:
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
-        instructions.setText ("ANALISADOR DE REFERENCIA  |  Clique/arraste para buscar, Shift+arraste para navegar, roda para zoom.",
+        instructions.setText ("REFERENCE ANALYZER  |  Click/drag to seek, Shift-drag to scroll, mouse wheel to zoom.",
                               juce::dontSendNotification);
         instructions.setFont (juce::FontOptions (11.5f));
         instructions.setColour (juce::Label::textColourId, theme::textDim());
         addAndMakeVisible (instructions);
 
-        openButton.setButtonText ("Abrir audio");
+        openButton.setButtonText ("Open Audio");
         openButton.onClick = [this] { openFileChooser(); };
         addAndMakeVisible (openButton);
 
-        removeButton.setButtonText ("Remover");
+        removeButton.setButtonText ("Remove");
         removeButton.onClick = [this] { clearTrack(); };
         removeButton.setEnabled (false);
         addAndMakeVisible (removeButton);
@@ -112,7 +112,7 @@ public:
         fileName.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (fileName);
 
-        status.setText ("Arraste uma faixa para o deck ou escolha um arquivo.",
+        status.setText ("Drag a track onto the deck or choose a file.",
                         juce::dontSendNotification);
         status.setFont (juce::FontOptions (11.5f));
         status.setColour (juce::Label::textColourId, theme::textDim());
@@ -135,13 +135,13 @@ public:
         doubleBpmButton.onClick = [this] { adjustBpm (2.0); };
         addAndMakeVisible (doubleBpmButton);
 
-        playButton.setButtonText ("Reproduzir");
+        playButton.setButtonText ("Play");
         playButton.onClick = [this] { playOrResume(); };
         addAndMakeVisible (playButton);
-        pauseButton.setButtonText ("Pausar");
+        pauseButton.setButtonText ("Pause");
         pauseButton.onClick = [this] { pausePlayback(); };
         addAndMakeVisible (pauseButton);
-        stopButton.setButtonText ("Parar");
+        stopButton.setButtonText ("Stop");
         stopButton.onClick = [this]
         {
             if (owner.onStopRequested)
@@ -187,7 +187,7 @@ public:
         zoomInButton.setButtonText ("+");
         zoomInButton.onClick = [this] { deck.zoomBy (1.5); };
         addAndMakeVisible (zoomInButton);
-        fitButton.setButtonText ("Ajustar");
+        fitButton.setButtonText ("Fit");
         fitButton.onClick = [this] { deck.fitToTrack(); };
         addAndMakeVisible (fitButton);
 
@@ -216,7 +216,7 @@ public:
     {
         if (files.size() != 1)
         {
-            setAnalysisStatus ("Arraste um arquivo de audio por vez.");
+            setAnalysisStatus ("Drag one audio file at a time.");
             return;
         }
         requestAnalysis (juce::File (files[0]));
@@ -225,7 +225,7 @@ public:
     void setAnalysisStatus (const juce::String& text)
     {
         status.setText (text, juce::dontSendNotification);
-        if (text.startsWith ("Erro") || text.startsWith ("Falha"))
+        if (text.startsWith ("Error") || text.startsWith ("Failure"))
         {
             loadPending = false;
             removeButton.setEnabled (analysis != nullptr);
@@ -239,7 +239,7 @@ public:
         {
             loadPending = false;
             removeButton.setEnabled (analysis != nullptr);
-            setAnalysisStatus ("Nao foi possivel analisar o arquivo.");
+            setAnalysisStatus ("Could not analyze the file.");
             return;
         }
         loadPending = false;
@@ -268,7 +268,7 @@ public:
         zoomInButton.setEnabled (true);
         fitButton.setEnabled (true);
         startTimerHz (60);
-        setAnalysisStatus ("Analise pronta. BPM x2 e /2 ajustam a leitura; o audio permanece em velocidade normal.");
+        setAnalysisStatus ("Analysis ready. BPM x2 and /2 adjust the display; audio remains at its normal speed.");
         updateTransport();
     }
 
@@ -298,7 +298,7 @@ public:
                     juce::Justification::centredLeft);
         g.drawText ("KEY", keyCard.reduced (10).withHeight (15),
                     juce::Justification::centredLeft);
-        g.drawText ("DURACAO", durationCard.reduced (10).withHeight (15),
+        g.drawText ("DURATION", durationCard.reduced (10).withHeight (15),
                     juce::Justification::centredLeft);
     }
 
@@ -587,7 +587,7 @@ private:
             {
                 g.setColour (theme::textDim());
                 g.setFont (14.0f);
-                g.drawText ("Carregue um audio para visualizar a waveform.",
+                g.drawText ("Load audio to view the waveform.",
                             area, juce::Justification::centred);
                 return;
             }
@@ -804,7 +804,7 @@ private:
                     {
                         g.setColour (theme::textDim());
                         g.setFont (11.0f);
-                        g.drawText ("Espectro ao vivo", area, juce::Justification::centred);
+                        g.drawText ("Live Spectrum", area, juce::Justification::centred);
                         return;
                     }
 
@@ -1016,7 +1016,7 @@ private:
     void openFileChooser()
     {
         fileChooser = std::make_unique<juce::FileChooser> (
-            "Escolha um audio de referencia", juce::File(),
+            "Choose Reference Audio", juce::File(),
             "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
         juce::Component::SafePointer<Content> safeThis (this);
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode
@@ -1032,20 +1032,20 @@ private:
     {
         if (! isSupportedAudioFile (file))
         {
-            setAnalysisStatus ("Escolha um arquivo de audio suportado.");
+            setAnalysisStatus ("Choose a supported audio file.");
             return;
         }
         loadPending = true;
         removeButton.setEnabled (false);
         rescanButton.setEnabled (false);
         fileName.setText (file.getFileName(), juce::dontSendNotification);
-        setAnalysisStatus ("Carregando waveform e espectro...");
+        setAnalysisStatus ("Loading waveform and spectrum...");
         if (owner.onAnalyzeRequested)
             owner.onAnalyzeRequested (file);
         else
         {
             loadPending = false;
-            setAnalysisStatus ("A analise nao esta disponivel.");
+            setAnalysisStatus ("Analysis is unavailable.");
         }
     }
 
@@ -1067,7 +1067,7 @@ private:
         displayedPosition = 0.0;
         hasPlaybackStarted = false;
         isPaused = false;
-        fileName.setText ("Nenhuma faixa carregada.", juce::dontSendNotification);
+        fileName.setText ("No track loaded.", juce::dontSendNotification);
         bpm.setText ("--", juce::dontSendNotification);
         key.setText ("--", juce::dontSendNotification);
         duration.setText ("00:00", juce::dontSendNotification);
@@ -1082,7 +1082,7 @@ private:
         zoomInButton.setEnabled (false);
         fitButton.setEnabled (false);
         stopTimer();
-        setAnalysisStatus ("Deck vazio.");
+        setAnalysisStatus ("Deck is empty.");
         updateTransport();
     }
 
@@ -1141,7 +1141,7 @@ private:
     {
         if (analysis == nullptr)
         {
-            setAnalysisStatus ("Carregue um audio antes de iniciar o deck.");
+            setAnalysisStatus ("Load audio before starting the deck.");
             return;
         }
         if (isPlaying())
@@ -1158,7 +1158,7 @@ private:
         }
         else
         {
-            setAnalysisStatus ("A reproducao nao esta disponivel.");
+            setAnalysisStatus ("Playback is unavailable.");
             return;
         }
         displayedPosition = position;
@@ -1194,7 +1194,7 @@ private:
                              juce::dontSendNotification);
         playButton.setButtonText (playing ? "Reproduzindo"
             : (isPaused && analysis != nullptr
-               && displayedPosition < analysis->durationSeconds - 0.02 ? "Retomar" : "Reproduzir"));
+               && displayedPosition < analysis->durationSeconds - 0.02 ? "Resume" : "Play"));
         playButton.setEnabled (analysis != nullptr && ! playing);
         pauseButton.setEnabled (analysis != nullptr && playing);
         stopButton.setEnabled (analysis != nullptr

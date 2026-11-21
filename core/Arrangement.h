@@ -121,7 +121,7 @@ inline bool isValidAutomationEnvelope (const AutomationEnvelope& envelope)
     return true;
 }
 
-// Um clip colocado na linha do tempo de uma trilha (posicao em beats).
+// A clip placed on a track's timeline (position in beats).
 struct Placement
 {
     int         id = 0;
@@ -241,7 +241,7 @@ inline bool isValidAudioWarpMarkers (const std::vector<AudioWarpMarker>& markers
     return true;
 }
 
-// Trilha + parametros de mixagem. Clips ficam em heap (ponteiros estaveis).
+// Track + mixer parameters. Clips are heap-allocated (stable pointers).
 class Track
 {
 public:
@@ -271,11 +271,11 @@ public:
     Placement* find (int clipId) const;
     Placement* copyClip (const Placement& source, double start);
     int splitClip (int clipId, double beat);
-    std::unique_ptr<Placement> take (int clipId);          // tira da trilha (para mover entre trilhas)
+    std::unique_ptr<Placement> take (int clipId);          // Removes from this track (for moving between tracks).
     void put (std::unique_ptr<Placement> p);
     bool remove (int clipId);
 
-    // O trecho [start, start+length) cabe sem encostar em outro clip (ignorando 'ignoreId')?
+    // Does [start, start+length) fit without touching another clip (ignoring 'ignoreId')?
     bool isFree (double start, double length, int ignoreId = -1) const;
 
     AudioPlacement* addAudioClip (double start, double length, std::string filePath,
@@ -289,7 +289,7 @@ public:
     bool removeAudioClip (int clipId);
     bool isAudioFree (double start, double length, int ignoreId = -1) const;
 
-    // Id de clip unico dentro da trilha.
+    // Clip ID is unique within the track.
     int nextClipId() { return nextId++; }
     void reserveClipId (int clipId) { if (clipId >= nextId) nextId = clipId + 1; }
 
@@ -297,11 +297,11 @@ private:
     int nextId = 1;
 };
 
-// Junta os clips da trilha numa lista de notas em tempo absoluto (o que o sequenciador toca).
-// Notas alem do fim do clip sao cortadas/descartadas.
+// Combines a track's clips into a list of notes at absolute times (what the sequencer plays).
+// Notes extending past the end of the clip are trimmed/discarded.
 std::vector<Note> flatten (const Track& track);
 
-// Conversao linear <-> decibeis para faders e medidores
+// Linear <-> decibel conversion for faders and meters.
 float gainToDecibels (float gain, float minusInfinityDb = -60.0f);
 float decibelsToGain (float decibels);
 double adaptiveGridBeat (double pixelsPerBeat, double targetSpacingPixels = 12.0);

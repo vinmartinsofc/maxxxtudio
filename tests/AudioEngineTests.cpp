@@ -5,6 +5,8 @@
 #include "NativeEffectProcessors.h"
 #include "ReferenceMasterWindow.h"
 #include "RemotePluginProcessor.h"
+#include "Theme.h"
+#include "WaveformDisplay.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -191,6 +193,36 @@ public:
 };
 }
 
+TEST_CASE ("Red themes use red accents on their selected dark backgrounds")
+{
+    const auto previousPalette = theme::selectedPalette();
+
+    theme::selectedPalette() = theme::Palette::GraphiteRed;
+    CHECK (theme::accent() == juce::Colour (0xffe53935));
+    CHECK (theme::background() == juce::Colour (0xff343638));
+
+    theme::selectedPalette() = theme::Palette::BlackRed;
+    CHECK (theme::accent() == juce::Colour (0xffe53935));
+    CHECK (theme::background() == juce::Colour (0xff101112));
+    CHECK (theme::panel() == juce::Colour (0xff191b1d));
+
+    theme::selectedPalette() = previousPalette;
+}
+
+TEST_CASE ("Ultraviolet waveform colors transition from red to orange to green")
+{
+    const auto red = ultravioletWaveformColour (0.0f);
+    const auto orange = ultravioletWaveformColour (0.5f);
+    const auto green = ultravioletWaveformColour (1.0f);
+
+    CHECK (red.getRed() > red.getGreen());
+    CHECK (orange.getRed() > orange.getGreen());
+    CHECK (orange.getGreen() > orange.getBlue());
+    CHECK (green.getGreen() > green.getRed());
+    CHECK (ultravioletWaveformColour (-1.0f) == red);
+    CHECK (ultravioletWaveformColour (2.0f) == green);
+}
+
 TEST_CASE ("Track mixer keeps separate left and right peak levels")
 {
     BlockShared shared;
@@ -212,7 +244,7 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     UtilityProcessor utility;
-    REQUIRE (utility.getName() == "Volume Master");
+    REQUIRE (utility.getName() == "Master Volume");
     REQUIRE (utility.getParameters().size() == 13);
     REQUIRE (std::any_of (utility.getParameters().begin(), utility.getParameters().end(),
         [] (const auto* parameter)
@@ -227,7 +259,7 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     REQUIRE (engine.addUtility (1) > 0);
     const auto utilityDevices = engine.devices (1);
     REQUIRE (utilityDevices.size() == 1);
-    REQUIRE (utilityDevices.front().name == "Volume Master");
+    REQUIRE (utilityDevices.front().name == "Master Volume");
     REQUIRE (utilityDevices.front().automatableParameters.size() == 13);
     const auto findParameter = [&utility] (const juce::String& id)
     {
@@ -373,6 +405,279 @@ TEST_CASE ("Volume Master Rate reaches the high-frequency range")
     REQUIRE (buffer.getSample (0, 1) > 0.7f);
     REQUIRE (std::abs (processor.modulationPhase()
                        - juce::MathConstants<double>::pi * 1.8) < 0.001);
+}
+
+TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    CompMasterProcessor processor;
+    REQUIRE (processor.getName() == "Comp Master");
+    REQUIRE (processor.getParameters().size() == 9);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    REQUIRE (editor != nullptr);
+    REQUIRE (editor->getWidth() == 900);
+    juce::Image editorImage (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+    juce::Graphics editorGraphics (editorImage);
+    editor->paintEntireComponent (editorGraphics, true);
+    const auto setParameter = [&processor] (const juce::String& id, float value)
+    {
+        for (auto* parameter : processor.getParameters())
+            if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                identified != nullptr && identified->paramID == id)
+                parameter->setValue (value);
+    };
+    const auto getParameter = [&processor] (const juce::String& id)
+    {
+        for (auto* parameter : processor.getParameters())
+            if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                identified != nullptr && identified->paramID == id)
+                return parameter;
+        return static_cast<juce::AudioProcessorParameter*> (nullptr);
+    };
+
+    setParameter ("threshold", 0.6f);
+    setParameter ("ratio", 1.0f);
+    setParameter ("attack", 0.0f);
+    setParameter ("release", 0.0f);
+    setParameter ("knee", 0.0f);
+    processor.prepareToPlay (48000.0, 512);
+
+    juce::AudioBuffer<float> buffer (4, 512);
+    buffer.clear();
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        buffer.setSample (0, sample, 0.8f);
+        buffer.setSample (1, sample, 0.6f);
+    }
+    juce::MidiBuffer midi;
+    processor.processBlock (buffer, midi);
+
+    REQUIRE (buffer.getSample (0, 511) < 0.2f);
+    REQUIRE (processor.gainReductionDb() > 10.0f);
+    REQUIRE (processor.outputPeak (0) > 0.0f);
+    REQUIRE (processor.outputPeak (1) > 0.0f);
+    std::array<CompMasterProcessor::ScopeColumn, 8> scope {};
+    REQUIRE (processor.copyScopeSnapshot (scope.data(), static_cast<int> (scope.size())) > 0);
+    REQUIRE (std::any_of (scope.begin(), scope.end(),
+        [] (const auto& column) { return std::abs (column.maximum) > 0.01f; }));
+    REQUIRE (getParameter ("attack")->getText (0.0f, 16).contains ("ms"));
+
+    juce::MemoryBlock state;
+    processor.getStateInformation (state);
+    CompMasterProcessor restored;
+    restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    REQUIRE (std::abs (getParameter ("ratio")->getValue()
+                       - restored.getParameters()[1]->getValue()) < 0.00001f);
+    processor.setSidechainSourceTrackId (27, false);
+    processor.selectABState (1);
+    setParameter ("ratio", 0.0f);
+    processor.getStateInformation (state);
+    restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    REQUIRE (restored.sidechainSourceTrackId() == 27);
+    REQUIRE (restored.activeABSlot() == 1);
+    REQUIRE (restored.getParameters()[1]->getValue() == 0.0f);
+    restored.selectABState (0);
+    REQUIRE (std::abs (restored.getParameters()[1]->getValue() - 1.0f) < 0.00001f);
+}
+
+TEST_CASE ("EQ Master applies its eight parametric bands and restores their state")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    EqMasterProcessor processor;
+    REQUIRE (processor.getName() == "EQ Master");
+    REQUIRE (processor.getParameters().size() == EqMasterProcessor::bandCount * 6 + 3);
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    REQUIRE (editor != nullptr);
+    REQUIRE (editor->getWidth() == 850);
+    REQUIRE (editor->getHeight() == 560);
+    juce::Image editorImage (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
+    juce::Graphics editorGraphics (editorImage);
+    editor->paintEntireComponent (editorGraphics, true);
+    const auto getParameter = [&processor] (const juce::String& id)
+    {
+        for (auto* parameter : processor.getParameters())
+            if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                identified != nullptr && identified->paramID == id)
+                return parameter;
+        return static_cast<juce::AudioProcessorParameter*> (nullptr);
+    };
+    auto* frequency = getParameter ("band1_frequency");
+    auto* gain = getParameter ("band1_gain");
+    REQUIRE (frequency != nullptr);
+    REQUIRE (gain != nullptr);
+    frequency->setValue (frequency->getValueForText ("1000 Hz"));
+    gain->setValue (gain->getValueForText ("18 dB"));
+    processor.prepareToPlay (48000.0, 4096);
+
+    juce::AudioBuffer<float> buffer (2, 4096);
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        const float value = 0.1f * std::sin (juce::MathConstants<float>::twoPi
+                                             * 1000.0f * static_cast<float> (sample) / 48000.0f);
+        buffer.setSample (0, sample, value);
+        buffer.setSample (1, sample, value);
+    }
+    juce::MidiBuffer midi;
+    processor.processBlock (buffer, midi);
+    double outputRms = 0.0;
+    for (int sample = 2048; sample < buffer.getNumSamples(); ++sample)
+        outputRms += std::pow (buffer.getSample (0, sample), 2.0);
+    outputRms = std::sqrt (outputRms / 2048.0);
+    REQUIRE (outputRms > 0.3);
+    std::array<float, EqMasterProcessor::analyzerBufferSize> preAnalyzer {}, postAnalyzer {};
+    REQUIRE (processor.copyAnalyzerSnapshot (false, preAnalyzer.data(),
+                static_cast<int> (preAnalyzer.size())) == EqMasterProcessor::analyzerBufferSize);
+    REQUIRE (processor.copyAnalyzerSnapshot (true, postAnalyzer.data(),
+                static_cast<int> (postAnalyzer.size())) == EqMasterProcessor::analyzerBufferSize);
+    const auto analyzerRms = [] (const auto& samples)
+    {
+        double sum = 0.0;
+        for (const auto sample : samples)
+            sum += static_cast<double> (sample) * sample;
+        return std::sqrt (sum / samples.size());
+    };
+    REQUIRE (analyzerRms (postAnalyzer) > analyzerRms (preAnalyzer) * 3.0);
+
+    juce::MemoryBlock state;
+    processor.getStateInformation (state);
+    EqMasterProcessor restored;
+    restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    REQUIRE (std::abs (getParameter ("band1_frequency")->getValue()
+                       - restored.getParameters()[1]->getValue()) < 0.00001f);
+    processor.selectABState (1);
+    gain->setValue (0.5f);
+    processor.getStateInformation (state);
+    restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    REQUIRE (restored.activeABSlot() == 1);
+    restored.selectABState (0);
+    REQUIRE (restored.getParameters()[2]->getValue() > 0.99f);
+
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+    const int compId = engine.addNativeEffect (1, AudioEngine::compMasterPluginIdentifier);
+    const int eqId = engine.addNativeEffect (1, AudioEngine::eqMasterPluginIdentifier);
+    REQUIRE (compId > 0);
+    REQUIRE (eqId > 0);
+    const auto devices = engine.devices (1);
+    REQUIRE (devices.size() == 2);
+    REQUIRE (devices[0].name == "Comp Master");
+    REQUIRE (devices[0].automatableParameters.size() == 9);
+    REQUIRE (devices[1].name == "EQ Master");
+    REQUIRE (devices[1].automatableParameters.size() == EqMasterProcessor::bandCount * 6 + 3);
+    const auto states = engine.getPluginStates();
+    REQUIRE (states.size() == 2);
+    REQUIRE (states[0].identifier == AudioEngine::compMasterPluginIdentifier);
+    REQUIRE (states[1].identifier == AudioEngine::eqMasterPluginIdentifier);
+    REQUIRE (states[0].state.getSize() > 0);
+    REQUIRE (states[1].state.getSize() > 0);
+}
+
+TEST_CASE ("EQ Master supports filter slopes and global Mid/Side processing")
+{
+    EqMasterProcessor lowPass;
+    const auto setParameter = [] (juce::AudioProcessor& processor, const juce::String& id,
+                                  const juce::String& text)
+    {
+        for (auto* parameter : processor.getParameters())
+            if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+                identified != nullptr && identified->paramID == id)
+                parameter->setValue (parameter->getValueForText (text));
+    };
+
+    setParameter (lowPass, "band1_type", "Low Pass");
+    setParameter (lowPass, "band1_slope", "48 dB/oct");
+    setParameter (lowPass, "band1_frequency", "1000 Hz");
+    lowPass.prepareToPlay (48000.0, 4096);
+    juce::AudioBuffer<float> highTone (2, 4096);
+    for (int sample = 0; sample < highTone.getNumSamples(); ++sample)
+    {
+        const float value = 0.5f * std::sin (juce::MathConstants<float>::twoPi
+                                             * 8000.0f * static_cast<float> (sample) / 48000.0f);
+        highTone.setSample (0, sample, value);
+        highTone.setSample (1, sample, value);
+    }
+    juce::MidiBuffer midi;
+    lowPass.processBlock (highTone, midi);
+    double filteredRms = 0.0;
+    for (int sample = 2048; sample < highTone.getNumSamples(); ++sample)
+        filteredRms += std::pow (highTone.getSample (0, sample), 2.0);
+    filteredRms = std::sqrt (filteredRms / 2048.0);
+    REQUIRE (filteredRms < 0.01);
+
+    EqMasterProcessor sideEq;
+    setParameter (sideEq, "band1_frequency", "1000 Hz");
+    setParameter (sideEq, "band1_gain", "18 dB");
+    setParameter (sideEq, "mode", "Side");
+    sideEq.prepareToPlay (48000.0, 4096);
+    juce::AudioBuffer<float> sideTone (2, 4096);
+    for (int sample = 0; sample < sideTone.getNumSamples(); ++sample)
+    {
+        const float value = 0.1f * std::sin (juce::MathConstants<float>::twoPi
+                                              * 1000.0f * static_cast<float> (sample) / 48000.0f);
+        sideTone.setSample (0, sample, value);
+        sideTone.setSample (1, sample, -value);
+    }
+    sideEq.processBlock (sideTone, midi);
+    double sideRms = 0.0;
+    for (int sample = 2048; sample < sideTone.getNumSamples(); ++sample)
+        sideRms += std::pow (sideTone.getSample (0, sample), 2.0);
+    sideRms = std::sqrt (sideRms / 2048.0);
+    REQUIRE (sideRms > 0.4);
+    REQUIRE (std::abs (sideTone.getSample (0, 4095) + sideTone.getSample (1, 4095)) < 0.001f);
+}
+
+TEST_CASE ("Comp Master sidechain routes reject feedback and restore valid sources")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+    engine.addTrack (2, roll::TrackType::Audio);
+    engine.addTrack (3, roll::TrackType::Audio);
+    const int compId = engine.addNativeEffect (1, AudioEngine::compMasterPluginIdentifier);
+    REQUIRE (compId > 0);
+    REQUIRE (engine.canUseCompMasterSidechainSource (1, 2));
+    REQUIRE_FALSE (engine.canUseCompMasterSidechainSource (1, 1));
+    REQUIRE (engine.canUseCompMasterSidechainSource (1, 0));
+
+    CompMasterProcessor stateSource;
+    stateSource.setSidechainSourceTrackId (2, false);
+    juce::MemoryBlock state;
+    stateSource.getStateInformation (state);
+    const auto connectionCount = engine.graph().getConnections().size();
+    REQUIRE (engine.restorePluginState (1, compId, state));
+    REQUIRE (engine.graph().getConnections().size() == connectionCount + 2);
+
+    stateSource.setSidechainSourceTrackId (0, false);
+    stateSource.getStateInformation (state);
+    const auto masterConnectionCount = engine.graph().getConnections().size();
+    REQUIRE (engine.restorePluginState (1, compId, state));
+    REQUIRE (engine.graph().getConnections().size() == masterConnectionCount + 2);
+    const auto savedStates = engine.getPluginStates();
+    REQUIRE (savedStates.size() == 1);
+    REQUIRE (juce::String::fromUTF8 (static_cast<const char*> (savedStates[0].state.getData()),
+                                    static_cast<int> (savedStates[0].state.getSize()))
+                 .contains ("sidechainSourceTrackId=\"0\""));
+
+    CompMasterProcessor sidechainCompressor;
+    sidechainCompressor.prepareToPlay (48000.0, 4096);
+    sidechainCompressor.setSidechainSourceTrackId (2, false);
+    auto* threshold = sidechainCompressor.getParameters()[0];
+    auto* ratio = sidechainCompressor.getParameters()[1];
+    threshold->setValue (0.7f);
+    ratio->setValue (1.0f);
+    juce::AudioBuffer<float> detectorSignal (4, 4096);
+    for (int sample = 0; sample < detectorSignal.getNumSamples(); ++sample)
+    {
+        detectorSignal.setSample (0, sample, 0.1f);
+        detectorSignal.setSample (1, sample, 0.1f);
+        const float detector = 0.8f * std::sin (juce::MathConstants<float>::twoPi
+            * 1000.0f * static_cast<float> (sample) / 48000.0f);
+        detectorSignal.setSample (2, sample, detector);
+        detectorSignal.setSample (3, sample, detector);
+    }
+    juce::MidiBuffer midi;
+    sidechainCompressor.processBlock (detectorSignal, midi);
+    REQUIRE (sidechainCompressor.gainReductionDb() > 5.0f);
+    REQUIRE (std::abs (detectorSignal.getSample (0, 4095)) < 0.05f);
 }
 
 TEST_CASE ("Volume Master applies stereo width, shared phase inversion, and pan modulation")
@@ -799,7 +1104,7 @@ TEST_CASE ("Drum Rack migrates legacy sixteen-pad state to its MIDI note bank")
     REQUIRE (processor.restoreStateXml (legacy));
     REQUIRE (processor.padSampleLength (0) == 1024);
     REQUIRE (processor.padName (0).contains ("maxxx_tudio_drum_rack_sample"));
-    REQUIRE (processor.padName (1).contains ("vazio"));
+    REQUIRE (processor.padName (1).contains ("Empty"));
     REQUIRE (processor.padSettings (0).endSample == 1024);
     REQUIRE (processor.padSettings (0).mode == DrumRackProcessor::PlaybackMode::Classic);
 }

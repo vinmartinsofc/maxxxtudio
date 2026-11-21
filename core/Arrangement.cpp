@@ -139,7 +139,7 @@ std::unique_ptr<Placement> Track::take (int clipId)
 
 void Track::put (std::unique_ptr<Placement> p)
 {
-    p->id = nextId++;                  // id novo na trilha de destino
+    p->id = nextId++;                  // New ID on the destination track.
     clips.push_back (std::move (p));
 }
 

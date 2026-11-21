@@ -35,14 +35,14 @@ public:
         addAndMakeVisible (appliedGrooveLabel);
         addAndMakeVisible (statusLabel);
 
-        importButton.setButtonText ("Importar .agr");
-        searchEditor.setTextToShowWhenEmpty ("Pesquisar grooves...", theme::textDim());
+        importButton.setButtonText ("Import .agr");
+        searchEditor.setTextToShowWhenEmpty ("Search grooves...", theme::textDim());
         searchEditor.setColour (juce::TextEditor::backgroundColourId, theme::panel());
         searchEditor.setColour (juce::TextEditor::outlineColourId, theme::border());
         searchEditor.setColour (juce::TextEditor::textColourId, theme::text());
         searchEditor.onTextChange = [this] { updateSearchResults(); };
         autoPreviewButton.setButtonText ("Auto preview");
-        autoPreviewButton.setTooltip ("Tocar automaticamente o groove selecionado.");
+        autoPreviewButton.setTooltip ("Automatically play the selected groove.");
         juce::PropertiesFile::Options options;
         options.applicationName = "MaXXXtudioGrooveBrowser";
         options.filenameSuffix = ".settings";
@@ -53,9 +53,9 @@ public:
             grooveSettings != nullptr && grooveSettings->getBoolValue ("autoPreview", false),
             juce::dontSendNotification);
         previewButton.setButtonText ("Preview");
-        stopButton.setButtonText ("Parar");
-        applyButton.setButtonText ("Aplicar ao clip");
-        clearButton.setButtonText ("Remover groove");
+        stopButton.setButtonText ("Stop");
+        applyButton.setButtonText ("Apply to Clip");
+        clearButton.setButtonText ("Remove Groove");
         amountLabel.setText ("Intensidade", juce::dontSendNotification);
         amountLabel.setColour (juce::Label::textColourId, theme::textDim());
         statusLabel.setColour (juce::Label::textColourId, theme::textDim());
@@ -119,7 +119,7 @@ public:
         {
             if (owner.onStopPreview)
                 owner.onStopPreview();
-            setStatusText ("Preview parado.");
+            setStatusText ("Preview stopped.");
         };
         applyButton.onClick = [this]
         {
@@ -140,12 +140,12 @@ public:
         };
 
         if (categories.empty())
-            setStatusText ("Nenhum groove compativel encontrado em: " + directory.getFullPathName());
+            setStatusText ("No compatible groove found in: " + directory.getFullPathName());
         else
         {
-            setStatusText (juce::String (loadedGrooves) + " grooves em "
+            setStatusText (juce::String (loadedGrooves) + " grooves in "
                            + juce::String (static_cast<int> (categories.size())) + " abas."
-                           + (skippedFiles.isNotEmpty() ? " Alguns arquivos nao puderam ser lidos." : ""));
+                           + (skippedFiles.isNotEmpty() ? " Some files could not be read." : ""));
             statusLabel.setTooltip (skippedFiles);
         }
         updateButtons();
@@ -177,7 +177,7 @@ public:
         appliedName = name;
         clearButton.setEnabled (appliedName.isNotEmpty());
         appliedGrooveLabel.setText (appliedName.isNotEmpty()
-            ? "Groove aplicado: " + appliedName : "Nenhum groove aplicado",
+            ? "Groove applied: " + appliedName : "No groove applied",
             juce::dontSendNotification);
         appliedGrooveLabel.setTooltip (appliedName);
     }
@@ -308,8 +308,8 @@ private:
             int matches = 0;
             for (const auto& page : pages)
                 matches += page->numMatches();
-            setStatusText (matches == 0 ? "Nenhum groove encontrado."
-                                        : juce::String (matches) + " groove(s) encontrado(s).");
+            setStatusText (matches == 0 ? "No grooves found."
+                                        : juce::String (matches) + " groove(s) found.");
         }
         selectionChanged();
     }
@@ -345,7 +345,7 @@ private:
     void importGrooves()
     {
         fileChooser = std::make_unique<juce::FileChooser> (
-            "Importar grooves", GrooveLibrary::defaultGroovesDirectory(), "*.agr");
+            "Import Grooves", GrooveLibrary::defaultGroovesDirectory(), "*.agr");
         const juce::Component::SafePointer<Content> safeThis (this);
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode
                                     | juce::FileBrowserComponent::canSelectFiles
@@ -358,7 +358,7 @@ private:
                 auto* page = safeThis->currentPage();
                 if (page == nullptr)
                 {
-                    safeThis->setStatusText ("Selecione uma aba antes de importar grooves.");
+                    safeThis->setStatusText ("Select a tab before importing grooves.");
                     safeThis->fileChooser.reset();
                     return;
                 }
@@ -392,9 +392,9 @@ private:
                     { return first.groove.name < second.groove.name; });
                 page->setSearchQuery (safeThis->searchEditor.getText().trim());
                 safeThis->setStatusText (imported > 0
-                    ? juce::String (imported) + " groove(s) importado(s) na aba "
+                    ? juce::String (imported) + " groove(s) imported into the tab "
                         + safeThis->tabs.getCurrentTabName() + "."
-                    : firstError.isNotEmpty() ? firstError : "Nenhum groove novo selecionado.");
+                    : firstError.isNotEmpty() ? firstError : "No new grooves selected.");
                 safeThis->fileChooser.reset();
                 safeThis->updateButtons();
             });

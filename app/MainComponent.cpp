@@ -182,7 +182,7 @@ void saveCreateFadesOnClipEdges (bool enabled)
     auto xml = loadUserPreferences();
     xml->setAttribute ("createFadesOnClipEdges", enabled);
     if (! xml->writeTo (userPreferencesFile()))
-        juce::Logger::writeToLog ("MainComponent: nao foi possivel salvar as preferencias.");
+        juce::Logger::writeToLog ("MainComponent: Could not save preferences.");
 }
 
 void saveArrangementLayout (double ratio, int height)
@@ -191,7 +191,7 @@ void saveArrangementLayout (double ratio, int height)
     xml->setAttribute ("arrangementRatio", ratio);
     xml->setAttribute ("arrangementHeight", height);
     if (! xml->writeTo (userPreferencesFile()))
-        juce::Logger::writeToLog ("MainComponent: nao foi possivel salvar as preferencias.");
+        juce::Logger::writeToLog ("MainComponent: Could not save preferences.");
 }
 
 std::shared_ptr<AudioFileData> createGroovePreviewAudio (const roll::GrooveTemplate& groove, double bpm)
@@ -631,7 +631,7 @@ struct MainComponent::PluginCopyOperation
     std::map<int, std::size_t> expectedGroupSizes;
 };
 
-// Janela de plugin: mantem o editor visivel e oferece rolagem como fallback.
+// Plugin window: keeps the editor visible and provides scrolling as a fallback.
 class MainComponent::PluginWindow : public juce::DocumentWindow,
                                     private juce::KeyListener,
                                     private juce::AudioProcessorParameter::Listener,
@@ -838,12 +838,12 @@ MainComponent::MainComponent()
         const auto alive = token.lock();
         if (alive != nullptr && alive->load())
         {
-            browser.setStatus ("O plugin " + pluginName
-                               + " falhou e foi encerrado; a faixa foi protegida.");
+            browser.setStatus ("The plugin " + pluginName
+                               + " failed and was terminated; the track was protected.");
             AppModalDialog::show (
-                *this, "Falha de plugin",
-                "O plugin " + pluginName
-                    + " falhou e foi encerrado. A faixa foi protegida e o MaXXXtudio continua aberto.",
+                *this, "Plugin Failure",
+                "The plugin " + pluginName
+                    + " failed and was terminated. The track was protected, and MaXXXtudio is still running.",
                 AppModalDialog::Icon::Error,
                 { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
         }
@@ -904,7 +904,7 @@ MainComponent::MainComponent()
     for (int m = 0; m <= static_cast<int> (roll::Mode::MelodicMinor); ++m)
         modeBox.addItem (juce::String (roll::Scale::nameOf (static_cast<roll::Mode> (m)).data()), m + 1);
     modeBox.setSelectedId (1, juce::dontSendNotification);
-    for (int bars : { 1, 2, 4, 8, 16, 32 }) lengthBox.addItem (juce::String (bars) + (bars == 1 ? " compasso" : " compassos"), bars);
+    for (int bars : { 1, 2, 4, 8, 16, 32 }) lengthBox.addItem (juce::String (bars) + (bars == 1 ? " bar" : " bars"), bars);
 
     for (auto* b : { &scaleButton, &highlightButton, &foldButton, &foldScaleButton, &drawButton, &snapButton, &previewButton })
     {
@@ -998,9 +998,9 @@ MainComponent::MainComponent()
         roll::AutomationParameterType type = roll::AutomationParameterType::AudioClipGain;
         if (parameterName == "Pitch")
             type = roll::AutomationParameterType::AudioClipPitch;
-        else if (parameterName == "Fade entrada")
+        else if (parameterName == "Fade In")
             type = roll::AutomationParameterType::AudioClipFadeIn;
-        else if (parameterName == "Fade saida")
+        else if (parameterName == "Fade Out")
             type = roll::AutomationParameterType::AudioClipFadeOut;
         arrangement.selectAudioClipAutomationParameter (trackId, clipId, type, value);
     };
@@ -1011,17 +1011,17 @@ MainComponent::MainComponent()
     };
     audioClipEditor.onAutomationGestureEnded = [this] { project.endEdit(); };
 
-    // botoes nao roubam o foco do teclado (Espaco continua sendo play/pause)
+    // Buttons do not steal keyboard focus (Space still toggles play/pause).
     for (auto* b : { &scaleButton, &highlightButton, &foldButton, &foldScaleButton, &drawButton, &snapButton, &previewButton,
                      &groovesButton,
                      &zoomHMinus, &zoomHPlus, &zoomVMinus, &zoomVPlus, &clipTab, &deviceTab,
                      &pianoLocatorPreviousButton, &pianoLocatorAddButton, &pianoLocatorNextButton,
                      &pianoLocatorDeleteButton })
         b->setMouseClickGrabsKeyboardFocus (false);
-    pianoLocatorPreviousButton.setTooltip ("Ir para o locator anterior");
-    pianoLocatorAddButton.setTooltip ("Adicionar locator na posicao atual");
-    pianoLocatorNextButton.setTooltip ("Ir para o proximo locator");
-    pianoLocatorDeleteButton.setTooltip ("Remover o locator selecionado");
+    pianoLocatorPreviousButton.setTooltip ("Go to Previous Locator");
+    pianoLocatorAddButton.setTooltip ("Add Locator at Current Position");
+    pianoLocatorNextButton.setTooltip ("Go to Next Locator");
+    pianoLocatorDeleteButton.setTooltip ("Remove the selected locator");
     pianoLocatorPreviousButton.onClick = [this] { navigatePianoRollLocator (false); };
     pianoLocatorAddButton.onClick = [this] { addPianoRollLocatorAtPlayhead(); };
     pianoLocatorNextButton.onClick = [this] { navigatePianoRollLocator (true); };
@@ -1031,20 +1031,20 @@ MainComponent::MainComponent()
     pianoLocatorNextButton.setEnabled (false);
     pianoLocatorDeleteButton.setEnabled (false);
 
-    clipTab.setTooltip ("Editar a selecao de audio ou MIDI no painel detalhado");
-    deviceTab.setTooltip ("Exibir os dispositivos e efeitos da trilha selecionada");
-    scaleButton.setTooltip ("Escala: destacar ou limitar as notas as notas da escala");
-    highlightButton.setTooltip ("Destacar as notas pertencentes a escala ativa");
-    foldButton.setTooltip ("Fold: recolher a grade para mostrar apenas as notas usadas");
-    foldScaleButton.setTooltip ("Fold da escala: mostrar somente as notas da escala");
-    drawButton.setTooltip ("Desenhar notas diretamente na grade do piano roll");
-    snapButton.setTooltip ("Snap: ajustar as notas a grade ritmica ativa");
-    previewButton.setTooltip ("Pre-ouvir notas ao inserir ou mover eventos");
-    groovesButton.setTooltip ("Grooves: aplicar ritmos e deslocamentos a selecao");
-    zoomHMinus.setTooltip ("Reduzir o zoom horizontal do piano roll");
-    zoomHPlus.setTooltip ("Ampliar o zoom horizontal do piano roll");
-    zoomVMinus.setTooltip ("Reduzir o zoom vertical das notas");
-    zoomVPlus.setTooltip ("Ampliar o zoom vertical das notas");
+    clipTab.setTooltip ("Edit the audio or MIDI selection in the detail panel");
+    deviceTab.setTooltip ("Show devices and effects for the selected track");
+    scaleButton.setTooltip ("Scale: highlight or constrain notes to the scale");
+    highlightButton.setTooltip ("Highlight notes in the active scale");
+    foldButton.setTooltip ("Fold: show only pitches used in the clip");
+    foldScaleButton.setTooltip ("Scale Fold: show only notes in the scale");
+    drawButton.setTooltip ("Draw notes directly in the piano roll");
+    snapButton.setTooltip ("Snap: align notes to the active rhythmic grid");
+    previewButton.setTooltip ("Preview notes when inserting or moving events");
+    groovesButton.setTooltip ("Grooves: apply rhythms and timing offsets to the selection");
+    zoomHMinus.setTooltip ("Zoom out horizontally in the piano roll");
+    zoomHPlus.setTooltip ("Zoom in horizontally in the piano roll");
+    zoomVMinus.setTooltip ("Zoom out vertically on notes");
+    zoomVPlus.setTooltip ("Zoom in vertically on notes");
     rootBox.setMouseClickGrabsKeyboardFocus (false);
     modeBox.setMouseClickGrabsKeyboardFocus (false);
     lengthBox.setMouseClickGrabsKeyboardFocus (false);
@@ -1280,7 +1280,7 @@ MainComponent::MainComponent()
                         target.clipId = clip->id;
                         return target;
                     }(),
-                    name + " : Fade entrada"
+                    name + " : Fade In"
                 });
                 choices.push_back ({
                     [&]
@@ -1291,7 +1291,7 @@ MainComponent::MainComponent()
                         target.clipId = clip->id;
                         return target;
                     }(),
-                    name + " : Fade saida"
+                    name + " : Fade Out"
                 });
             }
         }
@@ -1330,7 +1330,7 @@ MainComponent::MainComponent()
             const auto* track = project.track (trackId);
             return track != nullptr && track->type == roll::TrackType::Midi;
         }
-        if (identifier == UtilityProcessor::pluginIdentifier)
+        if (AudioEngine::isNativeEffectIdentifier (identifier))
             return project.track (trackId) != nullptr;
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr
@@ -1343,9 +1343,9 @@ MainComponent::MainComponent()
             addNativeDrumRackToTrack (trackId);
             return;
         }
-        if (identifier == UtilityProcessor::pluginIdentifier)
+        if (AudioEngine::isNativeEffectIdentifier (identifier))
         {
-            browser.setStatus (addNativeEffectToTrack (trackId));
+            browser.setStatus (addNativeEffectToTrack (trackId, identifier));
             return;
         }
         if (auto description = scanner.list().getTypeForIdentifierString (identifier))
@@ -1353,7 +1353,7 @@ MainComponent::MainComponent()
             auto* target = project.track (trackId);
             if (trackId == AudioEngine::masterTrackId && ! engine.canAcceptPlugin (trackId, *description))
             {
-                browser.setStatus ("A trilha Master aceita apenas efeitos.");
+                browser.setStatus ("The Master track only accepts effects.");
                 return;
             }
             if (! engine.canAcceptPlugin (trackId, *description))
@@ -1394,7 +1394,7 @@ MainComponent::MainComponent()
         juce::MidiFile midi;
         if (! input.openedOk() || ! midi.readFrom (input))
         {
-            setProjectStatus ("Nao foi possivel ler o arquivo MIDI.");
+            setProjectStatus ("Could not read the MIDI file.");
             return;
         }
 
@@ -1444,7 +1444,7 @@ MainComponent::MainComponent()
         }
         if (notes.empty())
         {
-            setProjectStatus ("O arquivo MIDI nao possui notas.");
+            setProjectStatus ("The MIDI file contains no notes.");
             return;
         }
 
@@ -1458,8 +1458,8 @@ MainComponent::MainComponent()
         }
         project.endEdit();
         setProjectStatus (clip != nullptr
-            ? "MIDI importado: " + file.getFileName()
-            : "Nao foi possivel inserir o MIDI nesse ponto.");
+            ? "MIDI imported: " + file.getFileName()
+            : "Could not insert the MIDI file at this position.");
     };
     arrangement.onAudioClipDoubleClicked = [this] (int trackId, int clipId)
     {
@@ -1505,7 +1505,7 @@ MainComponent::MainComponent()
                 return;
             if (error.isNotEmpty() || data == nullptr)
             {
-                audioBrowser.setStatus ("Erro no preview: " + error);
+                audioBrowser.setStatus ("Preview error: " + error);
                 return;
             }
             engine.previewAudio (std::move (data));
@@ -1655,12 +1655,12 @@ MainComponent::MainComponent()
             project.endEdit();
             refreshDeviceView();
             project.sendChangeMessage();
-            browser.setStatus ("Plugins agrupados. Ctrl+Shift+G para desagrupar.");
+            browser.setStatus ("Plugins grouped. Press Ctrl+Shift+G to ungroup.");
         }
         else
         {
             project.cancelEdit();
-            browser.setStatus ("Selecione pelo menos dois plugins consecutivos para agrupar.");
+            browser.setStatus ("Select at least two consecutive plugins to group.");
         }
     };
     deviceView.onUngroupRequested = [this] (int trackId, const std::vector<int>& deviceIds)
@@ -1671,12 +1671,12 @@ MainComponent::MainComponent()
             project.endEdit();
             refreshDeviceView();
             project.sendChangeMessage();
-            browser.setStatus ("Rack desagrupado.");
+            browser.setStatus ("Rack ungrouped.");
         }
         else
         {
             project.cancelEdit();
-            browser.setStatus ("Selecione um rack para desagrupar.");
+            browser.setStatus ("Select a rack to ungroup.");
         }
     };
     deviceView.onCopyDevices = [this] (int trackId, const std::vector<int>& deviceIds)
@@ -1695,7 +1695,7 @@ MainComponent::MainComponent()
             const auto* track = project.track (trackId);
             return track != nullptr && track->type == roll::TrackType::Midi;
         }
-        if (identifier == UtilityProcessor::pluginIdentifier)
+        if (AudioEngine::isNativeEffectIdentifier (identifier))
             return project.track (trackId) != nullptr;
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr && engine.canAcceptPlugin (trackId, *description);
@@ -1707,9 +1707,9 @@ MainComponent::MainComponent()
             addNativeDrumRackToTrack (trackId);
             return;
         }
-        if (identifier == UtilityProcessor::pluginIdentifier)
+        if (AudioEngine::isNativeEffectIdentifier (identifier))
         {
-            browser.setStatus (addNativeEffectToTrack (trackId));
+            browser.setStatus (addNativeEffectToTrack (trackId, identifier, insertionIndex));
             return;
         }
         if (auto description = scanner.list().getTypeForIdentifierString (identifier))
@@ -1746,7 +1746,7 @@ MainComponent::MainComponent()
                         return;
                     if (error.isNotEmpty() || data == nullptr)
                     {
-                        safeWindow->setAnalysisStatus ("Erro na analise: " + error);
+                        safeWindow->setAnalysisStatus ("Analysis error: " + error);
                         return;
                     }
                     safeWindow->setAnalysis (file, std::move (data));
@@ -1775,7 +1775,7 @@ MainComponent::MainComponent()
         }
         referenceMasterWindow->setVisible (true);
         referenceMasterWindow->toFront (true);
-        return juce::String ("Reference Master aberto.");
+        return juce::String ("Reference Master opened.");
     };
     browser.onAddDrumRackRequested = [this]
     {
@@ -1794,10 +1794,18 @@ MainComponent::MainComponent()
     {
         return addNativeEffectToTrack (project.selectedTrackId);
     };
+    browser.onAddCompMasterRequested = [this]
+    {
+        return addNativeEffectToTrack (project.selectedTrackId, AudioEngine::compMasterPluginIdentifier);
+    };
+    browser.onAddEqMasterRequested = [this]
+    {
+        return addNativeEffectToTrack (project.selectedTrackId, AudioEngine::eqMasterPluginIdentifier);
+    };
     scanner.onStarted = [this]
     {
         scanningPlugins = true;
-        scanMessage = "Procurando plugins...";
+        scanMessage = "Scanning plugins...";
         browser.setStatus (scanMessage);
         updateActionIndicator();
     };
@@ -1812,8 +1820,8 @@ MainComponent::MainComponent()
         scanMessage.clear();
         browser.refresh();
         browser.setStatus (cancelled
-            ? theme::ui ("Escaneamento cancelado. ") + juce::String (scanner.list().getNumTypes()) + " plugins encontrados"
-            : juce::String (scanner.list().getNumTypes()) + " plugins encontrados");
+            ? theme::ui ("Scan cancelled. ") + juce::String (scanner.list().getNumTypes()) + " plugins found"
+            : juce::String (scanner.list().getNumTypes()) + " plugins found");
         updateActionIndicator();
         if (waitingForProjectPluginScan)
         {
@@ -1850,7 +1858,7 @@ MainComponent::~MainComponent()
     grooveBrowserWindow.reset();
     releaseComputerMidiNotes();
 
-    // O registry e membro desta classe; encerre primeiro qualquer worker que o utilize.
+    // The registry is a member of this class; stop any workers using it first.
     if (taskSimulationThread.joinable())
     {
         taskSimulationThread.request_stop();
@@ -1874,7 +1882,7 @@ MainComponent::~MainComponent()
     stopTimer();
     project.removeChangeListener (this);
     model.removeChangeListener (this);
-    windows.clear();                              // fecha as UIs dos plugins antes do engine
+    windows.clear();                              // Close plugin UIs before the engine.
 }
 
 void MainComponent::setMainWindow (juce::TopLevelWindow* window)
@@ -1887,7 +1895,7 @@ void MainComponent::restorePluginHistoryState (const std::vector<PluginState>& p
 {
     if (pluginHistoryRestoreInProgress)
     {
-        setProjectStatus ("Aguarde a restauracao atual de plugins terminar.");
+        setProjectStatus ("Wait for the current plugin restoration to finish.");
         return;
     }
 
@@ -1925,7 +1933,7 @@ void MainComponent::restorePluginHistoryState (const std::vector<PluginState>& p
         engine.removeDevice (device.trackId, existing->id);
     }
 
-    setProjectStatus ("Restaurando o estado dos plugins...");
+    setProjectStatus ("Restoring plugin state...");
     restoreNextPluginHistoryState();
 }
 
@@ -1956,8 +1964,9 @@ void MainComponent::restoreNextPluginHistoryState()
         int nativeDeviceId = 0;
         if (state.identifier == AudioEngine::drumRackPluginIdentifier)
             nativeDeviceId = engine.addDrumRack (state.trackId);
-        else if (state.identifier == AudioEngine::utilityPluginIdentifier
-                 || state.identifier == AudioEngine::autoPanPluginIdentifier)
+        else if (AudioEngine::isNativeEffectIdentifier (state.identifier))
+            nativeDeviceId = engine.addNativeEffect (state.trackId, state.identifier);
+        else if (state.identifier == AudioEngine::autoPanPluginIdentifier)
             nativeDeviceId = engine.addUtility (state.trackId);
 
         if (nativeDeviceId > 0)
@@ -1986,7 +1995,7 @@ void MainComponent::restoreNextPluginHistoryState()
                 if (error.isNotEmpty())
                 {
                     ++operation->failures;
-                    browser.setStatus ("Nao foi possivel restaurar " + state.identifier + ": " + error);
+                    browser.setStatus ("Could not restore " + state.identifier + ": " + error);
                 }
                 else
                 {
@@ -2113,9 +2122,9 @@ void MainComponent::copyDevicesToClipboard (int trackId, const std::vector<int>&
     std::stable_sort (copiedPluginStates.begin(), copiedPluginStates.end(),
         [] (const PluginState& a, const PluginState& b) { return a.order < b.order; });
     browser.setStatus (copiedPluginStates.empty()
-        ? "Nao foi possivel copiar os plugins selecionados."
-        : juce::String (copiedPluginStates.size()) + " plugin(s) configurado(s) copiado(s). "
-          "Selecione outra trilha e use Ctrl+V.");
+        ? "Could not copy the selected plugins."
+        : juce::String (copiedPluginStates.size()) + " configured plugin(s) copied. "
+          "Select another track and press Ctrl+V.");
 }
 
 void MainComponent::pasteDevicesToTrack (int trackId)
@@ -2124,7 +2133,7 @@ void MainComponent::pasteDevicesToTrack (int trackId)
         return;
     if (pluginCopyInProgress || pluginHistoryRestoreInProgress)
     {
-        setProjectStatus ("Aguarde a operacao atual de plugins terminar.");
+        setProjectStatus ("Wait for the current plugin operation to finish.");
         return;
     }
 
@@ -2140,7 +2149,7 @@ void MainComponent::pasteDevicesToTrack (int trackId)
     project.beginExternalEdit();
     pluginCopyOperation = std::move (operation);
     pluginCopyInProgress = true;
-    setProjectStatus ("Copiando plugins configurados para a trilha...");
+    setProjectStatus ("Copying configured plugins to the track...");
     pasteNextDevice();
 }
 
@@ -2165,8 +2174,11 @@ void MainComponent::pasteNextDevice()
         {
             deviceId = engine.addDrumRack (operation->targetTrackId);
         }
-        else if (state.identifier == AudioEngine::utilityPluginIdentifier
-                 || state.identifier == AudioEngine::autoPanPluginIdentifier)
+        else if (AudioEngine::isNativeEffectIdentifier (state.identifier))
+        {
+            deviceId = engine.addNativeEffect (operation->targetTrackId, state.identifier);
+        }
+        else if (state.identifier == AudioEngine::autoPanPluginIdentifier)
         {
             deviceId = engine.addUtility (operation->targetTrackId);
         }
@@ -2189,8 +2201,8 @@ void MainComponent::pasteNextDevice()
                     if (error.isNotEmpty() || loadedDeviceId <= 0)
                     {
                         ++operation->failures;
-                        browser.setStatus ("Nao foi possivel copiar " + state.identifier + ": "
-                                          + (error.isNotEmpty() ? error : "falha ao adicionar."));
+                        browser.setStatus ("Could not copy " + state.identifier + ": "
+                                          + (error.isNotEmpty() ? error : "failed to add."));
                     }
                     else
                     {
@@ -2249,10 +2261,10 @@ void MainComponent::finishDeviceCopy()
 
     pluginCopyOperation.reset();
     pluginCopyInProgress = false;
-    const auto result = juce::String (operation->added) + " plugin(s) copiado(s)";
+    const auto result = juce::String (operation->added) + " plugin(s) copied";
     setProjectStatus (operation->failures == 0
         ? result + "."
-        : result + "; " + juce::String (operation->failures) + " nao puderam ser copiados.");
+        : result + "; " + juce::String (operation->failures) + " could not be copied.");
 }
 
 void MainComponent::finishPluginHistoryRestore()
@@ -2263,8 +2275,8 @@ void MainComponent::finishPluginHistoryRestore()
     refreshDeviceView();
     project.sendChangeMessage();
     setProjectStatus (failures == 0
-        ? "Estado de plugins restaurado."
-        : "Estado restaurado com " + juce::String (failures) + " falha(s) ao carregar plugins.");
+        ? "Plugin state restored."
+        : "State restored with " + juce::String (failures) + " plugin(s) failed to load.");
 }
 
 std::vector<juce::Rectangle<int>> MainComponent::pluginWindowBounds() const
@@ -2648,7 +2660,7 @@ void MainComponent::setPianoRollVisible (bool visible)
 void MainComponent::loadAudioFile (const juce::File& file, int trackId, double startBeat)
 {
     ++pendingAudioLoads;
-    audioBrowser.setStatus ("Carregando " + file.getFileName() + "...");
+    audioBrowser.setStatus ("Loading " + file.getFileName() + "...");
     updateActionIndicator();
     const int generation = projectGeneration;
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
@@ -2664,14 +2676,14 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
             return;
         if (error.isNotEmpty() || data == nullptr)
         {
-            audioBrowser.setStatus ("Erro ao carregar audio: " + error);
+            audioBrowser.setStatus ("Error loading audio: " + error);
             return;
         }
 
         auto* track = project.track (trackId);
         if (track == nullptr || track->type != roll::TrackType::Audio)
         {
-            audioBrowser.setStatus ("A trilha de audio foi removida durante o carregamento.");
+            audioBrowser.setStatus ("The audio track was removed while loading.");
             return;
         }
 
@@ -2691,11 +2703,11 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
                                                 data->durationSeconds, sourceBpm, edgeFadeBeats) == nullptr)
         {
             publishAudioTrack (trackId);
-            audioBrowser.setStatus ("Nao foi possivel inserir o audio nesse ponto da trilha.");
+            audioBrowser.setStatus ("Could not insert the audio at this position on the track.");
             return;
         }
 
-        audioBrowser.setStatus (file.getFileName() + " adicionado");
+        audioBrowser.setStatus (file.getFileName() + " added");
     }, true);
 }
 
@@ -2705,21 +2717,21 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
         || ! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
         || pendingAudioLoads > 0 || scanningPlugins)
     {
-        audioBrowser.setStatus ("Aguarde os carregamentos e operacoes atuais antes de consolidar.");
+        audioBrowser.setStatus ("Wait for current loads and operations to finish before consolidating.");
         return;
     }
 
     if (firstTrack != lastTrack || firstTrack < 0 || firstTrack >= static_cast<int> (project.tracks.size())
         || startBeat < 0.0 || endBeat <= startBeat)
     {
-        audioBrowser.setStatus ("Consolidar: selecione um trecho de uma unica faixa de audio.");
+        audioBrowser.setStatus ("Consolidate: select a range on a single audio track.");
         return;
     }
 
     auto* track = project.tracks[static_cast<std::size_t> (firstTrack)].get();
     if (track->type != roll::TrackType::Audio)
     {
-        audioBrowser.setStatus ("Consolidar: a faixa selecionada precisa ser de audio.");
+        audioBrowser.setStatus ("Consolidate: the selected track must be an audio track.");
         return;
     }
 
@@ -2727,7 +2739,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     const double bpm = engine.graph().getBpm();
     if (! std::isfinite (bpm) || bpm <= 0.0)
     {
-        audioBrowser.setStatus ("Consolidar: o BPM do projeto e invalido.");
+        audioBrowser.setStatus ("Consolidate: the project BPM is invalid.");
         return;
     }
     const double durationSeconds = (endBeat - startBeat) * 60.0 / bpm;
@@ -2736,7 +2748,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
         || durationSeconds > 600.0
         || frameCountDouble > static_cast<double> (std::numeric_limits<int>::max()))
     {
-        audioBrowser.setStatus ("Consolidar: a selecao e grande demais para renderizar (maximo de 10 minutos).");
+        audioBrowser.setStatus ("Consolidate: the selection is too large to render (maximum 10 minutes).");
         return;
     }
 
@@ -2755,7 +2767,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
         if (asset == audioAssets.end() || asset->second == nullptr || asset->second->samples == nullptr
             || asset->second->sampleRate <= 0.0)
         {
-            audioBrowser.setStatus ("Consolidar: nao foi possivel acessar a origem de " + juce::String (clip->name));
+            audioBrowser.setStatus ("Consolidate: could not access the source for " + juce::String (clip->name));
             return;
         }
 
@@ -2764,7 +2776,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
 
     if (! foundSource)
     {
-        audioBrowser.setStatus ("Consolidar: nao ha clips de audio na selecao.");
+        audioBrowser.setStatus ("Consolidate: the selection contains no audio clips.");
         return;
     }
 
@@ -2777,7 +2789,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
                               .getChildFile ("MaXXXtudio").getChildFile ("Consolidated");
     if (const auto error = outputDirectory.createDirectory(); error.failed())
     {
-        audioBrowser.setStatus ("Consolidar: nao foi possivel criar a pasta de destino: " + error.getErrorMessage());
+        audioBrowser.setStatus ("Consolidate: could not create the destination folder: " + error.getErrorMessage());
         return;
     }
     const auto outputFile = outputDirectory.getNonexistentChildFile (
@@ -2790,7 +2802,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     juce::String error;
     if (! engine.beginOfflineTrackRender (trackId, error))
     {
-        audioBrowser.setStatus ("Nao foi possivel iniciar a consolidacao: " + error);
+        audioBrowser.setStatus ("Could not start consolidation: " + error);
         return;
     }
 
@@ -2798,7 +2810,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     setAudioRenderUiEnabled (false);
     auto cancelled = std::make_shared<std::atomic<bool>> (false);
     auto task = std::make_shared<TaskScope> (
-        taskRegistry, "Consolidando faixa: " + trackName, "global", 0.0, true,
+        taskRegistry, "Consolidating track: " + trackName, "global", 0.0, true,
         [cancelled] { cancelled->store (true, std::memory_order_release); });
     const auto outputSampleRate = engine.offlineRenderSampleRate();
     const auto token = std::weak_ptr<std::atomic<bool>> (lifetimeToken);
@@ -2830,7 +2842,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
             auto fileStream = std::make_unique<juce::FileOutputStream> (outputFile);
             if (! fileStream->openedOk())
             {
-                result = juce::Result::fail ("Nao foi possivel criar o WAV.");
+                result = juce::Result::fail ("Could not create the WAV file.");
             }
             else
             {
@@ -2844,7 +2856,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
                 {
                     writer.reset();
                     outputStream.reset();
-                    result = juce::Result::fail ("Falha ao gravar o arquivo WAV.");
+                    result = juce::Result::fail ("Failed to write the WAV file.");
                 }
                 else
                 {
@@ -2901,12 +2913,12 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
             if (cancelled->load (std::memory_order_acquire))
             {
                 outputFile.deleteFile();
-                audioBrowser.setStatus ("Consolidacao cancelada.");
+                audioBrowser.setStatus ("Consolidation cancelled.");
                 return;
             }
             if (result.failed())
             {
-                audioBrowser.setStatus ("Falha ao consolidar: " + result.getErrorMessage());
+                audioBrowser.setStatus ("Consolidation failed: " + result.getErrorMessage());
                 return;
             }
 
@@ -2914,7 +2926,7 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
             if (targetTrack == nullptr || targetTrack->type != roll::TrackType::Audio || data == nullptr)
             {
                 outputFile.deleteFile();
-                audioBrowser.setStatus ("Consolidar: a faixa mudou durante a renderizacao.");
+                audioBrowser.setStatus ("Consolidate: the track changed during rendering.");
                 return;
             }
 
@@ -2957,12 +2969,12 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
                 project.undo();
                 audioAssets.erase (path);
                 outputFile.deleteFile();
-                audioBrowser.setStatus ("Consolidar: nao foi possivel substituir a selecao.");
+                audioBrowser.setStatus ("Consolidate: could not replace the selection.");
                 return;
             }
 
-            audioBrowser.setStatus ("Selecao consolidada: " + outputFile.getFileName()
-                                    + " (efeitos da faixa aplicados)");
+            audioBrowser.setStatus ("Selection consolidated: " + outputFile.getFileName()
+                                    + " (track effects applied)");
         });
     });
 }
@@ -3187,14 +3199,14 @@ void MainComponent::loopSelectedTrack()
     transport.setLoopEnabled (true);
 }
 
-// ------------------------------------------------------------ teclado
+// ------------------------------------------------------------ Keyboard
 
 bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
     if (pendingMidiLearn.has_value() && key.getKeyCode() == juce::KeyPress::escapeKey)
     {
         pendingMidiLearn.reset();
-        setProjectStatus ("MIDI Learn cancelado.");
+        setProjectStatus ("MIDI Learn cancelled.");
         return true;
     }
 
@@ -3225,7 +3237,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     if (pendingMidiLearn.has_value() && k.getKeyCode() == juce::KeyPress::escapeKey)
     {
         pendingMidiLearn.reset();
-        setProjectStatus ("MIDI Learn cancelado.");
+        setProjectStatus ("MIDI Learn cancelled.");
         return true;
     }
 
@@ -3364,7 +3376,7 @@ bool MainComponent::keyStateChanged (bool)
 
 void MainComponent::cycleFocus()
 {
-    // navegacao por teclado: lista de plugins -> arranjo -> piano roll
+    // Keyboard navigation: plugin list -> arrangement -> piano roll.
     if (browser.hasKeyboardFocus (true))          arrangement.grabFocus();
     else if (arrangement.hasKeyboardFocus (true)) { if (showingDevices) showDetail (false); editor.grabFocus(); }
     else                                          browser.grabFocus();
@@ -3377,15 +3389,15 @@ juce::String MainComponent::deviceSummary (int trackId) const
     juce::StringArray names;
     for (const auto& d : engine.devices (trackId)) names.add (d.name);
     const auto summary = names.joinIntoString (" > ");
-    if (trackId == 0) return summary.isNotEmpty() ? summary : theme::ui ("Efeitos Master");
+    if (trackId == 0) return summary.isNotEmpty() ? summary : theme::ui ("Master Effects");
     const auto* track = project.track (trackId);
     if (summary.isNotEmpty())
         return summary;
     if (track == nullptr)
         return {};
     if (track->type == roll::TrackType::Group)
-        return theme::ui ("Barramento de grupo");
-    return track->type == roll::TrackType::Audio ? theme::ui ("Canal de audio") : juce::String();
+        return theme::ui ("Group Bus");
+    return track->type == roll::TrackType::Audio ? theme::ui ("Audio Channel") : juce::String();
 }
 
 void MainComponent::applyMixers()
@@ -3430,10 +3442,10 @@ void MainComponent::requestMidiLearn (int trackId, MidiMappingTarget target)
                            : target == MidiMappingTarget::TrackPan ? "Pan"
                            : target == MidiMappingTarget::TrackMute ? "Mute"
                            : target == MidiMappingTarget::TrackSolo ? "Solo"
-                           : target == MidiMappingTarget::MasterVolume ? "Volume Master"
+                           : target == MidiMappingTarget::MasterVolume ? "Master Volume"
                            : "Pan Master";
-    setProjectStatus (juce::String ("MIDI Learn: mova um controle para ") + controlName
-                      + " (CC; Mute/Solo tambem aceitam notas; Esc cancela).");
+    setProjectStatus (juce::String ("MIDI Learn: move a control to ") + controlName
+                      + " (CC; Mute/Solo also accept notes; Esc cancels).");
 }
 
 void MainComponent::clearMidiMapping (int trackId, MidiMappingTarget target)
@@ -3455,7 +3467,7 @@ void MainComponent::clearMidiMapping (int trackId, MidiMappingTarget target)
     lastMidiButtonValues.erase ({ trackId, static_cast<int> (target) });
     project.sendChangeMessage();
     arrangement.refreshMidiMappingInfo();
-    setProjectStatus ("Mapeamento MIDI removido.");
+    setProjectStatus ("MIDI mapping removed.");
 }
 
 void MainComponent::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
@@ -3489,7 +3501,7 @@ void MainComponent::handleIncomingMidiMessage (juce::MidiInput*, const juce::Mid
         if (alive != nullptr && alive->load())
             handleMidiMessageOnMessageThread (channel, messageType, number, value, noteOn);
     }))
-        juce::Logger::writeToLog ("MainComponent: nao foi possivel enfileirar uma mensagem MIDI.");
+        juce::Logger::writeToLog ("MainComponent: Could not queue a MIDI message.");
 }
 
 void MainComponent::handleMidiMessageOnMessageThread (int channel, MidiMappingMessageType messageType,
@@ -3509,7 +3521,7 @@ void MainComponent::handleMidiMessageOnMessageThread (int channel, MidiMappingMe
                 || (! masterTarget && project.track (pending.trackId) == nullptr))
             {
                 pendingMidiLearn.reset();
-                setProjectStatus ("MIDI Learn cancelado: trilha removida.");
+                setProjectStatus ("MIDI Learn cancelled: track removed.");
                 return;
             }
 
@@ -3524,8 +3536,8 @@ void MainComponent::handleMidiMessageOnMessageThread (int channel, MidiMappingMe
             lastMidiButtonValues.erase ({ pending.trackId, static_cast<int> (pending.target) });
             project.sendChangeMessage();
             arrangement.refreshMidiMappingInfo();
-            setProjectStatus ("MIDI mapeado: canal " + juce::String (channel)
-                              + (messageType == MidiMappingMessageType::ControlChange ? " CC " : " nota ")
+            setProjectStatus ("MIDI mapped: channel " + juce::String (channel)
+                              + (messageType == MidiMappingMessageType::ControlChange ? " CC " : " note ")
                               + juce::String (number) + ".");
             return;
         }
@@ -3655,13 +3667,13 @@ void MainComponent::handlePluginParameterGesture (
 void MainComponent::showProjectMenu()
 {
     juce::PopupMenu menu;
-    menu.addItem (1, "Abrir projeto...");
-    menu.addItem (2, "Salvar", currentProjectFile.existsAsFile());
-    menu.addItem (3, "Salvar como...");
+    menu.addItem (1, "Open Project...");
+    menu.addItem (2, "Save", currentProjectFile.existsAsFile());
+    menu.addItem (3, "Save As...");
     menu.addSeparator();
-    menu.addItem (5, "Exportar Master como WAV...", ! audioRenderInProgress);
+    menu.addItem (5, "Export Master as WAV...", ! audioRenderInProgress);
     menu.addSeparator();
-    menu.addItem (6, "Preferencias... (Ctrl+,)");
+    menu.addItem (6, "Preferences... (Ctrl+,)");
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transport),
         [this] (int result)
         {
@@ -3746,7 +3758,7 @@ void MainComponent::chooseWavExportFile()
 {
     if (audioRenderInProgress || projectFileOperationInProgress)
     {
-        setProjectStatus ("Aguarde a operacao atual terminar antes de exportar.");
+        setProjectStatus ("Wait for the current operation to finish before exporting.");
         return;
     }
 
@@ -3755,7 +3767,7 @@ void MainComponent::chooseWavExportFile()
         : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
               .getChildFile ("MaXXXtudio.wav");
     audioExportChooser = std::make_unique<juce::FileChooser> (
-        "Exportar Master como WAV", suggestedFile, "*.wav");
+        "Export Master as WAV", suggestedFile, "*.wav");
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
     audioExportChooser->launchAsync (
         juce::FileBrowserComponent::saveMode
@@ -3780,10 +3792,10 @@ void MainComponent::showWavRenderOptions (const juce::File& file)
 {
     juce::Component::SafePointer<MainComponent> safeThis (this);
     AppModalDialog::showInput (
-        *this, "Exportar Master como WAV",
-        "Cauda apos o fim do Arrangement (segundos):", "2.0", "Segundos",
-        { { "Exportar", 1, AppModalDialog::ButtonStyle::Primary },
-          { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
+        *this, "Export Master as WAV",
+        "Tail after the end of the Arrangement (seconds):", "2.0", "Segundos",
+        { { "Export", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Cancel", 0, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, file] (int result, juce::String tailText)
         {
             if (safeThis == nullptr || result != 1)
@@ -3795,7 +3807,7 @@ void MainComponent::showWavRenderOptions (const juce::File& file)
             const double tailSeconds = tailText.getDoubleValue();
             if (! hasDigit || ! std::isfinite (tailSeconds) || tailSeconds < 0.0 || tailSeconds > 60.0)
             {
-                safeThis->setProjectStatus ("A cauda deve ser um valor entre 0 e 60 segundos.");
+                safeThis->setProjectStatus ("The tail must be between 0 and 60 seconds.");
                 return;
             }
 
@@ -3809,7 +3821,7 @@ void MainComponent::startWavRender (const juce::File& file, double tailSeconds)
         || ! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
         || pendingAudioLoads > 0 || scanningPlugins)
     {
-        setProjectStatus ("Aguarde os carregamentos e operacoes atuais antes de exportar.");
+        setProjectStatus ("Wait for current loads and operations to finish before exporting.");
         return;
     }
 
@@ -3833,7 +3845,7 @@ void MainComponent::startWavRender (const juce::File& file, double tailSeconds)
     const double bpm = engine.graph().getBpm();
     if (endBeat <= 0.0 || ! std::isfinite (bpm) || bpm <= 0.0)
     {
-        setProjectStatus ("O projeto nao possui audio ou clipes para exportar.");
+        setProjectStatus ("The project has no audio or clips to export.");
         return;
     }
 
@@ -3841,7 +3853,7 @@ void MainComponent::startWavRender (const juce::File& file, double tailSeconds)
     juce::String error;
     if (! engine.beginOfflineRender (error))
     {
-        setProjectStatus ("Nao foi possivel iniciar a exportacao: " + error);
+        setProjectStatus ("Could not start export: " + error);
         return;
     }
 
@@ -3873,11 +3885,11 @@ void MainComponent::startWavRender (const juce::File& file, double tailSeconds)
             task->end();
 
             if (cancelled->load (std::memory_order_acquire))
-                setProjectStatus ("Exportacao de audio cancelada.");
+                setProjectStatus ("Audio export cancelled.");
             else if (result.failed())
-                setProjectStatus ("Falha ao exportar WAV: " + result.getErrorMessage());
+                setProjectStatus ("WAV export failed: " + result.getErrorMessage());
             else
-                setProjectStatus ("Master exportado: " + file.getFullPathName());
+                setProjectStatus ("Master exported: " + file.getFullPathName());
         });
     });
 }
@@ -3922,8 +3934,8 @@ void MainComponent::offerRecoveryBeforeOpening (std::function<void()> continueSt
 
     const juce::Component::SafePointer<MainComponent> safeThis (this);
     AppModalDialog::show (
-        *this, "Sessao de recuperacao encontrada",
-        "O MaXXXtudio encontrou uma copia automatica recente. Deseja recupera-la?",
+        *this, "Recovery Session Found",
+        "MaXXXtudio found a recent automatic backup. Do you want to recover it?",
         AppModalDialog::Icon::Question,
         { { "Recuperar", 1, AppModalDialog::ButtonStyle::Primary },
           { "Descartar", 2, AppModalDialog::ButtonStyle::Secondary } },
@@ -3950,18 +3962,18 @@ void MainComponent::requestClose (std::function<void()> onCloseApproved)
 {
     if (recoverySaveInProgress)
     {
-        setProjectStatus ("Aguarde a copia de recuperacao terminar antes de fechar.");
+        setProjectStatus ("Wait for the recovery copy to finish before closing.");
         return;
     }
 
     const juce::Component::SafePointer<MainComponent> safeThis (this);
     AppModalDialog::show (
-        *this, "Salvar projeto?",
-        "Deseja salvar o projeto antes de fechar?",
+        *this, "Save Project?",
+        "Do you want to save the project before closing?",
         AppModalDialog::Icon::Question,
-        { { "Salvar", 1, AppModalDialog::ButtonStyle::Primary },
-          { "Nao salvar", 2, AppModalDialog::ButtonStyle::Secondary },
-          { "Cancelar", 3, AppModalDialog::ButtonStyle::Tertiary } },
+        { { "Save", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Don't Save", 2, AppModalDialog::ButtonStyle::Secondary },
+          { "Cancel", 3, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, onCloseApproved = std::move (onCloseApproved)] (int result) mutable
         {
             if (safeThis == nullptr)
@@ -3995,7 +4007,7 @@ void MainComponent::chooseProjectFile (bool open, std::function<void (bool)> onS
     const auto start = currentProjectFile.existsAsFile()
         ? currentProjectFile : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
     projectFileChooser = std::make_unique<juce::FileChooser> (
-        open ? "Abrir projeto" : "Salvar projeto",
+        open ? "Open Project" : "Save Project",
         start, "*.std");
     const auto chooserFlags = open ? juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
                                    : juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles;
@@ -4028,7 +4040,7 @@ void MainComponent::saveProject (const juce::File& requestedFile, std::function<
     if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
         || pendingAudioLoads > 0 || projectFileOperationInProgress || audioRenderInProgress)
     {
-        setProjectStatus ("Aguarde o fim dos carregamentos antes de salvar.");
+        setProjectStatus ("Wait for loading to finish before saving.");
         if (onComplete)
             onComplete (false);
         return;
@@ -4040,7 +4052,7 @@ void MainComponent::saveProject (const juce::File& requestedFile, std::function<
 
     projectFileOperationInProgress = true;
     auto task = std::make_shared<TaskScope> (
-        taskRegistry, theme::ui ("Salvando projeto: ") + file.getFileName(), "global");
+        taskRegistry, theme::ui ("Saving project: ") + file.getFileName(), "global");
     auto snapshot = std::make_shared<ProjectFileData>();
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
     if (! juce::MessageManager::callAsync ([this, token, file, task, snapshot,
@@ -4077,7 +4089,7 @@ void MainComponent::saveProject (const juce::File& requestedFile, std::function<
                 projectFileOperationInProgress = false;
                 if (result.failed())
                 {
-                    setProjectStatus ("Falha ao salvar projeto: " + result.getErrorMessage());
+                    setProjectStatus ("Failed to save project: " + result.getErrorMessage());
                     if (onComplete)
                         onComplete (false);
                     return;
@@ -4085,20 +4097,20 @@ void MainComponent::saveProject (const juce::File& requestedFile, std::function<
 
                 currentProjectFile = file;
                 ProjectFile::clearRecoveryFiles (ProjectFile::recoveryDirectory());
-                setProjectStatus ("Projeto salvo: " + file.getFileName());
+                setProjectStatus ("Project saved: " + file.getFileName());
                 if (onComplete)
                     onComplete (true);
             }))
             {
-                juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado do salvamento.");
+                juce::Logger::writeToLog ("MainComponent: Could not publish the save result.");
             }
         });
     }))
     {
         task->end();
         projectFileOperationInProgress = false;
-        juce::Logger::writeToLog ("MainComponent: nao foi possivel iniciar o salvamento do projeto.");
-        setProjectStatus ("Falha ao iniciar o salvamento do projeto.");
+        juce::Logger::writeToLog ("MainComponent: Could not start saving the project.");
+        setProjectStatus ("Failed to start saving the project.");
         if (onComplete)
             onComplete (false);
     }
@@ -4137,13 +4149,13 @@ void MainComponent::saveRecoverySnapshot()
             projectFileOperationInProgress = false;
             if (result.failed())
             {
-                juce::Logger::writeToLog ("MainComponent: falha ao salvar copia de recuperacao: "
+                juce::Logger::writeToLog ("MainComponent: Failed to save recovery copy: "
                                           + result.getErrorMessage());
-                setProjectStatus ("Falha ao criar copia de recuperacao: " + result.getErrorMessage());
+                setProjectStatus ("Failed to create recovery copy: " + result.getErrorMessage());
             }
         }))
         {
-            juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado do autosave.");
+            juce::Logger::writeToLog ("MainComponent: Could not publish the autosave result.");
         }
     });
 }
@@ -4153,13 +4165,13 @@ void MainComponent::loadProject (const juce::File& file, bool recovering)
     if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
         || pendingAudioLoads > 0 || projectFileOperationInProgress || audioRenderInProgress)
     {
-        setProjectStatus ("Aguarde o fim dos carregamentos antes de abrir outro projeto.");
+        setProjectStatus ("Wait for loading to finish before opening another project.");
         return;
     }
 
     projectFileOperationInProgress = true;
     auto task = std::make_shared<TaskScope> (
-        taskRegistry, theme::ui ("Abrindo projeto: ") + file.getFileName(), "global", -1.0);
+        taskRegistry, theme::ui ("Opening project: ") + file.getFileName(), "global", -1.0);
     auto data = std::make_shared<ProjectFileData>();
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
     projectFilePool.addJob ([this, token, file, task, data, recovering]
@@ -4179,14 +4191,14 @@ void MainComponent::loadProject (const juce::File& file, bool recovering)
             {
                 task->end();
                 projectFileOperationInProgress = false;
-                setProjectStatus ("Falha ao abrir projeto: " + result.getErrorMessage());
+                setProjectStatus ("Failed to open project: " + result.getErrorMessage());
                 return;
             }
 
             applyLoadedProject (file, std::move (*data), task, recovering);
         }))
         {
-            juce::Logger::writeToLog ("MainComponent: nao foi possivel publicar o resultado da abertura.");
+            juce::Logger::writeToLog ("MainComponent: Could not publish the project open result.");
         }
     });
 }
@@ -4242,8 +4254,8 @@ void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData 
         ProjectFile::clearRecoveryFiles (ProjectFile::recoveryDirectory());
     pendingProjectPlugins = std::move (data.plugins);
     loadProjectAudio (data);
-    setProjectStatus (recovering ? "Sessao recuperada. Use Salvar como para guardar o projeto."
-                                 : "Projeto aberto: " + file.getFileName());
+    setProjectStatus (recovering ? "Session recovered. Use Save As to save the project."
+                                 : "Project opened: " + file.getFileName());
     if (scanningPlugins && ! pendingProjectPlugins.empty())
         waitingForProjectPluginScan = true;
     else
@@ -4288,9 +4300,9 @@ void MainComponent::restoreNextProjectPlugin()
     while (nextProjectPlugin < pendingProjectPlugins.size())
     {
         auto plugin = pendingProjectPlugins[nextProjectPlugin++];
-        if (plugin.identifier == AudioEngine::utilityPluginIdentifier)
+        if (AudioEngine::isNativeEffectIdentifier (plugin.identifier))
         {
-            const int deviceId = engine.addUtility (plugin.trackId);
+            const int deviceId = engine.addNativeEffect (plugin.trackId, plugin.identifier);
             if (deviceId <= 0)
                 ++missingProjectPlugins;
             else
@@ -4328,7 +4340,7 @@ void MainComponent::restoreNextProjectPlugin()
             if (deviceId <= 0)
             {
                 ++missingProjectPlugins;
-                setProjectStatus ("Nao foi possivel carregar o Drum Rack.");
+                setProjectStatus ("Could not load the Drum Rack.");
             }
             else
             {
@@ -4365,7 +4377,7 @@ void MainComponent::restoreNextProjectPlugin()
                 if (error.isNotEmpty() || deviceId <= 0)
                 {
                     ++missingProjectPlugins;
-                    setProjectStatus ("Nao foi possivel carregar " + plugin.identifier + ": " + error);
+                    setProjectStatus ("Could not load " + plugin.identifier + ": " + error);
                     ++projectLoadWorkDone;
                     advanceProjectLoadTask();
                     restoreNextProjectPlugin();
@@ -4396,8 +4408,8 @@ void MainComponent::restoreNextProjectPlugin()
     restoringProjectPlugins = false;
     refreshDeviceView();
     if (missingProjectPlugins > 0)
-        setProjectStatus ("Projeto aberto; " + juce::String (missingProjectPlugins)
-                          + " plugin(s) nao encontrados ou nao carregados.");
+        setProjectStatus ("Project opened; " + juce::String (missingProjectPlugins)
+                          + " plugin(s) not found or failed to load.");
     advanceProjectLoadTask();
 }
 
@@ -4412,7 +4424,7 @@ void MainComponent::loadProjectAudio (const ProjectFileData& data)
     if (paths.empty())
     {
         if (! data.missingAudioFiles.empty())
-            setProjectStatus ("Projeto aberto com arquivos de audio ausentes.");
+            setProjectStatus ("Project opened with missing audio files.");
         return;
     }
 
@@ -4435,7 +4447,7 @@ void MainComponent::loadProjectAudio (const ProjectFileData& data)
                 return;
             if (error.isNotEmpty() || data == nullptr)
             {
-                setProjectStatus ("Audio ausente ou invalido: " + juce::File (
+                setProjectStatus ("Missing or invalid audio: " + juce::File (
                     juce::String::fromUTF8 (path.c_str())).getFileName());
                 ++projectLoadWorkDone;
                 advanceProjectLoadTask();
@@ -4605,9 +4617,9 @@ juce::String MainComponent::applyGrooveToSelectedClip (const roll::GrooveTemplat
     auto* track = project.selectedTrack();
     auto* placement = project.selectedClip();
     if (! groove.isValid())
-        return "O arquivo de groove contem dados invalidos.";
+        return "The groove file contains invalid data.";
     if (track == nullptr || track->type != roll::TrackType::Midi || placement == nullptr)
-        return "Selecione um clip MIDI para aplicar o groove.";
+        return "Select a MIDI clip to apply the groove.";
 
     stopGroovePreview();
     project.beginEdit();
@@ -4615,7 +4627,7 @@ juce::String MainComponent::applyGrooveToSelectedClip (const roll::GrooveTemplat
     project.endEdit();
     project.notifyTrackNotes (track->id);
     project.sendChangeMessage();
-    return "Groove aplicado sem alterar as notas originais; use Desfazer para remove-lo.";
+    return "Groove applied without changing the original notes; use Undo to remove it.";
 }
 
 juce::String MainComponent::removeGrooveFromSelectedClip()
@@ -4623,9 +4635,9 @@ juce::String MainComponent::removeGrooveFromSelectedClip()
     auto* track = project.selectedTrack();
     auto* placement = project.selectedClip();
     if (track == nullptr || track->type != roll::TrackType::Midi || placement == nullptr)
-        return "Selecione um clip MIDI para remover o groove.";
+        return "Select a MIDI clip to remove the groove.";
     if (! placement->clip.groove())
-        return "O clip selecionado nao tem groove.";
+        return "The selected clip has no groove.";
 
     stopGroovePreview();
     project.beginEdit();
@@ -4633,7 +4645,7 @@ juce::String MainComponent::removeGrooveFromSelectedClip()
     project.endEdit();
     project.notifyTrackNotes (track->id);
     project.sendChangeMessage();
-    return "Groove removido do clip.";
+    return "Groove removed from the clip.";
 }
 
 void MainComponent::refreshAudioClipEditor()
@@ -4670,7 +4682,7 @@ void MainComponent::applyLength()
     if (! t->isFree (p->start, newLen, p->id))
     {
         lengthBox.setSelectedId (static_cast<int> (std::lround (p->clip.length() / 4.0)), juce::dontSendNotification);
-        return;                                           // bateria em outro clip: nao deixa
+        return;                                           // Drum rack is in another clip; do not allow this.
     }
     p->clip.setLength (newLen);
     project.growTo (p->end() + 64.0);
@@ -4795,7 +4807,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* src)
 {
     if (src == &model)
     {
-        gridLabel.setText (model.gridLabel() + (model.drawMode ? "   (desenho)" : ""), juce::dontSendNotification);
+        gridLabel.setText (model.gridLabel() + (model.drawMode ? "   (drawing)" : ""), juce::dontSendNotification);
         drawButton.setToggleState (model.drawMode, juce::dontSendNotification);
         snapButton.setToggleState (model.snap, juce::dontSendNotification);
         highlightButton.setToggleState (model.highlight, juce::dontSendNotification);
@@ -4821,7 +4833,7 @@ void MainComponent::changeListenerCallback (juce::ChangeBroadcaster* src)
         model.clipStartBeats = project.selectedClip() != nullptr ? project.selectedClip()->start : 0.0;
         if (auto* p = project.selectedClip())
             lengthBox.setSelectedId (static_cast<int> (std::lround (p->clip.length() / 4.0)), juce::dontSendNotification);
-        model.sendChangeMessage();                         // o clip pode ter mudado de tamanho
+        model.sendChangeMessage();                         // The clip may have changed size.
     }
 }
 
@@ -4853,7 +4865,7 @@ void MainComponent::timerCallback()
         else
             hi |= std::uint64_t { 1 } << (pitch - 64);
     }
-    if (lo != lastLo || hi != lastHi)                     // teclas acendem com as notas tocando
+    if (lo != lastLo || hi != lastHi)                     // Light up keys as notes play.
     {
         lastLo = lo; lastHi = hi;
         model.activeLo = lo; model.activeHi = hi;
@@ -4876,8 +4888,8 @@ void MainComponent::setComputerMidiKeyboardEnabled (bool enabled)
     }
     else
     {
-        showComputerMidiStatus ("Teclado MIDI ativo",
-            "Vel " + juce::String (computerMidiVelocity) + " | Oitava "
+        showComputerMidiStatus ("Computer MIDI Keyboard Active",
+            "Vel " + juce::String (computerMidiVelocity) + " | Octave "
                 + (computerMidiOctaveOffset > 0 ? "+" : "") + juce::String (computerMidiOctaveOffset),
             false);
     }
@@ -4898,7 +4910,7 @@ void MainComponent::releaseComputerMidiNotes()
 
 void MainComponent::updateComputerMidiKeyboard()
 {
-    // O timer cobre tambem teclas focadas em outros paineis; keyStateChanged reduz a latencia.
+    // The timer also covers keys focused in other panels; keyStateChanged reduces latency.
     const auto modifiers = juce::ModifierKeys::getCurrentModifiers();
     const bool hasShortcutModifier = modifiers.isCtrlDown() || modifiers.isCommandDown()
                                   || modifiers.isAltDown() || modifiers.isShiftDown();
@@ -4933,7 +4945,7 @@ void MainComponent::updateComputerMidiKeyboard()
 
     const bool acceptKeys = computerMidiKeyboardEnabled && appForeground && ! audioRenderInProgress
                          && ! textInputFocused && ! hasShortcutModifier;
-    // Z/X mudam a oitava e C/V ajustam a velocity em passos de 20.
+    // Z/X change the octave, and C/V adjust velocity in steps of 20.
     const std::array<int, 4> controlKeys { 'Z', 'X', 'C', 'V' };
     bool statusChanged = false;
     bool noteChanged = false;
@@ -4997,9 +5009,9 @@ void MainComponent::updateComputerMidiKeyboard()
                 activeNotes.add (midiNoteName (computerMidiKeyPitch[i]));
 
         const auto primary = activeNotes.isEmpty()
-            ? (noteChanged ? "Soltou " + lastComputerMidiNote : "Teclado MIDI")
+            ? (noteChanged ? "Soltou " + lastComputerMidiNote : "Computer MIDI Keyboard")
             : activeNotes.joinIntoString (" + ");
-        const auto details = "Vel " + juce::String (computerMidiVelocity) + " | Oitava "
+        const auto details = "Vel " + juce::String (computerMidiVelocity) + " | Octave "
                            + (computerMidiOctaveOffset > 0 ? "+" : "")
                            + juce::String (computerMidiOctaveOffset);
         showComputerMidiStatus (primary, details, ! activeNotes.isEmpty());
@@ -5040,8 +5052,8 @@ void MainComponent::startSimulatedTask()
     auto* registry = &taskRegistry;
     taskSimulationThread = std::jthread ([registry, cancelled] (std::stop_token stopToken)
     {
-        // A tarefa simulada roda fora da UI e publica apenas progresso no registry.
-        TaskScope task (*registry, theme::ui ("Tarefa simulada"), "global", 0.0, true,
+        // The simulated task runs outside the UI and only publishes progress to the registry.
+        TaskScope task (*registry, theme::ui ("Simulated Task"), "global", 0.0, true,
                         [cancelled] { cancelled->store (true, std::memory_order_relaxed); });
         constexpr int steps = 30;
         for (int step = 1; step <= steps; ++step)
@@ -5064,7 +5076,7 @@ void MainComponent::duplicateSelectedTrack (int trackId)
     if (trackDuplicationInProgress || scanningPlugins || restoringProjectPlugins
         || projectFileOperationInProgress || audioRenderInProgress || pendingAudioLoads > 0)
     {
-        setProjectStatus ("Aguarde a operacao em andamento antes de duplicar a faixa.");
+        setProjectStatus ("Wait for the current operation to finish before duplicating the track.");
         return;
     }
 
@@ -5081,7 +5093,7 @@ void MainComponent::duplicateSelectedTrack (int trackId)
     if (pluginStates.empty())
     {
         project.endEdit();
-        setProjectStatus ("Faixa duplicada.");
+        setProjectStatus ("Track duplicated.");
         return;
     }
 
@@ -5099,7 +5111,7 @@ void MainComponent::duplicateSelectedTrack (int trackId)
     operation->targetTrackId = duplicateId;
     operation->plugins = std::move (pluginStates);
     operation->task = std::make_shared<TaskScope> (
-        taskRegistry, theme::ui ("Copiando dispositivos da faixa"), "track:" + juce::String (duplicateId), 0.0);
+        taskRegistry, theme::ui ("Copying track devices"), "track:" + juce::String (duplicateId), 0.0);
     trackDuplicationInProgress = true;
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
 
@@ -5113,7 +5125,7 @@ void MainComponent::duplicateSelectedTrack (int trackId)
             trackDuplicationInProgress = false;
             operation->task->end();
             project.endEdit();
-            setProjectStatus ("A faixa duplicada foi removida antes da copia dos dispositivos.");
+            setProjectStatus ("The duplicated track was removed before its devices could be copied.");
             return;
         }
         if (index >= operation->plugins.size())
@@ -5131,16 +5143,16 @@ void MainComponent::duplicateSelectedTrack (int trackId)
             refreshDeviceView();
             project.sendChangeMessage();
             setProjectStatus (operation->failures == 0
-                ? "Faixa e dispositivos duplicados."
-                : "Faixa duplicada; " + juce::String (operation->failures)
-                    + " dispositivo(s) nao puderam ser copiados.");
+                ? "Track and devices duplicated."
+                : "Track duplicated; " + juce::String (operation->failures)
+                    + " device(s) could not be copied.");
             return;
         }
 
         const auto state = operation->plugins[index];
-        if (state.identifier == AudioEngine::utilityPluginIdentifier)
+        if (AudioEngine::isNativeEffectIdentifier (state.identifier))
         {
-            const int deviceId = engine.addUtility (operation->targetTrackId);
+            const int deviceId = engine.addNativeEffect (operation->targetTrackId, state.identifier);
             if (deviceId <= 0)
                 ++operation->failures;
             else
@@ -5214,24 +5226,27 @@ void MainComponent::duplicateSelectedTrack (int trackId)
     copyNextPlugin (copyNextPlugin, 0);
 }
 
-juce::String MainComponent::addNativeEffectToTrack (int trackId)
+juce::String MainComponent::addNativeEffectToTrack (
+    int trackId, const juce::String& identifier, int insertionIndex)
 {
     if (project.track (trackId) == nullptr)
-        return "Trilha inexistente.";
+        return "Track does not exist.";
 
+    const juce::String effectName = identifier == AudioEngine::compMasterPluginIdentifier ? "Comp Master"
+        : identifier == AudioEngine::eqMasterPluginIdentifier ? "EQ Master" : "Master Volume";
     const auto existing = engine.devices (trackId);
-    if (std::any_of (existing.begin(), existing.end(), [] (const DeviceInfo& device)
+    if (std::any_of (existing.begin(), existing.end(), [&identifier] (const DeviceInfo& device)
         {
-            return device.pluginIdentifier == AudioEngine::utilityPluginIdentifier;
+            return device.pluginIdentifier == identifier;
         }))
-        return "O Volume Master ja esta neste canal.";
+        return effectName + " is already on this channel.";
 
     project.beginExternalEdit();
-    const int deviceId = engine.addUtility (trackId);
+    const int deviceId = engine.addNativeEffect (trackId, identifier, insertionIndex);
     if (deviceId <= 0)
     {
         project.cancelEdit();
-        return "Nao foi possivel adicionar o Volume Master a esta trilha.";
+        return "Could not add " + effectName + " to this track.";
     }
 
     project.endEdit();
@@ -5240,7 +5255,7 @@ juce::String MainComponent::addNativeEffectToTrack (int trackId)
     refreshDeviceView();
     project.sendChangeMessage();
     openDeviceEditor (trackId, deviceId);
-    return "Volume Master added to the selected track.";
+    return effectName + " added to the selected track.";
 }
 
 void MainComponent::addNativeDrumRackToTrack (int trackId)
@@ -5248,7 +5263,7 @@ void MainComponent::addNativeDrumRackToTrack (int trackId)
     const auto* track = project.track (trackId);
     if (track == nullptr || track->type != roll::TrackType::Midi)
     {
-        browser.setStatus ("O Drum Rack so pode ser adicionado a um canal MIDI.");
+        browser.setStatus ("The Drum Rack can only be added to a MIDI channel.");
         return;
     }
 
@@ -5278,7 +5293,7 @@ void MainComponent::addNativeDrumRackToTrack (int trackId)
     if (deviceId <= 0)
     {
         project.cancelEdit();
-        browser.setStatus ("Nao foi possivel adicionar o Drum Rack a este canal.");
+        browser.setStatus ("Could not add the Drum Rack to this channel.");
         return;
     }
 
@@ -5297,8 +5312,8 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
     const int trackId = t->id;
     if (! engine.canAcceptPlugin (trackId, desc))
     {
-        browser.setStatus (trackId == 0 ? theme::ui ("A trilha Master aceita apenas efeitos.")
-                                        : theme::ui ("Canais de audio aceitam apenas efeitos."));
+        browser.setStatus (trackId == 0 ? theme::ui ("The Master track only accepts effects.")
+                                        : theme::ui ("Audio channels only accept effects."));
         return;
     }
 
@@ -5311,12 +5326,12 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
             });
         existing != existingDevices.end())
     {
-        browser.setStatus (theme::ui ("Este plugin ja esta carregado nesta trilha."));
+        browser.setStatus (theme::ui ("This plugin is already loaded on this track."));
         openDeviceEditor (trackId, existing->id);
         return;
     }
 
-    if (desc.isInstrument)                                // o instrumento atual sera substituido: fecha a UI dele
+    if (desc.isInstrument)                                // The current instrument will be replaced; close its UI.
         for (const auto& d : existingDevices)
             if (d.isInstrument)
             {
@@ -5337,8 +5352,8 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
     const auto target = "track:" + juce::String (trackId) + ":plugin:" + juce::String (pluginSlot);
     // Keep the scope alive in the async callback so every success/error path ends the task.
     auto pluginTask = std::make_shared<TaskScope> (
-        taskRegistry, theme::ui ("Carregando ") + desc.name, target);
-    browser.setStatus ("Carregando " + desc.name + "...");
+        taskRegistry, theme::ui ("Loading ") + desc.name, target);
+    browser.setStatus ("Loading " + desc.name + "...");
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
     project.beginExternalEdit();
     engine.addDevice (trackId, desc,
@@ -5351,17 +5366,17 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
         if (error.isNotEmpty())
         {
             project.cancelEdit();
-            browser.setStatus ("Erro: " + error);
+            browser.setStatus ("Error: " + error);
             return;
         }
         if (deviceId <= 0)
         {
             project.cancelEdit();
-            browser.setStatus ("O plugin nao foi adicionado.");
+            browser.setStatus ("The plugin was not added.");
             return;
         }
         project.endEdit();
-        browser.setStatus (juce::String (scanner.list().getNumTypes()) + " plugins encontrados");
+        browser.setStatus (juce::String (scanner.list().getNumTypes()) + " plugins found");
         refreshDeviceView();
         project.sendChangeMessage();
         openDeviceEditor (trackId, deviceId);
@@ -5376,17 +5391,17 @@ void MainComponent::updateActionIndicator()
     if (pendingAudioLoads > 0)
     {
         const auto text = pendingAudioLoads == 1
-            ? "Carregando audio..."
-            : "Carregando " + juce::String (pendingAudioLoads) + " arquivos de audio...";
+            ? "Loading audio..."
+            : "Loading " + juce::String (pendingAudioLoads) + " audio files...";
         actionIndicator->showMessage (text, icons::Icon::Waveform, true);
     }
     else if (pendingPreviewLoads > 0)
     {
-        actionIndicator->showMessage ("Carregando preview de audio...", icons::Icon::Waveform, true);
+        actionIndicator->showMessage ("Loading audio preview...", icons::Icon::Waveform, true);
     }
     else if (restoringProjectPlugins)
     {
-        actionIndicator->showMessage ("Restaurando plugins do projeto...", icons::Icon::Mixer, true);
+        actionIndicator->showMessage ("Restoring project plugins...", icons::Icon::Mixer, true);
     }
     else
     {
@@ -5396,6 +5411,14 @@ void MainComponent::updateActionIndicator()
 
 void MainComponent::openDeviceEditor (int trackId, int deviceId)
 {
+    std::vector<std::pair<int, juce::String>> sidechainSources { { -1, "Internal" } };
+    if (trackId != 0 && engine.canUseCompMasterSidechainSource (trackId, 0))
+        sidechainSources.emplace_back (0, "Master");
+    for (const auto& track : project.tracks)
+        if (engine.canUseCompMasterSidechainSource (trackId, track->id))
+            sidechainSources.emplace_back (track->id, juce::String (track->name));
+    engine.setCompMasterSidechainSources (trackId, deviceId, std::move (sidechainSources));
+
     const auto editorPosition = nextPluginWindowPosition();
     const auto isolatedResult = engine.showIsolatedDeviceEditor (
         trackId, deviceId, editorPosition.x, editorPosition.y);
@@ -5406,12 +5429,12 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
     }
     if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
     {
-        browser.setStatus ("Este plugin nao possui uma interface grafica.");
+        browser.setStatus ("This plugin has no graphical interface.");
         return;
     }
     if (isolatedResult == AudioEngine::IsolatedEditorResult::failed)
     {
-        browser.setStatus ("O processo isolado deste plugin foi encerrado.");
+        browser.setStatus ("This plugin's isolated process has stopped.");
         return;
     }
 
@@ -5445,7 +5468,7 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 if (description == nullptr || description->isInstrument)
                 {
                     AppModalDialog::show (
-                        *this, "Efeito do pad", "Arraste um plugin de efeito de audio para o pad.",
+                        *this, "Pad Effect", "Drag an audio effect plugin onto the pad.",
                         AppModalDialog::Icon::Warning,
                         { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
@@ -5461,13 +5484,13 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                         if (error.isNotEmpty())
                         {
                             AppModalDialog::show (
-                                *this, "Efeito do pad", error, AppModalDialog::Icon::Warning,
+                                *this, "Pad Effect", error, AppModalDialog::Icon::Warning,
                                 { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                             return;
                         }
                         if (safeEditor != nullptr)
                             safeEditor->refreshPadEffects (true);
-                        browser.setStatus ("Efeito " + effectName + " adicionado ao pad.");
+                        browser.setStatus ("Effect " + effectName + " added to the pad.");
                     });
             };
             drumRackEditor->onPadEffectEditorRequested = [this, token, trackId, deviceId]
@@ -5487,7 +5510,7 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::noEditor)
                 {
                     AppModalDialog::show (
-                        *this, "Efeito do pad", "Este efeito nao possui uma interface grafica.",
+                        *this, "Pad Effect", "This effect has no graphical interface.",
                         AppModalDialog::Icon::Question,
                         { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
@@ -5495,7 +5518,7 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 if (isolatedResult == AudioEngine::IsolatedEditorResult::failed)
                 {
                     AppModalDialog::show (
-                        *this, "Efeito do pad", "O processo isolado deste efeito foi encerrado.",
+                        *this, "Pad Effect", "The isolated process for this effect has stopped.",
                         AppModalDialog::Icon::Error,
                         { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
@@ -5515,13 +5538,13 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
                 if (editor == nullptr)
                 {
                     AppModalDialog::show (
-                        *this, "Efeito do pad", "Este efeito nao possui uma interface grafica.",
+                        *this, "Pad Effect", "This effect has no graphical interface.",
                         AppModalDialog::Icon::Question,
                         { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                     return;
                 }
 
-                juce::String title = "Efeito do pad " + juce::String (pad + 1);
+                juce::String title = "Pad Effect " + juce::String (pad + 1);
                 if (const auto* track = project.track (trackId))
                     title = juce::String (track->name) + " - " + title;
                 const auto& displays = juce::Desktop::getInstance().getDisplays();
@@ -5617,7 +5640,7 @@ void MainComponent::openDeviceEditor (int trackId, int deviceId)
         for (const auto& device : engine.devices (trackId))
             if (device.id == deviceId) { pluginName = device.name; break; }
 
-        browser.setStatus ("Falha ao abrir interface de " + (pluginName.isNotEmpty() ? pluginName : "plugin") + ".");
+        browser.setStatus ("Failed to open the interface for " + (pluginName.isNotEmpty() ? pluginName : "plugin") + ".");
     }
 }
 

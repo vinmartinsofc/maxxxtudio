@@ -9,7 +9,7 @@
 
 namespace roll
 {
-// Arredonda 'beats' para a grade mais proxima (gridBeats = 0.25 -> 1/16).
+// Rounds 'beats' to the nearest grid point (gridBeats = 0.25 -> 1/16).
 double snapToGrid(double beats, double gridBeats);
 
 struct PianoRollLocator
@@ -88,20 +88,20 @@ public:
             ? id : -1;
     }
 
-    int  addNote(Note n);                       // atribui e retorna o id
+    int  addNote(Note n);                       // Assigns and returns the ID.
     bool removeNote(int id);
     Note*       find(int id);
     const Note* find(int id) const;
-    int  noteAt(int pitch, double beat) const;  // id, ou -1 se nao houver
+    int  noteAt(int pitch, double beat) const;  // ID, or -1 if not found.
 
     const std::vector<Note>& notes() const { return notesVec; }
     std::vector<Note>&       notes()       { return notesVec; }
 
-    // Nota nova sobre outra do mesmo pitch: a nota coberta pelo inicio some,
-    // a coberta pela cauda e encurtada ate o inicio da nova. 'ids' = notas recem movidas/criadas.
+    // When a new note overlaps another at the same pitch, the covered note disappears,
+    // A note covered at its tail is shortened to the start of the new note. 'ids' = recently moved/created notes.
     void resolveOverlaps (const std::vector<int>& ids);
 
-    // Substitui todas as notas (desfazer/refazer). Ids sao preservados.
+    // Replaces all notes (undo/redo). IDs are preserved.
     void setNotes(std::vector<Note> newNotes);
 
 private:

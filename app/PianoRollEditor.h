@@ -6,7 +6,7 @@
 #include <map>
 #include <utility>
 
-// Grade de notas: desenha o clip e trata mouse/teclado de edicao.
+// Note grid: draws the clip and handles editing input.
 class NoteGrid : public juce::Component
 {
 public:
@@ -48,10 +48,10 @@ private:
 
     Drag   drag = Drag::None;
     bool   editBegun = false;
-    bool   copied = false;                    // Ctrl+arrastar: copias ja deixadas para tras
+    bool   copied = false;                    // Ctrl+drag: copies have already been placed.
     int    primaryId = -1;
     double downBeat = 0.0;
-    std::map<int, roll::Note> original;       // notas selecionadas no inicio do gesto
+    std::map<int, roll::Note> original;       // Notes selected at the start of the gesture.
     juce::Point<float> rubberStart;
     juce::Rectangle<float> rubberRect;
     std::set<int> baseSelection;
@@ -59,13 +59,13 @@ private:
     int previewPitch = -1;
 };
 
-// Coluna de teclas a esquerda (clique para pre-escutar).
+// Keyboard column on the left (click to preview).
 class KeyColumn : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit KeyColumn (RollModel& m) : model (m)
     {
-        setTooltip ("Na regua de notas: arraste verticalmente para rolar e horizontalmente para ajustar a altura das notas.");
+        setTooltip ("On the note ruler: drag vertically to scroll and horizontally to adjust note height.");
     }
 
     std::function<void (int screenY)> onZoomStart;
@@ -90,13 +90,13 @@ private:
 class PianoRollEditor;
 class SyncViewport;
 
-// Regua com compassos/beats e a faixa do clip. Clique reposiciona o playhead.
+// Ruler with bars/beats and the clip range. Click to reposition the playhead.
 class RulerBar : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit RulerBar (RollModel& m) : model (m)
     {
-        setTooltip ("Clique para reproduzir a partir deste ponto.");
+        setTooltip ("Click to play from this position.");
     }
     std::function<void (double)> onSeek;
     std::function<void (int)> onLocatorSelected;
@@ -135,7 +135,7 @@ class PianoRollOverview : public juce::Component, public juce::SettableTooltipCl
 public:
     PianoRollOverview (RollModel& m, SyncViewport& v) : model (m), viewport (v)
     {
-        setTooltip ("Arraste para navegar e ajustar o zoom. Duplo clique para enquadrar o clip.");
+        setTooltip ("Drag to scroll and zoom. Double-click to fit the clip.");
     }
 
     std::function<void (double, double, int)> onZoomAt;
@@ -160,7 +160,7 @@ private:
     bool dragging = false, hovered = false, speakerHovered = false;
 };
 
-// Faixa de velocity: uma barra por nota; arraste para mudar.
+// Velocity lane: one bar per note; drag to change the value.
 class VelocityLane : public juce::Component
 {
 public:
@@ -188,7 +188,7 @@ public:
     }
 };
 
-// Piano roll completo: regua + teclas + grade rolavel + velocity.
+// Full piano roll: ruler + keys + scrollable grid + velocity.
 class PianoRollEditor : public juce::Component, private juce::ChangeListener
 {
 public:
@@ -239,7 +239,7 @@ private:
     Holder keyHolder, rulerHolder, velocityHolder;
     bool scrolledOnce = false;
     bool fitToClip = true;
-    int  lastCenterPitch = 60;      // mantem a posicao vertical ao ligar/desligar o fold
+    int  lastCenterPitch = 60;      // Preserve the vertical position when toggling fold.
     int noteRulerStartRowHeight = 16, noteRulerStartViewY = 0;
     int noteRulerAnchorPitch = 60, noteRulerAnchorScreenY = 0;
 };

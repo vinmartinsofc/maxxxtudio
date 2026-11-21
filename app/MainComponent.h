@@ -57,7 +57,9 @@ private:
     void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
     void addNativeDrumRackToTrack (int trackId);
-    juce::String addNativeEffectToTrack (int trackId);
+    juce::String addNativeEffectToTrack (
+        int trackId, const juce::String& identifier = AudioEngine::utilityPluginIdentifier,
+        int insertionIndex = -1);
     void duplicateSelectedTrack (int trackId);
     void openDeviceEditor (int trackId, int deviceId);
     void updateActionIndicator();
@@ -158,11 +160,11 @@ private:
     AudioClipEditor audioClipEditor;
     DeviceView deviceView { taskRegistry };
 
-    // painel do clip
-    juce::TextButton clipTab { "Clip" }, deviceTab { "Dispositivos" };
-    juce::Label scaleCaption { {}, "Escala" }, lengthCaption { {}, "Tamanho" }, gridCaption { {}, "Grade" }, zoomCaption { {}, "Zoom" };
+    // Clip panel.
+    juce::TextButton clipTab { "Clip" }, deviceTab { "Devices" };
+    juce::Label scaleCaption { {}, "Scale" }, lengthCaption { {}, "Size" }, gridCaption { {}, "Grid" }, zoomCaption { {}, "Zoom" };
     juce::ComboBox rootBox, modeBox, lengthBox;
-    juce::TextButton scaleButton { "Scale" }, highlightButton { "Destacar (K)" }, foldButton { "Fold" }, foldScaleButton { "Fold escala" },
+    juce::TextButton scaleButton { "Scale" }, highlightButton { "Highlight (K)" }, foldButton { "Fold" }, foldScaleButton { "Scale Fold" },
                      drawButton { "Draw (B)" }, snapButton { "Snap" }, previewButton { "Preview" },
                      groovesButton { "Grooves..." },
                      zoomHMinus { "H -" }, zoomHPlus { "H +" }, zoomVMinus { "V -" }, zoomVPlus { "V +" };

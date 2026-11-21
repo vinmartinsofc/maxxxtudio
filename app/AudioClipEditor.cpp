@@ -35,7 +35,7 @@ AudioClipEditor::AudioClipEditor()
     sourceBpm.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     sourceBpm.setTextBoxStyle (juce::Slider::TextBoxLeft, false, 74, 24);
     sourceBpm.setName ("BPM");
-    sourceBpm.setTooltip ("BPM da origem: digite o valor no campo ou ajuste pelo knob.");
+    sourceBpm.setTooltip ("Source BPM: enter a value in the field or adjust it with the knob.");
     sourceBpm.textFromValueFunction = [] (double value)
     {
         return juce::String (value, 1) + " BPM";
@@ -54,8 +54,8 @@ AudioClipEditor::AudioClipEditor()
     reverseButton.setMouseClickGrabsKeyboardFocus (false);
     doubleBpmButton.setMouseClickGrabsKeyboardFocus (false);
     halveBpmButton.setMouseClickGrabsKeyboardFocus (false);
-    doubleBpmButton.setTooltip ("Dobrar o BPM original");
-    halveBpmButton.setTooltip ("Dividir o BPM original por dois");
+    doubleBpmButton.setTooltip ("Double the original BPM");
+    halveBpmButton.setTooltip ("Halve the original BPM");
     doubleBpmButton.onClick = [this]
     {
         if (clip == nullptr)
@@ -70,7 +70,7 @@ AudioClipEditor::AudioClipEditor()
         const double bpm = std::clamp (clip->sourceBpm * 0.5, 20.0, 300.0);
         sourceBpm.setValue (bpm, juce::sendNotification);
     };
-    warpButton.setTooltip ("Sincronizar este clip ao BPM do projeto; a velocidade altera a afinacao.");
+    warpButton.setTooltip ("Sync this clip to the project BPM; changing speed also changes pitch.");
     warpButton.onClick = [this]
     {
         if (clip != nullptr && onWarpChanged)
@@ -83,7 +83,7 @@ AudioClipEditor::AudioClipEditor()
     warpModeBox.addItem ("Complex", 5);
     warpModeBox.addItem ("Complex Pro", 6);
     warpModeBox.setSelectedId (1, juce::dontSendNotification);
-    warpModeBox.setTooltip ("Modo Warp do clip");
+    warpModeBox.setTooltip ("Clip Warp Mode");
     warpModeBox.onChange = [this]
     {
         applyPlaybackProperties();
@@ -91,13 +91,13 @@ AudioClipEditor::AudioClipEditor()
     pitchSlider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     pitchSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     pitchSlider.setRange (-24.0, 24.0, 1.0);
-    pitchSlider.setName ("Semitons");
+    pitchSlider.setName ("Semitones");
     pitchSlider.textFromValueFunction = [] (double value)
     {
         return (value > 0.0 ? juce::String ("+") : juce::String())
-             + juce::String (value, 0) + " semitons";
+             + juce::String (value, 0) + " semitones";
     };
-    pitchSlider.setTooltip ("Transposicao em semitons");
+    pitchSlider.setTooltip ("Transpose in semitones");
     pitchSlider.bipolar = true;
     centsSlider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     centsSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -108,7 +108,7 @@ AudioClipEditor::AudioClipEditor()
         return (value > 0.0 ? juce::String ("+") : juce::String())
              + juce::String (value, 0) + " cents";
     };
-    centsSlider.setTooltip ("Transposicao fina em cents");
+    centsSlider.setTooltip ("Fine transpose in cents");
     centsSlider.bipolar = true;
     gainSlider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
     gainSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
@@ -119,7 +119,7 @@ AudioClipEditor::AudioClipEditor()
         return (value > 0.0 ? juce::String ("+") : juce::String())
              + juce::String (value, 1) + " dB";
     };
-    gainSlider.setTooltip ("Gain do clip em dB");
+    gainSlider.setTooltip ("Clip Gain in dB");
     gainSlider.bipolar = true;
     for (auto* slider : std::initializer_list<juce::Slider*> {
              &pitchSlider, &centsSlider, &gainSlider })
@@ -163,7 +163,7 @@ AudioClipEditor::AudioClipEditor()
         if (onAutomationParameterChanged)
             onAutomationParameterChanged ("Gain", gainSlider.getValue());
     };
-    reverseButton.setTooltip ("Reproduzir o audio ao contrario");
+    reverseButton.setTooltip ("Play audio in reverse");
     reverseButton.onClick = [this] { applyPlaybackProperties(); };
     closeButton.onClick = [this] { if (onClose) onClose(); };
     sourceBpm.onValueChange = [this]
@@ -174,16 +174,16 @@ AudioClipEditor::AudioClipEditor()
         if (! onSourceBpmChanged (value))
         {
             sourceBpm.setValue (clip->sourceBpm, juce::dontSendNotification);
-            tempoInfo.setText ("BPM nao aplicado: os clips se sobrepoem.", juce::dontSendNotification);
+            tempoInfo.setText ("BPM not applied: the clips overlap.", juce::dontSendNotification);
         }
     };
-    splitButton.setTooltip ("Dividir o clip selecionado na posicao do playhead");
+    splitButton.setTooltip ("Split the selected clip at the playhead");
     splitButton.onClick = [this]
     {
         if (clip != nullptr && onSplitAtPlayhead)
             onSplitAtPlayhead();
     };
-    joinButton.setTooltip ("Unir este clip ao trecho adjacente criado por uma divisao");
+    joinButton.setTooltip ("Merge this clip with the adjacent segment created by splitting");
     joinButton.onClick = [this]
     {
         if (clip != nullptr && onJoinWithNext)
@@ -233,14 +233,14 @@ AudioClipEditor::AudioClipEditor()
         return juce::String (value, 2) + " beats";
     };
     fadeOut.textFromValueFunction = fadeIn.textFromValueFunction;
-    fadeIn.setTooltip ("Duracao do fade de entrada em beats");
-    fadeOut.setTooltip ("Duracao do fade de saida em beats");
+    fadeIn.setTooltip ("Fade-in duration in beats");
+    fadeOut.setTooltip ("Fade-out duration in beats");
     sourceBpm.setPopupDisplayEnabled (true, true, nullptr);
 
     fadeIn.onValueChange = [this]
     {
         if (onAutomationParameterChanged)
-            onAutomationParameterChanged ("Fade entrada", fadeIn.getValue());
+            onAutomationParameterChanged ("Fade In", fadeIn.getValue());
         if (clip == nullptr || ! onFadesChanged)
             return;
         if (! onFadesChanged (fadeIn.getValue(), fadeOut.getValue()))
@@ -249,7 +249,7 @@ AudioClipEditor::AudioClipEditor()
     fadeOut.onValueChange = [this]
     {
         if (onAutomationParameterChanged)
-            onAutomationParameterChanged ("Fade saida", fadeOut.getValue());
+            onAutomationParameterChanged ("Fade Out", fadeOut.getValue());
         if (clip == nullptr || ! onFadesChanged)
             return;
         if (! onFadesChanged (fadeIn.getValue(), fadeOut.getValue()))
@@ -289,7 +289,7 @@ void AudioClipEditor::setClip (const roll::AudioPlacement* selected,
         waveformViewStartBeat = std::clamp (
             waveformViewStartBeat, 0.0,
             std::max (0.0, selected->lengthBeats - selected->lengthBeats / waveformZoom));
-    fileName.setText (clip != nullptr ? juce::String (clip->name) : "Nenhum audio selecionado",
+    fileName.setText (clip != nullptr ? juce::String (clip->name) : "No audio selected",
                       juce::dontSendNotification);
     const double defaultBpm = source != nullptr && source->estimatedBpm > 0.0
         ? std::clamp (source->estimatedBpm, 20.0, 300.0)
@@ -326,7 +326,7 @@ void AudioClipEditor::setClip (const roll::AudioPlacement* selected,
     fadeIn.setValue (clip != nullptr ? clip->fadeInBeats : 0.0, juce::dontSendNotification);
     fadeOut.setValue (clip != nullptr ? clip->fadeOutBeats : 0.0, juce::dontSendNotification);
     tempoInfo.setText (clip != nullptr
-        ? "Projeto: " + juce::String (projectBpm, 1) + " BPM    |    Duracao: "
+        ? "Project: " + juce::String (projectBpm, 1) + " BPM    |    Duration: "
             + juce::String (clip->durationSeconds, 2) + " s"
         : juce::String(), juce::dontSendNotification);
     repaint();

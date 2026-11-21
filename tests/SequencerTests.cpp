@@ -9,7 +9,7 @@ namespace
 {
 struct Abs { long long sample; bool on; int pitch; };
 
-// Relogio + sequenciador em blocos de 512; devolve eventos com tempo absoluto em amostras.
+// Clock + sequencer in 512-sample blocks; returns events at absolute sample times.
 std::vector<Abs> run(Sequencer& s, TransportClock& clock, const std::vector<Note>& notes,
                      const TransportSettings& t, double sr, long long totalSamples, int block = 512)
 {

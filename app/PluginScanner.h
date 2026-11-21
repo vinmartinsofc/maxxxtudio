@@ -10,8 +10,8 @@
 class TaskRegistry;
 class TaskScope;
 
-// Detecta plugins nos formatos registrados e persiste a lista em disco.
-// O trabalho pesado roda em um worker, enquanto o progresso vai para o TaskRegistry.
+// Detects plugins in registered formats and persists the list to disk.
+// Heavy work runs in a worker while progress is reported to the TaskRegistry.
 class PluginScanner
 {
 public:

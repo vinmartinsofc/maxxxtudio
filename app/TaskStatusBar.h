@@ -20,6 +20,6 @@ private:
     TaskRegistry& registry;
     ActivityIndicator indicator;
     juce::Label label;
-    juce::TextButton cancelButton { "Cancelar" };
+    juce::TextButton cancelButton { "Cancel" };
     std::optional<TaskRegistry::Task> currentTask;
 };

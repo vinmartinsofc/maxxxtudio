@@ -40,14 +40,14 @@ public:
     TaskRegistry (const TaskRegistry&) = delete;
     TaskRegistry& operator= (const TaskRegistry&) = delete;
 
-    // begin/setProgress/end aceitam chamadas de workers; mutacoes e listeners ficam na message thread.
-    // O registry deve sobreviver a todos os workers que receberam uma referencia para ele.
+    // begin/setProgress/end accept calls from workers; mutations and listeners stay on the message thread.
+    // The registry must outlive every worker that received a reference to it.
     TaskId begin (juce::String label, juce::String target, double progress = -1.0,
                   bool cancelable = false, std::function<void()> cancel = {});
     void setProgress (TaskId, double progress);
     void end (TaskId);
 
-    // Cancelamento, consultas e registro de listeners sao exclusivos da message thread.
+    // Cancellation, queries, and listener registration are restricted to the message thread.
     bool cancel (TaskId);
 
     std::vector<Task> tasksForTarget (const juce::String& target) const;

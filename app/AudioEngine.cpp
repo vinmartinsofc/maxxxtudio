@@ -510,14 +510,14 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
     std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
     if (reader == nullptr)
     {
-        juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("Formato de audio nao suportado.", {}); });
+        juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("Unsupported audio format.", {}); });
         return;
     }
 
     if (reader->lengthInSamples <= 0 || reader->lengthInSamples > std::numeric_limits<int>::max()
         || reader->numChannels == 0 || reader->sampleRate <= 0.0)
     {
-        juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("Arquivo de audio vazio ou grande demais.", {}); });
+        juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("The audio file is empty or too large.", {}); });
         return;
     }
 
@@ -530,7 +530,7 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
     {
         juce::MessageManager::callAsync ([callback = std::move (callback)]
         {
-            callback ("Arquivo de audio excede o limite de 512 MB decodificados.", {});
+            callback ("The audio file exceeds the 512 MB decoded size limit.", {});
         });
         return;
     }
@@ -542,7 +542,7 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
     data->samples = std::make_shared<juce::AudioBuffer<float>> (numChannels, numSamples);
     if (! reader->read (data->samples.get(), 0, numSamples, 0, true, true))
     {
-        juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("Falha ao decodificar o arquivo de audio.", {}); });
+        juce::MessageManager::callAsync ([callback = std::move (callback)] { callback ("Failed to decode the audio file.", {}); });
         return;
     }
     data->estimatedBpm = AudioEngine::estimateAudioBpm (*data->samples, data->sampleRate);
@@ -1401,7 +1401,7 @@ void TrackMixer::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffe
     liveGainValue.store (targetGain.load(), std::memory_order_relaxed);
     livePanValue.store (pan, std::memory_order_relaxed);
     liveMuteValue.store (controlMute.load(), std::memory_order_relaxed);
-    peakLevel = std::max (peakNow, peakLevel.load() * 0.92f);       // queda suave para o medidor
+    peakLevel = std::max (peakNow, peakLevel.load() * 0.92f);       // Smooth decay for the meter.
     if (buffer.getNumChannels() == 1)
         peakRightNow = peakLeftNow;
     peakLeftLevel = std::max (peakLeftNow, peakLeftLevel.load() * 0.92f);
@@ -1673,7 +1673,7 @@ AudioEngine::AudioEngine()
     const auto savedSettings = settingsFile.existsAsFile()
         ? juce::XmlDocument::parse (settingsFile) : nullptr;
     if (settingsFile.existsAsFile() && savedSettings == nullptr)
-        juce::Logger::writeToLog ("AudioEngine: nao foi possivel ler as preferencias do dispositivo de audio.");
+        juce::Logger::writeToLog ("AudioEngine: Could not read audio device preferences.");
 
     const auto error = deviceManager.initialise (0, 2, savedSettings.get(), true);
     if (error.isNotEmpty())
@@ -1706,7 +1706,7 @@ void AudioEngine::saveAudioDeviceSettings()
         return;
 
     if (! state->writeTo (audioDeviceSettingsFile()))
-        juce::Logger::writeToLog ("AudioEngine: nao foi possivel salvar as preferencias do dispositivo de audio.");
+        juce::Logger::writeToLog ("AudioEngine: Could not save audio device preferences.");
 }
 
 AudioEngine::TrackNodes* AudioEngine::find (int trackId)
@@ -1766,6 +1766,7 @@ void AudioEngine::removeTrack (int trackId)
     seqGraph.removeNode (t->automationNode->nodeID);
     seqGraph.removeNode (t->mixer->nodeID);
     tracks.erase (trackId);
+    rewireSidechains();
 }
 
 void AudioEngine::clearConnectionsOf (juce::AudioProcessorGraph::NodeID id)
@@ -1815,6 +1816,7 @@ void AudioEngine::rewireMaster()
             previous = device.node;
     }
     connectAudioChannels (seqGraph, previous, m->mixer);
+    rewireSidechains();
 }
 
 // Cadeia: MIDI -> instrumento -> efeitos ou audio -> efeitos -> mixer -> Master / Ext. Out
@@ -1871,11 +1873,15 @@ void AudioEngine::rewire (TrackNodes& t)
                 previous = device.node;
         }
         connectAudioChannels (seqGraph, previous, t.mixer);
+        rewireSidechains();
         return;
     }
 
     if (t.devices.empty() || ! t.devices.front().instrument)
+    {
+        rewireSidechains();
         return;
+    }
 
     seqGraph.addConnection ({ { t.source->nodeID, midi }, { t.automationNode->nodeID, midi } });
     seqGraph.addConnection ({ { t.automationNode->nodeID, midi },
@@ -1892,6 +1898,168 @@ void AudioEngine::rewire (TrackNodes& t)
             previous = t.devices[i].node;
     }
     connectAudioChannels (seqGraph, previous, t.mixer);
+    rewireSidechains();
+}
+
+bool AudioEngine::canUseCompMasterSidechainSource (int trackId, int sourceTrackId) const
+{
+    const auto* destination = find (trackId);
+    if (destination == nullptr)
+        return false;
+    if (sourceTrackId < 0)
+        return true;
+
+    const auto* source = find (sourceTrackId);
+    if (source == nullptr || sourceTrackId == trackId)
+        return false;
+
+    auto* ancestor = destination;
+    while (ancestor != nullptr && ancestor->parentGroupId != 0)
+    {
+        if (ancestor->parentGroupId == sourceTrackId)
+            return false;
+        ancestor = find (ancestor->parentGroupId);
+    }
+
+    return true;
+}
+
+bool AudioEngine::setCompMasterSidechainSource (int trackId, int deviceId, int sourceTrackId)
+{
+    auto* track = find (trackId);
+    if (track == nullptr || ! canUseCompMasterSidechainSource (trackId, sourceTrackId))
+        return false;
+
+    for (auto& device : track->devices)
+        if (device.id == deviceId)
+            if (auto* compressor = dynamic_cast<CompMasterProcessor*> (
+                    device.node->getProcessor()))
+            {
+                compressor->setSidechainSourceTrackId (sourceTrackId, false);
+                rewireSidechains();
+                return true;
+            }
+    return false;
+}
+
+void AudioEngine::setCompMasterSidechainSources (
+    int trackId, int deviceId, std::vector<std::pair<int, juce::String>> sources)
+{
+    auto* track = find (trackId);
+    if (track == nullptr)
+        return;
+    for (auto& device : track->devices)
+        if (device.id == deviceId)
+            if (auto* compressor = dynamic_cast<CompMasterProcessor*> (
+                    device.node->getProcessor()))
+            {
+                std::vector<CompMasterProcessor::SidechainSource> available;
+                available.reserve (sources.size());
+                for (auto& source : sources)
+                    if (source.first < 0 || canUseCompMasterSidechainSource (trackId, source.first))
+                        available.push_back ({ source.first, std::move (source.second) });
+                compressor->setSidechainSources (std::move (available));
+                return;
+            }
+}
+
+void AudioEngine::rewireSidechains()
+{
+    struct Route
+    {
+        CompMasterProcessor* processor = nullptr;
+        juce::AudioProcessorGraph::Node::Ptr node;
+        int trackId = -1;
+    };
+    std::vector<Route> routes;
+    for (auto& [trackId, track] : tracks)
+        for (auto& device : track.devices)
+            if (auto* compressor = dynamic_cast<CompMasterProcessor*> (
+                    device.node->getProcessor()))
+            {
+                routes.push_back ({ compressor, device.node, trackId });
+                for (const auto& connection : seqGraph.getConnections())
+                    if (connection.destination.nodeID == device.node->nodeID
+                        && connection.destination.channelIndex >= 2)
+                        seqGraph.removeConnection (connection);
+            }
+
+    for (auto& route : routes)
+    {
+        const int sourceTrackId = route.processor->sidechainSourceTrackId();
+        if (sourceTrackId < 0)
+            continue;
+        auto* source = find (sourceTrackId);
+        if (source == nullptr
+            || ! canUseCompMasterSidechainSource (route.trackId, sourceTrackId))
+        {
+            route.processor->setSidechainSourceTrackId (-1, false);
+            continue;
+        }
+
+        std::vector<TrackNodes*> sources;
+        if (source->isMaster)
+        {
+            const auto containsDestination = [this, &route] (int groupId)
+            {
+                if (groupId == route.trackId)
+                    return true;
+                auto* destination = find (route.trackId);
+                while (destination != nullptr && destination->parentGroupId != 0)
+                {
+                    if (destination->parentGroupId == groupId)
+                        return true;
+                    destination = find (destination->parentGroupId);
+                }
+                return false;
+            };
+            const auto collectGroupChildren = [this, &route, &sources, &containsDestination] (
+                auto&& self, int groupId) -> void
+            {
+                for (auto& [childId, child] : tracks)
+                {
+                    if (child.parentGroupId != groupId || childId == route.trackId
+                        || childId == child.parentGroupId
+                        || child.routing == roll::TrackOutputRouting::ExtOut)
+                        continue;
+                    if (child.isGroup && containsDestination (childId))
+                        self (self, childId);
+                    else
+                        sources.push_back (&child);
+                }
+            };
+            for (auto& [candidateId, candidate] : tracks)
+            {
+                if (candidate.isMaster || candidate.parentGroupId != 0
+                    || candidate.routing == roll::TrackOutputRouting::ExtOut
+                    || candidateId == route.trackId)
+                    continue;
+                if (candidate.isGroup && containsDestination (candidateId))
+                    collectGroupChildren (collectGroupChildren, candidateId);
+                else
+                    sources.push_back (&candidate);
+            }
+        }
+        else
+            sources.push_back (source);
+
+        bool connected = true;
+        for (const auto* sidechainSource : sources)
+        {
+            connected = seqGraph.addConnection (
+                { { sidechainSource->mixer->nodeID, 0 }, { route.node->nodeID, 2 } }) && connected;
+            connected = seqGraph.addConnection (
+                { { sidechainSource->mixer->nodeID, 1 }, { route.node->nodeID, 3 } }) && connected;
+        }
+        if (! connected)
+        {
+            for (const auto& connection : seqGraph.getConnections())
+                if (connection.destination.nodeID == route.node->nodeID
+                    && connection.destination.channelIndex >= 2)
+                    seqGraph.removeConnection (connection);
+            route.processor->setSidechainSourceTrackId (-1, false);
+        }
+    }
 }
 
 void AudioEngine::publishNotes (int trackId, const std::vector<roll::Note>& notes)
@@ -2360,9 +2528,9 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
                              std::function<void (const juce::String&, int)> onDone, int insertionIndex)
 {
     auto* track = find (trackId);
-    if (track == nullptr) { onDone ("Trilha inexistente.", 0); return; }
-    if (track->isMaster && desc.isInstrument) { onDone ("A trilha Master aceita apenas efeitos.", 0); return; }
-    if (track->audioTrack && desc.isInstrument) { onDone ("Canais de audio aceitam apenas efeitos.", 0); return; }
+    if (track == nullptr) { onDone ("Track does not exist.", 0); return; }
+    if (track->isMaster && desc.isInstrument) { onDone ("The Master track only accepts effects.", 0); return; }
+    if (track->audioTrack && desc.isInstrument) { onDone ("Audio channels only accept effects.", 0); return; }
 
     const auto pluginIdentifier = desc.createIdentifierString();
     for (const auto& device : find (trackId)->devices)
@@ -2375,7 +2543,7 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
     const auto pendingKey = std::make_pair (trackId, pluginIdentifier.toStdString());
     if (! pendingPluginLoads.insert (pendingKey).second)
     {
-        onDone ("Este plugin ja esta sendo carregado nesta trilha.", 0);
+        onDone ("This plugin is already loading on this track.", 0);
         return;
     }
 
@@ -2400,7 +2568,7 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
             auto* t = find (trackId);
             if (*instance == nullptr || t == nullptr)
             {
-                onDone (loadError->isNotEmpty() ? *loadError : "Falha ao carregar o plugin.", 0);
+                onDone (loadError->isNotEmpty() ? *loadError : "Failed to load the plugin.", 0);
                 return;
             }
 
@@ -2419,13 +2587,13 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
             d.node = seqGraph.addNode (std::move (*instance));
             if (d.node == nullptr)
             {
-                onDone ("Nao foi possivel adicionar o plugin ao grafo de audio.", 0);
+                onDone ("Could not add the plugin to the audio graph.", 0);
                 return;
             }
 
             if (d.instrument)
             {
-                // um instrumento por trilha: o novo substitui o anterior
+                // One instrument per track: the new one replaces the previous one.
                 if (! t->devices.empty() && t->devices.front().instrument)
                 {
                     static_cast<TrackAutomationProcessor*> (t->automationProcessor)->clearBindings();
@@ -2451,7 +2619,7 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
             rewire (*t);
             onDone ({}, d.id);
         }))
-            juce::Logger::writeToLog ("AudioEngine: nao foi possivel publicar o resultado do carregamento do plugin.");
+            juce::Logger::writeToLog ("AudioEngine: Could not publish the plugin load result.");
     });
 }
 
@@ -2489,24 +2657,56 @@ int AudioEngine::addDrumRack (int trackId)
 
 int AudioEngine::addUtility (int trackId)
 {
+    return addNativeEffect (trackId, utilityPluginIdentifier);
+}
+
+int AudioEngine::addNativeEffect (int trackId, const juce::String& identifier, int insertionIndex)
+{
     auto* track = find (trackId);
-    if (track == nullptr)
+    if (track == nullptr || ! isNativeEffectIdentifier (identifier))
         return 0;
     for (const auto& device : track->devices)
-        if (device.pluginIdentifier == utilityPluginIdentifier)
+        if (device.pluginIdentifier == identifier)
             return device.id;
 
     Device device;
     device.id = nextDeviceId++;
-    device.name = "Volume Master";
-    device.pluginIdentifier = utilityPluginIdentifier;
+    device.pluginIdentifier = identifier;
     device.instrument = false;
-    device.node = seqGraph.addNode (std::make_unique<UtilityProcessor>());
+    if (identifier == utilityPluginIdentifier)
+    {
+        device.name = "Master Volume";
+        device.node = seqGraph.addNode (std::make_unique<UtilityProcessor>());
+    }
+    else if (identifier == compMasterPluginIdentifier)
+    {
+        device.name = "Comp Master";
+        device.node = seqGraph.addNode (std::make_unique<CompMasterProcessor>());
+    }
+    else if (identifier == eqMasterPluginIdentifier)
+    {
+        device.name = "EQ Master";
+        device.node = seqGraph.addNode (std::make_unique<EqMasterProcessor>());
+    }
+    else
+    {
+        return 0;
+    }
     if (device.node == nullptr)
         return 0;
-    track->devices.push_back (std::move (device));
+    if (auto* compressor = dynamic_cast<CompMasterProcessor*> (device.node->getProcessor()))
+        compressor->onSidechainSourceChanged =
+            [this, trackId, deviceId = device.id] (int sourceTrackId)
+            {
+                return setCompMasterSidechainSource (trackId, deviceId, sourceTrackId);
+            };
+    const int firstEffect = ! track->devices.empty() && track->devices.front().instrument ? 1 : 0;
+    const int index = insertionIndex < 0
+        ? static_cast<int> (track->devices.size())
+        : std::clamp (insertionIndex, firstEffect, static_cast<int> (track->devices.size()));
+    track->devices.insert (track->devices.begin() + index, std::move (device));
     rewire (*track);
-    return track->devices.back().id;
+    return track->devices[static_cast<std::size_t> (index)].id;
 }
 
 void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
@@ -2525,7 +2725,7 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
         : nullptr;
     if (rack == nullptr || pad < 0 || pad >= DrumRackProcessor::numPads || description.isInstrument)
     {
-        onDone ("Selecione um efeito valido e um pad do Drum Rack.");
+        onDone ("Select a valid effect and a Drum Rack pad.");
         return;
     }
 
@@ -2555,7 +2755,7 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
 
             if (*instance == nullptr || targetRack == nullptr)
             {
-                onDone (loadError->isNotEmpty() ? *loadError : "O Drum Rack nao esta mais disponivel.");
+                onDone (loadError->isNotEmpty() ? *loadError : "The Drum Rack is no longer available.");
                 return;
             }
 
@@ -2574,7 +2774,7 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
             }
             onDone ({});
         }))
-            juce::Logger::writeToLog ("AudioEngine: nao foi possivel publicar o resultado do carregamento de efeito.");
+            juce::Logger::writeToLog ("AudioEngine: Could not publish the effect load result.");
     });
 }
 

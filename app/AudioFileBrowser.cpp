@@ -151,8 +151,8 @@ public:
 
         juce::String label;
         bool isBold = false;
-        if (kind == Kind::ComputerRoot) { label = "Este Computador"; isBold = true; }
-        else if (kind == Kind::FavoritesRoot) { label = "Favoritos"; isBold = true; }
+        if (kind == Kind::ComputerRoot) { label = "This PC"; isBold = true; }
+        else if (kind == Kind::FavoritesRoot) { label = "Favorites"; isBold = true; }
         else if (kind == Kind::FavoriteCategory)
         {
             label = favoriteColorNames[static_cast<std::size_t> (favoriteColor)];
@@ -233,7 +233,7 @@ void AudioFileBrowser::moveSelectedItemsToDirectory (const juce::File& destinati
 {
     if (! destination.isDirectory())
     {
-        setStatus ("Selecione uma pasta valida como destino.");
+        setStatus ("Select a valid destination folder.");
         return;
     }
 
@@ -259,7 +259,7 @@ void AudioFileBrowser::moveSelectedItemsToDirectory (const juce::File& destinati
 
     if (uniqueSources.empty())
     {
-        setStatus ("Arraste arquivos ou pastas para uma pasta de destino.");
+        setStatus ("Drag files or folders to a destination folder.");
         return;
     }
 
@@ -275,7 +275,7 @@ void AudioFileBrowser::moveSelectedItemsToDirectory (const juce::File& destinati
     {
         if (source == destination || (source.isDirectory() && destination.isAChildOf (source)))
         {
-            setStatus ("Nao e possivel mover uma pasta para dentro dela mesma.");
+            setStatus ("A folder cannot be moved into itself.");
             return;
         }
 
@@ -285,12 +285,12 @@ void AudioFileBrowser::moveSelectedItemsToDirectory (const juce::File& destinati
         const auto target = destination.getChildFile (source.getFileName());
         if (target.exists() || plannedTargets.contains (target.getFullPathName(), true))
         {
-            setStatus ("Ja existe um item chamado \"" + source.getFileName() + "\" no destino.");
+            setStatus ("An item named \" already exists at the destination." + source.getFileName() + "\" at the destination.");
             return;
         }
         if (canDeleteFile && ! canDeleteFile (source))
         {
-            setStatus ("O arquivo ou pasta contem audio em uso no Arrangement e nao pode ser movido.");
+            setStatus ("This file or folder contains audio currently used in the Arrangement and cannot be moved.");
             return;
         }
         plannedTargets.add (target.getFullPathName());
@@ -299,7 +299,7 @@ void AudioFileBrowser::moveSelectedItemsToDirectory (const juce::File& destinati
 
     if (moves.empty())
     {
-        setStatus ("Os itens selecionados ja estao nessa pasta.");
+        setStatus ("The selected items are already in this folder.");
         return;
     }
 
@@ -383,10 +383,10 @@ void AudioFileBrowser::moveSelectedItemsToDirectory (const juce::File& destinati
     refreshTree();
 
     auto message = movedNames.size() == 1
-        ? "Movido: " + movedNames[0]
-        : "Itens movidos: " + juce::String (movedNames.size());
+        ? "Moved: " + movedNames[0]
+        : "Items moved: " + juce::String (movedNames.size());
     if (! failedNames.isEmpty())
-        message << ". Falha ao mover: " << failedNames.joinIntoString (", ");
+        message << ". Failed to move: " << failedNames.joinIntoString (", ");
     setStatus (message);
 }
 
@@ -434,7 +434,7 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
     {
         if (selectedFile.existsAsFile() && onPreviewRequested)
         {
-            setStatus ("Carregando preview...");
+            setStatus ("Loading preview...");
             onPreviewRequested (selectedFile);
         }
     };
@@ -442,16 +442,16 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
     {
         if (onPreviewStopRequested)
             onPreviewStopRequested();
-        setStatus ("Preview parado");
+        setStatus ("Preview stopped");
     };
     autoPreviewButton.setClickingTogglesState (true);
     autoPreviewButton.setToggleState (true, juce::dontSendNotification);
-    autoPreviewButton.setTooltip ("Reproduzir automaticamente ao selecionar um arquivo");
+    autoPreviewButton.setTooltip ("Play files automatically when selected");
     previewGain.setSliderStyle (juce::Slider::LinearHorizontal);
     previewGain.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     previewGain.setRange (0.0, 1.0, 0.01);
     previewGain.setValue (0.5, juce::dontSendNotification);
-    previewGain.setTooltip ("Volume da pre-escuta");
+    previewGain.setTooltip ("Preview Volume");
     previewGainLabel.setColour (juce::Label::textColourId, theme::textDim());
     previewGainLabel.setFont (juce::FontOptions (12.5f));
     previewGain.onValueChange = [this]
@@ -459,7 +459,7 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
         if (onPreviewGainChanged)
             onPreviewGainChanged (static_cast<float> (previewGain.getValue()));
     };
-    search.setTextToShowWhenEmpty ("Buscar na pasta selecionada", theme::textDim());
+    search.setTextToShowWhenEmpty ("Search the selected folder", theme::textDim());
     search.onTextChange = [this]
     {
         searchGeneration->fetch_add (1);
@@ -471,11 +471,11 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
         }
         else
         {
-            setStatus ("Preparando pesquisa...");
+            setStatus ("Preparing search...");
             startTimer (250);
         }
     };
-    backButton.setTooltip ("Voltar");
+    backButton.setTooltip ("Back");
     forwardButton.setTooltip ("Avancar");
     backButton.onClick = [this] { navigateHistory (-1); };
     forwardButton.onClick = [this] { navigateHistory (1); };
@@ -534,8 +534,8 @@ void AudioFileBrowser::navigateHistory (int direction)
     const auto state = navigationHistory[static_cast<std::size_t> (navigationHistoryIndex)];
     showingFavorites = state.favorites;
     searchDirectory = state.directory;
-    title.setText (showingFavorites ? "Favoritos" : "Arquivos de audio", juce::dontSendNotification);
-    search.setTextToShowWhenEmpty (showingFavorites ? "Buscar nos favoritos" : "Buscar na pasta selecionada",
+    title.setText (showingFavorites ? "Favorites" : "Audio Files", juce::dontSendNotification);
+    search.setTextToShowWhenEmpty (showingFavorites ? "Search Favorites" : "Search the selected folder",
                                    theme::textDim());
     search.setText (state.query, juce::dontSendNotification);
     searchGeneration->fetch_add (1);
@@ -602,8 +602,8 @@ void AudioFileBrowser::setFavoritesMode (bool showing)
 
     showingFavorites = showing;
     selectFile ({});
-    title.setText (showingFavorites ? "Favoritos" : "Arquivos de audio", juce::dontSendNotification);
-    search.setTextToShowWhenEmpty (showingFavorites ? "Buscar nos favoritos" : "Buscar na pasta selecionada",
+    title.setText (showingFavorites ? "Favorites" : "Audio Files", juce::dontSendNotification);
+    search.setTextToShowWhenEmpty (showingFavorites ? "Search Favorites" : "Search the selected folder",
                                    theme::textDim());
     refreshTree();
     recordNavigationState();
@@ -613,7 +613,7 @@ void AudioFileBrowser::revealFile (const juce::File& file)
 {
     if (! file.existsAsFile() || ! isAudioFile (file))
     {
-        setStatus ("Arquivo de audio nao encontrado.");
+        setStatus ("Audio file not found.");
         return;
     }
 
@@ -640,7 +640,7 @@ void AudioFileBrowser::revealFile (const juce::File& file)
                     }
             }
     }
-    setStatus ("Localizado: " + file.getFileName());
+    setStatus ("Located: " + file.getFileName());
     recordNavigationState();
 }
 
@@ -656,8 +656,8 @@ void AudioFileBrowser::selectFile (const juce::File& file)
     if (onPreviewStopRequested)
         stopPreview();
     setStatus (selectedFile.existsAsFile()
-                   ? "Selecionado: " + selectedFile.getFileName()
-                   : "Selecione um arquivo de audio para ouvir");
+                   ? "Selected: " + selectedFile.getFileName()
+                   : "Select an audio file to preview");
 }
 
 void AudioFileBrowser::refreshTree()
@@ -679,7 +679,7 @@ void AudioFileBrowser::refreshTree()
                                   showingFavorites ? expandedFavoriteItems : expandedFilesystemItems);
             restoringTreeExpansion = false;
         }
-        setStatus ("Selecione um arquivo de audio para ouvir");
+        setStatus ("Select an audio file to preview");
         return;
     }
 
@@ -738,10 +738,10 @@ void AudioFileBrowser::refreshTree()
 
     tree.setRootItem (new FileTreeItem (*this, {}, FileTreeItem::Kind::SearchResultsRoot));
     tree.getRootItem()->setOpen (true);
-    setStatus (showingFavorites ? "Pesquisando nos favoritos..."
+    setStatus (showingFavorites ? "Searching Favorites..."
         : searchDirectory.isDirectory()
-            ? "Pesquisando em " + searchDirectory.getFullPathName() + "..."
-            : "Pesquisando no disco C...");
+            ? "Searching in " + searchDirectory.getFullPathName() + "..."
+            : "Searching drive C...");
 
     const auto generationState = searchGeneration;
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
@@ -812,8 +812,8 @@ void AudioFileBrowser::refreshTree()
             }
             const auto count = safeThis->searchResults.size();
             safeThis->setStatus (truncated
-                ? "Mais de " + juce::String (count) + " resultados; limite de exibicao atingido."
-                : juce::String (count) + " item(ns) encontrado(s)");
+                ? "More than " + juce::String (count) + " results; display limit reached."
+                : juce::String (count) + " item(s) found");
         });
     });
 }
@@ -824,7 +824,7 @@ void AudioFileBrowser::previewFile (const juce::File& file)
     {
         selectedFile = file;
         previewButton.setEnabled (true);
-        setStatus ("Carregando preview...");
+        setStatus ("Loading preview...");
         if (onPreviewRequested)
             onPreviewRequested (file);
     }
@@ -842,19 +842,19 @@ void AudioFileBrowser::showFileMenu (const juce::File& file, juce::Point<int> sc
 
     juce::PopupMenu menu;
     if (canBeFavorite)
-        menu.addSubMenu ("Adicionar aos favoritos", colors);
+        menu.addSubMenu ("Add to Favorites", colors);
     if (canBeFavorite && existing != favorites.end())
-        menu.addItem (20, "Remover dos favoritos");
+        menu.addItem (20, "Remove from Favorites");
     if (file.isDirectory())
     {
-        menu.addItem (21, "Criar nova pasta aqui...");
+        menu.addItem (21, "Create New Folder Here...");
         if (file.getParentDirectory() != file)
-            menu.addItem (23, "Mover pasta e conteudo para a Lixeira...");
+            menu.addItem (23, "Move Folder and Contents to Recycle Bin...");
     }
     else if (file.existsAsFile())
-        menu.addItem (22, "Mover arquivo para a Lixeira...");
+        menu.addItem (22, "Move File to Recycle Bin...");
     if (file.exists())
-        menu.addItem (24, "Localizar no Explorer");
+        menu.addItem (24, "Show in File Explorer");
 
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
     const juce::PopupMenu::Options options;
@@ -903,15 +903,15 @@ void AudioFileBrowser::createFolderInDirectory (const juce::File& directory)
 {
     if (! directory.isDirectory())
     {
-        setStatus ("Selecione uma pasta valida para criar a nova pasta.");
+        setStatus ("Select a valid folder in which to create the new folder.");
         return;
     }
 
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
     AppModalDialog::showInput (
-        *this, "Criar pasta", "Digite o nome da nova pasta:", {}, "Nome",
-        { { "Criar", 1, AppModalDialog::ButtonStyle::Primary },
-          { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
+        *this, "Create Folder", "Enter the new folder name:", {}, "Name",
+        { { "Create", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Cancel", 0, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, directory] (int result, juce::String input)
         {
             if (safeThis == nullptr || result != 1)
@@ -921,25 +921,25 @@ void AudioFileBrowser::createFolderInDirectory (const juce::File& directory)
             if (name.isEmpty() || name == "." || name == ".."
                 || name.containsChar ('/') || name.containsChar ('\\'))
             {
-                safeThis->setStatus ("Digite um nome valido para a pasta.");
+                safeThis->setStatus ("Enter a valid folder name.");
                 return;
             }
 
             const auto newDirectory = directory.getChildFile (name);
             if (newDirectory.exists())
             {
-                safeThis->setStatus ("Ja existe um arquivo ou pasta com esse nome.");
+                safeThis->setStatus ("A file or folder with that name already exists.");
                 return;
             }
 
             if (const auto error = newDirectory.createDirectory(); error.failed())
             {
-                safeThis->setStatus ("Falha ao criar pasta: " + error.getErrorMessage());
+                safeThis->setStatus ("Failed to create folder: " + error.getErrorMessage());
                 return;
             }
 
             safeThis->refreshTree();
-            safeThis->setStatus ("Pasta criada: " + name);
+            safeThis->setStatus ("Folder created: " + name);
         });
 }
 
@@ -947,46 +947,46 @@ void AudioFileBrowser::moveItemToTrash (const juce::File& file)
 {
     if (! file.exists())
     {
-        setStatus ("O arquivo ou pasta nao existe mais.");
+        setStatus ("The file or folder no longer exists.");
         return;
     }
     if (file.isDirectory() && file.getParentDirectory() == file)
     {
-        setStatus ("Nao e possivel remover a raiz de uma unidade.");
+        setStatus ("A drive root cannot be removed.");
         return;
     }
     if (canDeleteFile && ! canDeleteFile (file))
     {
-        setStatus ("O arquivo ou pasta contem audio em uso no Arrangement e nao pode ser removido.");
+        setStatus ("This file or folder contains audio currently used in the Arrangement and cannot be removed.");
         return;
     }
 
     const bool isDirectory = file.isDirectory();
     const auto itemDescription = isDirectory
-        ? "A pasta \"" + file.getFileName() + "\" e todo o seu conteudo serao movidos para a Lixeira do sistema."
-        : "O arquivo \"" + file.getFileName() + "\" sera movido para a Lixeira do sistema.";
+        ? "The folder \"" + file.getFileName() + "\" and all its contents will be moved to the Recycle Bin."
+        : "The file \"" + file.getFileName() + "\" will be moved to the Recycle Bin.";
     juce::Component::SafePointer<AudioFileBrowser> safeThis (this);
     AppModalDialog::show (
-        *this, "Mover para a Lixeira?", itemDescription, AppModalDialog::Icon::Warning,
-        { { "Mover para a Lixeira", 1, AppModalDialog::ButtonStyle::Primary },
-          { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
+        *this, "Move to Recycle Bin?", itemDescription, AppModalDialog::Icon::Warning,
+        { { "Move to Recycle Bin", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Cancel", 0, AppModalDialog::ButtonStyle::Tertiary } },
         [safeThis, file] (int result)
         {
             if (safeThis == nullptr || result == 0)
                 return;
             if (! file.exists())
             {
-                safeThis->setStatus ("O arquivo ou pasta nao existe mais.");
+                safeThis->setStatus ("The file or folder no longer exists.");
                 return;
             }
             if (file.isDirectory() && file.getParentDirectory() == file)
             {
-                safeThis->setStatus ("Nao e possivel remover a raiz de uma unidade.");
+                safeThis->setStatus ("A drive root cannot be removed.");
                 return;
             }
             if (safeThis->canDeleteFile && ! safeThis->canDeleteFile (file))
             {
-                safeThis->setStatus ("O arquivo ou pasta contem audio em uso no Arrangement e nao pode ser removido.");
+                safeThis->setStatus ("This file or folder contains audio currently used in the Arrangement and cannot be removed.");
                 return;
             }
             const auto selectedFileIsAffected = safeThis->selectedFile == file
@@ -996,7 +996,7 @@ void AudioFileBrowser::moveItemToTrash (const juce::File& file)
                 safeThis->onPreviewStopRequested();
             if (! file.moveToTrash())
             {
-                safeThis->setStatus ("Falha ao mover o arquivo ou pasta para a Lixeira.");
+                safeThis->setStatus ("Failed to move the file or folder to the Recycle Bin.");
                 return;
             }
             safeThis->favorites.erase (std::remove_if (safeThis->favorites.begin(), safeThis->favorites.end(),
@@ -1008,7 +1008,7 @@ void AudioFileBrowser::moveItemToTrash (const juce::File& file)
             safeThis->saveFavorites();
             safeThis->selectFile ({});
             safeThis->refreshTree();
-            safeThis->setStatus (file.getFileName() + " movido para a Lixeira.");
+            safeThis->setStatus (file.getFileName() + " moved to the Recycle Bin.");
         });
 }
 

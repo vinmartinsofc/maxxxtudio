@@ -1,11 +1,14 @@
 #include "NativeEffectProcessors.h"
 #include "ThemeKnobSlider.h"
 #include "Theme.h"
+#include "WaveformDisplay.h"
+#include <juce_dsp/juce_dsp.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <functional>
+#include <limits>
 
 namespace
 {
@@ -14,7 +17,9 @@ class EffectParameter final : public juce::AudioProcessorParameterWithID
 public:
     enum class Kind
     {
-        Decibels, Width, Balance, Percent, Rate, Degrees, Toggle, Shape, ChannelMode
+        Decibels, Width, Balance, Percent, Rate, Degrees, Toggle, Shape, ChannelMode,
+        Threshold, Ratio, Attack, Release, Knee, Makeup, Frequency, EqGain, Quality,
+        FilterType, FilterSlope, MidSide
     };
 
     EffectParameter (const juce::String& id, const juce::String& name,
@@ -32,6 +37,12 @@ public:
             newValue = newValue >= 0.5f ? 1.0f : 0.0f;
         else if (kind == Kind::ChannelMode)
             newValue = std::round (newValue * 3.0f) / 3.0f;
+        else if (kind == Kind::FilterType)
+            newValue = std::round (newValue * 3.0f) / 3.0f;
+        else if (kind == Kind::FilterSlope)
+            newValue = std::round (newValue * 2.0f) / 2.0f;
+        else if (kind == Kind::MidSide)
+            newValue = std::round (newValue * 2.0f) / 2.0f;
         value.store (newValue, std::memory_order_relaxed);
     }
     float getDefaultValue() const override { return defaultValue; }
@@ -58,6 +69,40 @@ public:
                 return names[static_cast<std::size_t> (std::clamp (static_cast<int> (std::round (normalized * 3.0f)),
                                                                     0, 3))];
             }
+            case Kind::Threshold: return juce::String (normalized * 60.0f - 60.0f, 1) + " dB";
+            case Kind::Ratio: return juce::String (1.0f + normalized * 19.0f, 1) + ":1";
+            case Kind::Attack:
+                return juce::String (0.1f * std::pow (2000.0f, normalized), 1) + " ms";
+            case Kind::Release:
+                return juce::String (1.0f * std::pow (1000.0f, normalized), 1) + " ms";
+            case Kind::Knee: return juce::String (normalized * 24.0f, 1) + " dB";
+            case Kind::Makeup: return juce::String (normalized * 24.0f, 1) + " dB";
+            case Kind::Frequency:
+                return juce::String (20.0f * std::pow (1000.0f, normalized), 0) + " Hz";
+            case Kind::EqGain: return juce::String (normalized * 36.0f - 18.0f, 1) + " dB";
+            case Kind::Quality: return juce::String (0.1f * std::pow (100.0f, normalized), 2);
+            case Kind::FilterType:
+            {
+                static constexpr std::array<const char*, 4> names {
+                    "Bell", "Low Pass", "High Pass", "Notch"
+                };
+                return names[static_cast<std::size_t> (
+                    std::clamp (static_cast<int> (std::round (normalized * 3.0f)), 0, 3))];
+            }
+            case Kind::FilterSlope:
+            {
+                static constexpr std::array<const char*, 3> names {
+                    "12 dB/oct", "24 dB/oct", "48 dB/oct"
+                };
+                return names[static_cast<std::size_t> (
+                    std::clamp (static_cast<int> (std::round (normalized * 2.0f)), 0, 2))];
+            }
+            case Kind::MidSide:
+            {
+                static constexpr std::array<const char*, 3> names { "Stereo", "Mid", "Side" };
+                return names[static_cast<std::size_t> (
+                    std::clamp (static_cast<int> (std::round (normalized * 2.0f)), 0, 2))];
+            }
         }
         jassertfalse;
         return {};
@@ -80,6 +125,38 @@ public:
                     if (getText (static_cast<float> (index) / 3.0f, 32)
                             .equalsIgnoreCase (text))
                         return static_cast<float> (index) / 3.0f;
+                return 0.0f;
+            case Kind::Threshold: return std::clamp ((number + 60.0f) / 60.0f, 0.0f, 1.0f);
+            case Kind::Ratio: return std::clamp ((number - 1.0f) / 19.0f, 0.0f, 1.0f);
+            case Kind::Attack:
+                return std::clamp (std::log (std::max (number, 0.1f) / 0.1f)
+                                   / std::log (2000.0f), 0.0f, 1.0f);
+            case Kind::Release:
+                return std::clamp (std::log (std::max (number, 1.0f))
+                                   / std::log (1000.0f), 0.0f, 1.0f);
+            case Kind::Knee: return std::clamp (number / 24.0f, 0.0f, 1.0f);
+            case Kind::Makeup: return std::clamp (number / 24.0f, 0.0f, 1.0f);
+            case Kind::Frequency:
+                return std::clamp (std::log (std::max (number, 20.0f) / 20.0f)
+                                   / std::log (1000.0f), 0.0f, 1.0f);
+            case Kind::EqGain: return std::clamp ((number + 18.0f) / 36.0f, 0.0f, 1.0f);
+            case Kind::Quality:
+                return std::clamp (std::log (std::max (number, 0.1f) / 0.1f)
+                                   / std::log (100.0f), 0.0f, 1.0f);
+            case Kind::FilterType:
+                for (int index = 0; index < 4; ++index)
+                    if (getText (static_cast<float> (index) / 3.0f, 32).equalsIgnoreCase (text))
+                        return static_cast<float> (index) / 3.0f;
+                return 0.0f;
+            case Kind::FilterSlope:
+                for (int index = 0; index < 3; ++index)
+                    if (getText (static_cast<float> (index) * 0.5f, 32).equalsIgnoreCase (text))
+                        return static_cast<float> (index) * 0.5f;
+                return 0.0f;
+            case Kind::MidSide:
+                for (int index = 0; index < 3; ++index)
+                    if (getText (static_cast<float> (index) * 0.5f, 32).equalsIgnoreCase (text))
+                        return static_cast<float> (index) * 0.5f;
                 return 0.0f;
         }
         jassertfalse;
@@ -140,7 +217,7 @@ class NativeEffectEditor final : public juce::AudioProcessorEditor,
 {
 public:
     explicit NativeEffectEditor (UtilityProcessor& processor)
-        : juce::AudioProcessorEditor (processor), title ("Volume Master"), utility (processor)
+        : juce::AudioProcessorEditor (processor), title ("Master Volume"), utility (processor)
     {
         setSize (700, 400);
         setResizable (false, false);
@@ -724,6 +801,81 @@ void restoreNativeParameterState (juce::AudioProcessor& processor, const void* d
         }
     }
 }
+
+template <std::size_t ParameterCount>
+void captureABState (juce::AudioProcessor& processor,
+                     std::array<std::array<float, ParameterCount>, 2>& states, int active)
+{
+    const auto parameters = processor.getParameters();
+    for (std::size_t index = 0; index < ParameterCount && index < parameters.size(); ++index)
+        states[static_cast<std::size_t> (active)][index] =
+            parameters[static_cast<int> (index)]->getValue();
+}
+
+template <std::size_t ParameterCount>
+void initializeABState (juce::AudioProcessor& processor,
+                        std::array<std::array<float, ParameterCount>, 2>& states)
+{
+    const auto parameters = processor.getParameters();
+    for (std::size_t index = 0; index < ParameterCount && index < parameters.size(); ++index)
+        states[0][index] = states[1][index] = parameters[static_cast<int> (index)]->getValue();
+}
+
+template <std::size_t ParameterCount>
+void selectABState (juce::AudioProcessor& processor,
+                    std::array<std::array<float, ParameterCount>, 2>& states,
+                    int& active, int slot)
+{
+    slot = std::clamp (slot, 0, 1);
+    if (slot == active)
+        return;
+    captureABState (processor, states, active);
+    active = slot;
+    const auto parameters = processor.getParameters();
+    for (std::size_t index = 0; index < ParameterCount && index < parameters.size(); ++index)
+    {
+        auto* parameter = parameters[static_cast<int> (index)];
+        parameter->beginChangeGesture();
+        parameter->setValue (states[static_cast<std::size_t> (active)][index]);
+        parameter->endChangeGesture();
+    }
+}
+
+template <std::size_t ParameterCount>
+void saveABState (juce::XmlElement& xml,
+                  const std::array<std::array<float, ParameterCount>, 2>& states, int active)
+{
+    xml.setAttribute ("abActive", active);
+    for (int slot = 0; slot < 2; ++slot)
+        for (std::size_t index = 0; index < ParameterCount; ++index)
+            xml.setAttribute ("ab" + juce::String (slot) + "_" + juce::String (static_cast<int> (index)),
+                              static_cast<double> (states[static_cast<std::size_t> (slot)][index]));
+}
+
+template <std::size_t ParameterCount>
+void restoreABState (juce::AudioProcessor& processor, const juce::XmlElement& xml,
+                     std::array<std::array<float, ParameterCount>, 2>& states, int& active)
+{
+    const juce::String firstAttribute = "ab0_0";
+    if (! xml.hasAttribute (firstAttribute))
+    {
+        initializeABState (processor, states);
+        active = 0;
+        return;
+    }
+
+    active = std::clamp (xml.getIntAttribute ("abActive", 0), 0, 1);
+    for (int slot = 0; slot < 2; ++slot)
+        for (std::size_t index = 0; index < ParameterCount; ++index)
+            states[static_cast<std::size_t> (slot)][index] = static_cast<float> (
+                xml.getDoubleAttribute ("ab" + juce::String (slot) + "_"
+                                        + juce::String (static_cast<int> (index)), 0.0));
+
+    const auto parameters = processor.getParameters();
+    for (std::size_t index = 0; index < ParameterCount && index < parameters.size(); ++index)
+        parameters[static_cast<int> (index)]->setValue (
+            states[static_cast<std::size_t> (active)][index]);
+}
 }
 
 void UtilityProcessor::getStateInformation (juce::MemoryBlock& destination)
@@ -744,4 +896,1562 @@ void AutoPanProcessor::getStateInformation (juce::MemoryBlock& destination)
 void AutoPanProcessor::setStateInformation (const void* data, int size)
 {
     restoreNativeParameterState (*this, data, size);
+}
+
+namespace
+{
+class ParameterKnob final : public juce::Component
+{
+public:
+    explicit ParameterKnob (juce::AudioProcessorParameter& parameter)
+    {
+        label.setColour (juce::Label::textColourId, theme::text());
+        label.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        label.setJustificationType (juce::Justification::centred);
+        addAndMakeVisible (label);
+
+        slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 78, 22);
+        slider.setRange (0.0, 1.0, 0.001);
+        slider.setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
+        slider.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border());
+        slider.setColour (juce::Slider::thumbColourId, theme::text());
+        slider.setColour (juce::Slider::textBoxTextColourId, theme::text());
+        slider.setColour (juce::Slider::textBoxBackgroundColourId, theme::control());
+        slider.setColour (juce::Slider::textBoxOutlineColourId, theme::border());
+        slider.textFromValueFunction = [this] (double value)
+        {
+            return target != nullptr ? target->getText (static_cast<float> (value), 24)
+                                     : juce::String();
+        };
+        slider.valueFromTextFunction = [this] (const juce::String& text)
+        {
+            return target != nullptr ? target->getValueForText (text) : 0.0;
+        };
+        slider.onDragStart = [this] { if (target != nullptr) target->beginChangeGesture(); };
+        slider.onDragEnd = [this] { if (target != nullptr) target->endChangeGesture(); };
+        slider.onValueChange = [this]
+        {
+            if (target != nullptr)
+                target->setValue (static_cast<float> (slider.getValue()));
+        };
+        addAndMakeVisible (slider);
+        setParameter (parameter);
+    }
+
+    void setParameter (juce::AudioProcessorParameter& parameter)
+    {
+        target = &parameter;
+        label.setText (target->getName (48), juce::dontSendNotification);
+        slider.setName (target->getName (48));
+        slider.setDoubleClickReturnValue (true, target->getDefaultValue());
+        refresh();
+    }
+
+    void refresh()
+    {
+        if (target != nullptr)
+            slider.setValue (target->getValue(), juce::dontSendNotification);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds();
+        label.setBounds (area.removeFromTop (24));
+        slider.setBounds (area);
+    }
+
+private:
+    juce::AudioProcessorParameter* target = nullptr;
+    juce::Label label;
+    ThemeKnobSlider slider;
+};
+
+struct BiquadCoefficients
+{
+    double b0 = 1.0, b1 = 0.0, b2 = 0.0, a1 = 0.0, a2 = 0.0;
+};
+
+BiquadCoefficients makePeakingCoefficients (double frequency, double gainDb,
+                                             double quality, double rate)
+{
+    const double safeRate = std::max (rate, 100.0);
+    const double omega = juce::MathConstants<double>::twoPi
+                       * std::clamp (frequency, 10.0, safeRate * 0.45) / safeRate;
+    const double gain = std::pow (10.0, gainDb / 40.0);
+    const double alpha = std::sin (omega) / (2.0 * std::clamp (quality, 0.1, 10.0));
+    const double a0 = 1.0 + alpha / gain;
+    const double cosine = std::cos (omega);
+    return {
+        (1.0 + alpha * gain) / a0,
+        (-2.0 * cosine) / a0,
+        (1.0 - alpha * gain) / a0,
+        (-2.0 * cosine) / a0,
+        (1.0 - alpha / gain) / a0
+    };
+}
+
+BiquadCoefficients makeLowPassCoefficients (double frequency, double quality, double rate)
+{
+    const double safeRate = std::max (rate, 100.0);
+    const double omega = juce::MathConstants<double>::twoPi
+                       * std::clamp (frequency, 10.0, safeRate * 0.45) / safeRate;
+    const double cosine = std::cos (omega);
+    const double alpha = std::sin (omega) / (2.0 * std::clamp (quality, 0.1, 10.0));
+    const double a0 = 1.0 + alpha;
+    return { (1.0 - cosine) * 0.5 / a0, (1.0 - cosine) / a0,
+             (1.0 - cosine) * 0.5 / a0, -2.0 * cosine / a0,
+             (1.0 - alpha) / a0 };
+}
+
+BiquadCoefficients makeHighPassCoefficients (double frequency, double quality, double rate)
+{
+    const double safeRate = std::max (rate, 100.0);
+    const double omega = juce::MathConstants<double>::twoPi
+                       * std::clamp (frequency, 10.0, safeRate * 0.45) / safeRate;
+    const double cosine = std::cos (omega);
+    const double alpha = std::sin (omega) / (2.0 * std::clamp (quality, 0.1, 10.0));
+    const double a0 = 1.0 + alpha;
+    return { (1.0 + cosine) * 0.5 / a0, -(1.0 + cosine) / a0,
+             (1.0 + cosine) * 0.5 / a0, -2.0 * cosine / a0,
+             (1.0 - alpha) / a0 };
+}
+
+BiquadCoefficients makeNotchCoefficients (double frequency, double quality, double rate)
+{
+    const double safeRate = std::max (rate, 100.0);
+    const double omega = juce::MathConstants<double>::twoPi
+                       * std::clamp (frequency, 10.0, safeRate * 0.45) / safeRate;
+    const double cosine = std::cos (omega);
+    const double alpha = std::sin (omega) / (2.0 * std::clamp (quality, 0.1, 10.0));
+    const double a0 = 1.0 + alpha;
+    return { 1.0 / a0, -2.0 * cosine / a0, 1.0 / a0,
+             -2.0 * cosine / a0, (1.0 - alpha) / a0 };
+}
+
+std::array<double, 4> butterworthStageQualities (int slope, int& count)
+{
+    static constexpr std::array<double, 1> twelveDb { 0.70710678 };
+    static constexpr std::array<double, 2> twentyFourDb { 0.54119610, 1.30656296 };
+    static constexpr std::array<double, 4> fortyEightDb {
+        0.50979558, 0.60134489, 0.89997622, 2.56291545
+    };
+    std::array<double, 4> result {};
+    if (slope <= 0)
+    {
+        count = 1;
+        std::copy (twelveDb.begin(), twelveDb.end(), result.begin());
+    }
+    else if (slope == 1)
+    {
+        count = 2;
+        std::copy (twentyFourDb.begin(), twentyFourDb.end(), result.begin());
+    }
+    else
+    {
+        count = 4;
+        std::copy (fortyEightDb.begin(), fortyEightDb.end(), result.begin());
+    }
+    return result;
+}
+
+std::array<BiquadCoefficients, 4> makeBandCoefficients (int type, int slope,
+    double frequency, double gain, double quality, double rate, int& stageCount)
+{
+    std::array<BiquadCoefficients, 4> result {};
+    if (type == 0)
+    {
+        stageCount = 1;
+        result[0] = makePeakingCoefficients (frequency, gain, quality, rate);
+    }
+    else if (type == 3)
+    {
+        stageCount = 1;
+        result[0] = makeNotchCoefficients (frequency, quality, rate);
+    }
+    else
+    {
+        const auto qualities = butterworthStageQualities (slope, stageCount);
+        for (int stage = 0; stage < stageCount; ++stage)
+            result[static_cast<std::size_t> (stage)] = type == 1
+                ? makeLowPassCoefficients (frequency, qualities[static_cast<std::size_t> (stage)], rate)
+                : makeHighPassCoefficients (frequency, qualities[static_cast<std::size_t> (stage)], rate);
+    }
+    return result;
+}
+
+double responseDb (const BiquadCoefficients& c, double frequency, double rate)
+{
+    const double omega = juce::MathConstants<double>::twoPi * frequency / std::max (rate, 100.0);
+    const double cosine = std::cos (omega);
+    const double sine = std::sin (omega);
+    const double cosine2 = std::cos (omega * 2.0);
+    const double sine2 = std::sin (omega * 2.0);
+    const double numeratorReal = c.b0 + c.b1 * cosine + c.b2 * cosine2;
+    const double numeratorImaginary = -c.b1 * sine - c.b2 * sine2;
+    const double denominatorReal = 1.0 + c.a1 * cosine + c.a2 * cosine2;
+    const double denominatorImaginary = -c.a1 * sine - c.a2 * sine2;
+    const double magnitude = std::hypot (numeratorReal, numeratorImaginary)
+                           / std::max (std::hypot (denominatorReal, denominatorImaginary), 1.0e-12);
+    return 20.0 * std::log10 (std::max (magnitude, 1.0e-12));
+}
+
+juce::AudioProcessorParameter* parameterWithId (juce::AudioProcessor& processor,
+                                                 const juce::String& id)
+{
+    for (auto* parameter : processor.getParameters())
+        if (auto* identified = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
+            identified != nullptr && identified->paramID == id)
+            return parameter;
+    return nullptr;
+}
+
+class CompMasterEditor final : public juce::AudioProcessorEditor, private juce::Timer
+{
+public:
+    explicit CompMasterEditor (CompMasterProcessor& processor)
+        : juce::AudioProcessorEditor (processor), compressor (processor)
+    {
+        setSize (900, 600);
+        setResizable (false, false);
+        for (int index = 0; index < 6; ++index)
+        {
+            auto control = std::make_unique<ParameterKnob> (*processor.getParameters()[index]);
+            addAndMakeVisible (*control);
+            controls.push_back (std::move (control));
+        }
+        for (int index = 6; index < 8; ++index)
+        {
+            auto control = std::make_unique<ParameterKnob> (*processor.getParameters()[index]);
+            addAndMakeVisible (*control);
+            sidechainControls.push_back (std::move (control));
+        }
+        refreshSourceItems();
+        sourceBox.setSelectedId (selectedSourceItem(), juce::dontSendNotification);
+        sourceBox.onChange = [this]
+        {
+            const int index = sourceBox.getSelectedId() - 1;
+            const auto& sources = compressor.getSidechainSources();
+            if (index >= 0 && index < static_cast<int> (sources.size()))
+                compressor.setSidechainSourceTrackId (
+                    sources[static_cast<std::size_t> (index)].trackId);
+            sourceBox.setSelectedId (selectedSourceItem(), juce::dontSendNotification);
+        };
+        sourceBox.setColour (juce::ComboBox::backgroundColourId, theme::control());
+        sourceBox.setColour (juce::ComboBox::textColourId, theme::text());
+        sourceBox.setColour (juce::ComboBox::outlineColourId, theme::border());
+        addAndMakeVisible (sourceBox);
+
+        zoomOut.setButtonText ("-");
+        zoomIn.setButtonText ("+");
+        for (auto* button : { &zoomOut, &zoomIn })
+        {
+            button->setColour (juce::TextButton::buttonColourId, theme::control());
+            button->setColour (juce::TextButton::textColourOffId, theme::text());
+            addAndMakeVisible (*button);
+        }
+        zoomOut.onClick = [this] { zoomFactor = std::max (1, zoomFactor / 2); repaint(); };
+        zoomIn.onClick = [this] { zoomFactor = std::min (32, zoomFactor * 2); repaint(); };
+
+        bypass.setButtonText ("Bypass");
+        bypass.setClickingTogglesState (true);
+        bypass.setColour (juce::TextButton::buttonColourId, theme::control());
+        bypass.setColour (juce::TextButton::buttonOnColourId, theme::recording());
+        bypass.setColour (juce::TextButton::textColourOffId, theme::text());
+        bypass.setColour (juce::TextButton::textColourOnId, theme::text());
+        bypass.onClick = [this]
+        {
+            auto* parameter = compressor.getParameters()[8];
+            parameter->beginChangeGesture();
+            parameter->setValue (bypass.getToggleState() ? 1.0f : 0.0f);
+            parameter->endChangeGesture();
+        };
+        addAndMakeVisible (bypass);
+        ab.setButtonText ("A");
+        ab.setColour (juce::TextButton::buttonColourId, theme::control());
+        ab.setColour (juce::TextButton::textColourOffId, theme::text());
+        ab.onClick = [this] { compressor.selectABState (1 - compressor.activeABSlot()); };
+        addAndMakeVisible (ab);
+        startTimerHz (30);
+    }
+
+    ~CompMasterEditor() override { stopTimer(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::panel());
+        g.setColour (theme::text());
+        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.drawText ("COMP MASTER", getLocalBounds().removeFromTop (36).reduced (16, 0),
+                    juce::Justification::centredLeft, true);
+
+        auto area = getLocalBounds().reduced (16);
+        area.removeFromTop (38);
+        auto sourceRow = area.removeFromTop (32);
+        g.setColour (theme::textDim());
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText ("SIDECHAIN SOURCE", sourceRow.removeFromLeft (126),
+                    juce::Justification::centredLeft, true);
+        auto scope = area.removeFromTop (260).toFloat();
+        g.setColour (juce::Colour (0xff161616));
+        g.fillRoundedRectangle (scope, 5.0f);
+        g.setColour (theme::border());
+        g.drawRoundedRectangle (scope, 5.0f, 1.0f);
+        drawScope (g, scope);
+        g.setColour (theme::textDim());
+        g.setFont (juce::FontOptions (10.0f));
+        g.drawText ("SIDECHAIN FILTER RANGE", area.removeFromTop (20),
+                    juce::Justification::centredLeft, true);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (16);
+        auto header = area.removeFromTop (38);
+        bypass.setBounds (header.removeFromRight (92).reduced (2, 4));
+        ab.setBounds (header.removeFromRight (44).reduced (2, 4));
+        auto sourceRow = area.removeFromTop (32);
+        sourceRow.removeFromLeft (126);
+        sourceBox.setBounds (sourceRow.removeFromLeft (280).reduced (2, 2));
+        sourceRow.removeFromLeft (8);
+        zoomOut.setBounds (sourceRow.removeFromRight (30).reduced (2, 2));
+        zoomIn.setBounds (sourceRow.removeFromRight (30).reduced (2, 2));
+        area.removeFromTop (260);
+        area.removeFromTop (20);
+        const int sidechainWidth = 120;
+        const int controlWidth = (area.getWidth() - sidechainWidth * 2 - 8) / 6;
+        const int count = static_cast<int> (controls.size());
+        for (int index = 0; index < count; ++index)
+        {
+            controls[static_cast<std::size_t> (index)]->setBounds (
+                area.removeFromLeft (controlWidth));
+        }
+        area.removeFromLeft (8);
+        for (auto& control : sidechainControls)
+            control->setBounds (area.removeFromLeft (sidechainWidth));
+    }
+
+private:
+    void refreshSourceItems()
+    {
+        sourceBox.clear (juce::dontSendNotification);
+        const auto& sources = compressor.getSidechainSources();
+        for (std::size_t index = 0; index < sources.size(); ++index)
+            sourceBox.addItem (sources[index].name, static_cast<int> (index) + 1);
+        sourceOptionsCache = sources;
+        sourceBox.setSelectedId (selectedSourceItem(), juce::dontSendNotification);
+    }
+
+    bool sourceOptionsChanged() const
+    {
+        const auto& sources = compressor.getSidechainSources();
+        if (sources.size() != sourceOptionsCache.size())
+            return true;
+        for (std::size_t index = 0; index < sources.size(); ++index)
+            if (sources[index].trackId != sourceOptionsCache[index].trackId
+                || sources[index].name != sourceOptionsCache[index].name)
+                return true;
+        return false;
+    }
+
+    int selectedSourceItem() const
+    {
+        const auto& sources = compressor.getSidechainSources();
+        for (std::size_t index = 0; index < sources.size(); ++index)
+            if (sources[index].trackId == compressor.sidechainSourceTrackId())
+                return static_cast<int> (index) + 1;
+        return sources.empty() ? 0 : 1;
+    }
+
+    void drawScope (juce::Graphics& g, juce::Rectangle<float> scope)
+    {
+        auto content = scope.reduced (9.0f, 8.0f);
+        auto meters = content.removeFromRight (108.0f);
+        auto graph = content.reduced (30.0f, 0.0f);
+        const float centreY = graph.getCentreY();
+        const float halfHeight = graph.getHeight() * 0.5f;
+        static constexpr std::array<float, 5> dbMarks { -12.0f, -6.0f, -4.0f, -2.0f, 0.0f };
+        g.setFont (juce::FontOptions (8.5f));
+        for (const float db : dbMarks)
+        {
+            const float amplitude = juce::Decibels::decibelsToGain (db);
+            const float offset = amplitude * halfHeight;
+            g.setColour (db == 0.0f ? theme::textDim().withAlpha (0.65f)
+                                     : theme::border().withAlpha (0.45f));
+            g.drawHorizontalLine (juce::roundToInt (centreY - offset), graph.getX(), graph.getRight());
+            g.drawHorizontalLine (juce::roundToInt (centreY + offset), graph.getX(), graph.getRight());
+            g.setColour (theme::textDim());
+            g.drawText (juce::String (static_cast<int> (db)),
+                        juce::Rectangle<float> (scope.getX() + 2.0f, centreY - offset - 6.0f,
+                                                25.0f, 12.0f),
+                        juce::Justification::centredLeft);
+            g.drawText (juce::String (static_cast<int> (db)),
+                        juce::Rectangle<float> (graph.getRight() + 3.0f, centreY + offset - 6.0f,
+                                                25.0f, 12.0f),
+                        juce::Justification::centredRight);
+        }
+
+        const int count = static_cast<int> (waveform.size());
+        const int visibleCount = count > 0 ? std::max (1, count / zoomFactor) : 0;
+        const int start = std::max (0, count - visibleCount);
+        juce::Path reductionLine;
+        if (visibleCount > 0)
+        {
+            const int pixelWidth = std::max (1, juce::roundToInt (graph.getWidth()));
+            for (int pixel = 0; pixel < pixelWidth; ++pixel)
+            {
+                const int first = start + pixel * visibleCount / pixelWidth;
+                const int last = std::max (first + 1, start + (pixel + 1) * visibleCount / pixelWidth);
+                float minimum = 0.0f, maximum = 0.0f, reduction = 0.0f;
+                for (int index = first; index < std::min (last, count); ++index)
+                {
+                    const auto& column = waveform[static_cast<std::size_t> (index)];
+                    minimum = std::min (minimum, column.minimum);
+                    maximum = std::max (maximum, column.maximum);
+                    reduction = std::max (reduction, column.gainReductionDb);
+                }
+                const float x = graph.getX() + static_cast<float> (pixel);
+                const float top = centreY - juce::jlimit (0.0f, 1.0f, maximum) * halfHeight;
+                const float bottom = centreY - juce::jlimit (-1.0f, 0.0f, minimum) * halfHeight;
+                g.setColour (theme::accent().withAlpha (0.88f));
+                g.fillRect (x, top, 1.5f, std::max (1.0f, bottom - top));
+                const float grY = centreY + juce::jlimit (0.0f, 1.0f, reduction / 12.0f) * halfHeight;
+                if (pixel == 0)
+                    reductionLine.startNewSubPath (x, grY);
+                else
+                    reductionLine.lineTo (x, grY);
+            }
+            g.setColour (theme::recording());
+            g.strokePath (reductionLine, juce::PathStrokeType (1.5f));
+        }
+
+        g.setColour (theme::textDim());
+        g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+        g.drawText ("IN", meters.removeFromLeft (32.0f), juce::Justification::centredTop);
+        g.drawText ("GR", meters.removeFromLeft (32.0f), juce::Justification::centredTop);
+        g.drawText ("OUT", meters, juce::Justification::centredTop);
+        meters = scope.reduced (9.0f, 8.0f).removeFromRight (108.0f);
+        meters.removeFromTop (15.0f);
+        drawLevelMeter (g, meters.removeFromLeft (32.0f), compressor.inputPeak (0),
+                        compressor.inputPeak (1));
+        const float reduction = compressor.gainReductionDb();
+        auto grArea = meters.removeFromLeft (32.0f);
+        const float meterY = grArea.getY() + 5.0f;
+        const float meterHeight = grArea.getHeight() - 10.0f;
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRect (grArea.getX() + 8.0f, meterY, 14.0f, meterHeight);
+        g.setColour (theme::recording());
+        g.fillRect (grArea.getX() + 8.0f, meterY, 14.0f,
+                    juce::jlimit (0.0f, meterHeight, reduction / 12.0f * meterHeight));
+        g.setColour (theme::textDim());
+        g.setFont (juce::FontOptions (8.0f));
+        g.drawText (juce::String (reduction, 1), grArea.withY (grArea.getBottom() - 14.0f)
+                    .withHeight (12.0f), juce::Justification::centred);
+        drawLevelMeter (g, meters, compressor.outputPeak (0), compressor.outputPeak (1));
+    }
+
+    static void drawLevelMeter (juce::Graphics& g, juce::Rectangle<float> area,
+                                float left, float right)
+    {
+        const float top = area.getY() + 5.0f;
+        const float height = area.getHeight() - 23.0f;
+        for (int channel = 0; channel < 2; ++channel)
+        {
+            const float x = area.getX() + 5.0f + channel * 11.0f;
+            const float level = channel == 0 ? left : right;
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.fillRect (x, top, 7.0f, height);
+            const float db = level > 0.000001f
+                ? juce::Decibels::gainToDecibels (level) : -48.0f;
+            const float fill = juce::jlimit (0.0f, 1.0f, (db + 48.0f) / 48.0f) * height;
+            g.setColour (db > -6.0f ? theme::warning() : theme::accent());
+            g.fillRect (x, top + height - fill, 7.0f, fill);
+        }
+    }
+
+    void timerCallback() override
+    {
+        if (sourceOptionsChanged())
+            refreshSourceItems();
+        for (auto& control : controls)
+            control->refresh();
+        for (auto& control : sidechainControls)
+            control->refresh();
+        bypass.setToggleState (compressor.getParameters()[8]->getValue() >= 0.5f,
+                               juce::dontSendNotification);
+        ab.setButtonText (compressor.activeABSlot() == 0 ? "A" : "B");
+        sourceBox.setSelectedId (selectedSourceItem(), juce::dontSendNotification);
+        waveform.resize (static_cast<std::size_t> (CompMasterProcessor::scopeBufferSize));
+        const int count = compressor.copyScopeSnapshot (
+            waveform.data(), static_cast<int> (waveform.size()));
+        waveform.resize (static_cast<std::size_t> (count));
+        repaint();
+    }
+
+    CompMasterProcessor& compressor;
+    std::vector<std::unique_ptr<ParameterKnob>> controls;
+    std::vector<std::unique_ptr<ParameterKnob>> sidechainControls;
+    std::vector<CompMasterProcessor::ScopeColumn> waveform;
+    std::vector<CompMasterProcessor::SidechainSource> sourceOptionsCache;
+    juce::ComboBox sourceBox;
+    juce::TextButton zoomIn, zoomOut, bypass, ab;
+    int zoomFactor = 1;
+};
+
+class EqMasterEditor final : public juce::AudioProcessorEditor, private juce::Timer
+{
+public:
+    explicit EqMasterEditor (EqMasterProcessor& processor)
+        : juce::AudioProcessorEditor (processor), equalizer (processor), fft (11)
+    {
+        setSize (850, 560);
+        setResizable (false, false);
+
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        {
+            auto& button = bandButtons[static_cast<std::size_t> (band)];
+            button.setButtonText (juce::String (band + 1));
+            button.setColour (juce::TextButton::buttonColourId, theme::control());
+            button.setColour (juce::TextButton::buttonOnColourId, theme::accent());
+            button.setColour (juce::TextButton::textColourOffId, theme::text());
+            button.setColour (juce::TextButton::textColourOnId, theme::text());
+            button.setClickingTogglesState (true);
+            button.setRadioGroupId (9814);
+            button.setToggleState (band == 0, juce::dontSendNotification);
+            button.onClick = [this, band]
+            {
+                selectedBand = band;
+                bandButtons[static_cast<std::size_t> (band)].setToggleState (
+                    true, juce::dontSendNotification);
+                refreshSelectedBand();
+                repaint();
+            };
+            button.onDoubleClick = [this, band] { resetBand (band); };
+            addAndMakeVisible (button);
+        }
+
+        enabled.setButtonText ("Band enabled");
+        enabled.setColour (juce::ToggleButton::textColourId, theme::text());
+        enabled.setColour (juce::ToggleButton::tickColourId, theme::accent());
+        enabled.onClick = [this]
+        {
+            if (auto* parameter = selectedParameter (0))
+            {
+                parameter->beginChangeGesture();
+                parameter->setValue (enabled.getToggleState() ? 1.0f : 0.0f);
+                parameter->endChangeGesture();
+                repaint();
+            }
+        };
+        addAndMakeVisible (enabled);
+
+        type.setTextWhenNothingSelected ("Filter");
+        type.addItem ("Bell", 1);
+        type.addItem ("Low Pass", 2);
+        type.addItem ("High Pass", 3);
+        type.addItem ("Notch", 4);
+        type.onChange = [this] { setSelectedParameter (4, (type.getSelectedId() - 1) / 3.0f); };
+        type.onDoubleClick = [this] { resetSelectedParameter (4); };
+        addAndMakeVisible (type);
+
+        slope.setTextWhenNothingSelected ("Slope");
+        slope.addItem ("12 dB/oct", 1);
+        slope.addItem ("24 dB/oct", 2);
+        slope.addItem ("48 dB/oct", 3);
+        slope.onChange = [this] { setSelectedParameter (5, (slope.getSelectedId() - 1) * 0.5f); };
+        slope.onDoubleClick = [this] { resetSelectedParameter (5); };
+        addAndMakeVisible (slope);
+
+        channelMode.addItem ("Stereo", 1);
+        channelMode.addItem ("Mid", 2);
+        channelMode.addItem ("Side", 3);
+        channelMode.onChange = [this]
+        {
+            auto* parameter = parameterWithId (equalizer, "mode");
+            if (parameter != nullptr)
+            {
+                parameter->beginChangeGesture();
+                parameter->setValue (static_cast<float> (channelMode.getSelectedId() - 1) * 0.5f);
+                parameter->endChangeGesture();
+            }
+        };
+        channelMode.setColour (juce::ComboBox::backgroundColourId, theme::control());
+        channelMode.setColour (juce::ComboBox::textColourId, theme::text());
+        channelMode.setColour (juce::ComboBox::outlineColourId, theme::border());
+        addAndMakeVisible (channelMode);
+
+        analyzerMode.addItem ("Analyzer: Pre", 1);
+        analyzerMode.addItem ("Analyzer: Post", 2);
+        analyzerMode.onChange = [this]
+        {
+            if (auto* parameter = parameterWithId (equalizer, "analyzer_mode"))
+            {
+                parameter->beginChangeGesture();
+                parameter->setValue (static_cast<float> (analyzerMode.getSelectedId() - 1));
+                parameter->endChangeGesture();
+            }
+        };
+        analyzerMode.setColour (juce::ComboBox::backgroundColourId, theme::control());
+        analyzerMode.setColour (juce::ComboBox::textColourId, theme::text());
+        analyzerMode.setColour (juce::ComboBox::outlineColourId, theme::border());
+        addAndMakeVisible (analyzerMode);
+
+        bypass.setButtonText ("Bypass");
+        bypass.setClickingTogglesState (true);
+        bypass.setColour (juce::TextButton::buttonColourId, theme::control());
+        bypass.setColour (juce::TextButton::buttonOnColourId, theme::recording());
+        bypass.setColour (juce::TextButton::textColourOffId, theme::text());
+        bypass.setColour (juce::TextButton::textColourOnId, theme::text());
+        bypass.onClick = [this]
+        {
+            auto* parameter = parameterWithId (equalizer, "bypass");
+            if (parameter != nullptr)
+            {
+                parameter->beginChangeGesture();
+                parameter->setValue (bypass.getToggleState() ? 1.0f : 0.0f);
+                parameter->endChangeGesture();
+            }
+        };
+        addAndMakeVisible (bypass);
+        ab.setButtonText ("A");
+        ab.setColour (juce::TextButton::buttonColourId, theme::control());
+        ab.setColour (juce::TextButton::textColourOffId, theme::text());
+        ab.onClick = [this] { equalizer.selectABState (1 - equalizer.activeABSlot()); };
+        addAndMakeVisible (ab);
+
+        for (int offset = 1; offset <= 3; ++offset)
+        {
+            auto control = std::make_unique<ParameterKnob> (*selectedParameter (offset));
+            addAndMakeVisible (*control);
+            controls.push_back (std::move (control));
+        }
+        refreshSelectedBand();
+        startTimerHz (30);
+    }
+
+    ~EqMasterEditor() override { stopTimer(); }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (theme::panel());
+        g.setColour (theme::text());
+        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.drawText ("EQ MASTER", getLocalBounds().removeFromTop (36).reduced (18, 0),
+                    juce::Justification::centredLeft, true);
+
+        auto bounds = getLocalBounds().reduced (18);
+        bounds.removeFromTop (42);
+        auto graph = bounds.removeFromTop (270).toFloat().reduced (10.0f, 8.0f);
+        drawResponseGraph (g, graph);
+    }
+
+    void resized() override
+    {
+        auto header = getLocalBounds().reduced (18).removeFromTop (36);
+        bypass.setBounds (header.removeFromRight (88).reduced (2, 4));
+        ab.setBounds (header.removeFromRight (44).reduced (2, 4));
+        channelMode.setBounds (header.removeFromRight (125).reduced (2, 4));
+        analyzerMode.setBounds (header.removeFromRight (145).reduced (2, 4));
+
+        auto area = getLocalBounds().reduced (18);
+        area.removeFromTop (42);
+        area.removeFromTop (270);
+        area.removeFromTop (6);
+        auto selectors = area.removeFromTop (30);
+        const int buttonWidth = selectors.getWidth() / EqMasterProcessor::bandCount;
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        {
+            const int x = selectors.getX() + band * buttonWidth;
+            bandButtons[static_cast<std::size_t> (band)].setBounds (
+                x, selectors.getY(), bandWidth (selectors, band, buttonWidth), selectors.getHeight());
+        }
+        area.removeFromTop (6);
+        enabled.setBounds (area.removeFromLeft (112).removeFromTop (26));
+        area.removeFromLeft (4);
+        const int controlWidth = 105;
+        for (auto& control : controls)
+        {
+            control->setBounds (area.removeFromLeft (controlWidth));
+            area.removeFromLeft (2);
+        }
+        const int comboWidth = area.getWidth() / 2;
+        type.setBounds (area.removeFromLeft (comboWidth).removeFromTop (28));
+        slope.setBounds (area.removeFromLeft (area.getWidth()).removeFromTop (28));
+    }
+
+    void mouseDown (const juce::MouseEvent& event) override
+    {
+        const auto graph = responseGraphBounds();
+        if (! graph.contains (event.position))
+            return;
+
+        const auto point = event.position;
+        float nearestDistance = 18.0f;
+        int nearestBand = -1;
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        {
+            const auto frequency = parameterPhysicalValue (band, 1);
+            const auto typeIndex = std::clamp (static_cast<int> (std::round (
+                parameterWithId (equalizer, "band" + juce::String (band + 1)
+                                 + "_type")->getValue() * 3.0f)), 0, 3);
+            const auto gain = typeIndex == 0 ? parameterPhysicalValue (band, 2) : 0.0;
+            const auto x = graphXForFrequency (graph, frequency);
+            const auto y = graphYForGain (graph, gain);
+            const float distance = point.getDistanceFrom (juce::Point<float> (x, y));
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestBand = band;
+            }
+        }
+        if (nearestBand < 0)
+            return;
+
+        selectedBand = nearestBand;
+        bandButtons[static_cast<std::size_t> (selectedBand)].setToggleState (
+            true, juce::dontSendNotification);
+        refreshSelectedBand();
+        draggingNode = true;
+        if (auto* frequency = selectedParameter (1))
+            frequency->beginChangeGesture();
+        if (auto* gain = selectedParameter (2))
+            gain->beginChangeGesture();
+        updateSelectedNode (point, graph);
+    }
+
+    void mouseDrag (const juce::MouseEvent& event) override
+    {
+        if (draggingNode)
+            updateSelectedNode (event.position, responseGraphBounds());
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (! draggingNode)
+            return;
+        if (auto* frequency = selectedParameter (1))
+            frequency->endChangeGesture();
+        if (auto* gain = selectedParameter (2))
+            gain->endChangeGesture();
+        draggingNode = false;
+    }
+
+private:
+    static int bandWidth (juce::Rectangle<int> area, int band, int nominalWidth)
+    {
+        return band + 1 == EqMasterProcessor::bandCount
+            ? area.getRight() - (area.getX() + band * nominalWidth) : nominalWidth;
+    }
+
+    juce::AudioProcessorParameter* selectedParameter (int offset) const
+    {
+        return bandParameter (selectedBand, offset);
+    }
+
+    double parameterPhysicalValue (int band, int offset) const
+    {
+        const auto id = "band" + juce::String (band + 1) + "_"
+                      + (offset == 1 ? "frequency" : offset == 2 ? "gain" : "quality");
+        if (auto* parameter = parameterWithId (equalizer, id))
+        {
+            const auto value = parameter->getValue();
+            if (offset == 1)
+                return 20.0 * std::pow (1000.0, value);
+            if (offset == 2)
+                return value * 36.0 - 18.0;
+            return 0.1 * std::pow (100.0, value);
+        }
+        return 0.0;
+    }
+
+    void refreshSelectedBand()
+    {
+        enabled.setToggleState (selectedParameter (0)->getValue() >= 0.5f,
+                                juce::dontSendNotification);
+        const int filterType = currentFilterType();
+        for (std::size_t index = 0; index < controls.size(); ++index)
+        {
+            if (auto* parameter = selectedParameter (static_cast<int> (index) + 1))
+                controls[index]->setParameter (*parameter);
+            controls[index]->setVisible (index != 1 || filterType == 0);
+            controls[index]->refresh();
+        }
+        type.setSelectedId (filterType + 1, juce::dontSendNotification);
+        slope.setSelectedId (static_cast<int> (std::round (
+            selectedParameter (5)->getValue() * 2.0f)) + 1, juce::dontSendNotification);
+        slope.setEnabled (filterType == 1 || filterType == 2);
+    }
+
+    int currentFilterType() const
+    {
+        return std::clamp (static_cast<int> (std::round (
+            selectedParameter (4)->getValue() * 3.0f)), 0, 3);
+    }
+
+    void setSelectedParameter (int offset, float value)
+    {
+        if (auto* parameter = selectedParameter (offset))
+        {
+            parameter->beginChangeGesture();
+            parameter->setValue (value);
+            parameter->endChangeGesture();
+            refreshSelectedBand();
+            repaint();
+        }
+    }
+
+    void resetSelectedParameter (int offset)
+    {
+        if (auto* parameter = selectedParameter (offset))
+            setSelectedParameter (offset, parameter->getDefaultValue());
+    }
+
+    void resetBand (int band)
+    {
+        for (int offset = 0; offset < 6; ++offset)
+            if (auto* parameter = bandParameter (band, offset))
+            {
+                parameter->beginChangeGesture();
+                parameter->setValue (parameter->getDefaultValue());
+                parameter->endChangeGesture();
+            }
+        if (selectedBand == band)
+            refreshSelectedBand();
+        repaint();
+    }
+
+    juce::AudioProcessorParameter* bandParameter (int band, int offset) const
+    {
+        static constexpr std::array<const char*, 6> suffixes {
+            "enabled", "frequency", "gain", "quality", "type", "slope"
+        };
+        return parameterWithId (equalizer,
+            "band" + juce::String (band + 1) + "_" + suffixes[static_cast<std::size_t> (offset)]);
+    }
+
+    juce::Rectangle<float> responseGraphBounds() const
+    {
+        auto bounds = getLocalBounds().reduced (18);
+        bounds.removeFromTop (42);
+        return bounds.removeFromTop (270).toFloat().reduced (10.0f, 8.0f);
+    }
+
+    static float graphXForFrequency (juce::Rectangle<float> graph, double frequency)
+    {
+        const double normalized = std::log (std::clamp (frequency, 20.0, 20000.0) / 20.0)
+                                / std::log (1000.0);
+        return graph.getX() + static_cast<float> (normalized) * graph.getWidth();
+    }
+
+    static float graphYForGain (juce::Rectangle<float> graph, double gain)
+    {
+        return graph.getCentreY() - static_cast<float> (gain / 18.0) * graph.getHeight() * 0.5f;
+    }
+
+    void updateSelectedNode (juce::Point<float> point, juce::Rectangle<float> graph)
+    {
+        const float x = juce::jlimit (graph.getX(), graph.getRight(), point.x);
+        const float y = juce::jlimit (graph.getY(), graph.getBottom(), point.y);
+        const float normalizedFrequency = (x - graph.getX()) / graph.getWidth();
+        const float frequency = 20.0f * std::pow (1000.0f, normalizedFrequency);
+        if (auto* parameter = selectedParameter (1))
+            parameter->setValue (static_cast<float> (
+                std::log (frequency / 20.0f) / std::log (1000.0f)));
+        if (currentFilterType() == 0)
+        {
+            const float gain = (graph.getCentreY() - y) / (graph.getHeight() * 0.5f) * 18.0f;
+            if (auto* parameter = selectedParameter (2))
+                parameter->setValue ((gain + 18.0f) / 36.0f);
+        }
+        for (auto& control : controls)
+            control->refresh();
+        repaint();
+    }
+
+    void drawResponseGraph (juce::Graphics& g, juce::Rectangle<float> graph)
+    {
+        g.setColour (juce::Colour (0xff161616));
+        g.fillRoundedRectangle (graph, 5.0f);
+        g.setColour (theme::border());
+        g.drawRoundedRectangle (graph, 5.0f, 1.0f);
+
+        constexpr std::array<double, 10> frequencies {
+            20.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0, 20000.0
+        };
+        for (const auto frequency : frequencies)
+        {
+            const auto x = graphXForFrequency (graph, frequency);
+            g.setColour (theme::border().withAlpha (0.42f));
+            g.drawVerticalLine (juce::roundToInt (x), graph.getY(), graph.getBottom());
+            g.setColour (theme::textDim());
+            g.setFont (juce::FontOptions (9.5f));
+            const auto label = frequency >= 1000.0
+                ? juce::String (frequency / 1000.0, frequency >= 10000.0 ? 0 : 1) + "k"
+                : juce::String (static_cast<int> (frequency));
+            g.drawText (label, juce::Rectangle<float> (x - 20.0f, graph.getBottom() - 15.0f,
+                                                       40.0f, 12.0f),
+                        juce::Justification::centred);
+        }
+        for (int db = -18; db <= 18; db += 6)
+        {
+            const auto y = graphYForGain (graph, db);
+            g.setColour (db == 0 ? theme::textDim().withAlpha (0.8f)
+                                 : theme::border().withAlpha (0.42f));
+            g.drawHorizontalLine (juce::roundToInt (y), graph.getX(), graph.getRight());
+            g.setColour (theme::textDim());
+            g.setFont (juce::FontOptions (9.5f));
+            g.drawText (juce::String (db),
+                        juce::Rectangle<int> (juce::roundToInt (graph.getX() + 2.0f),
+                                               juce::roundToInt (y - 7.0f), 28, 14),
+                        juce::Justification::centredLeft);
+        }
+
+        juce::Path response;
+        constexpr int points = 240;
+        for (int point = 0; point <= points; ++point)
+        {
+            const double frequency = 20.0 * std::pow (1000.0, static_cast<double> (point) / points);
+            double totalGain = 0.0;
+            for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+            {
+                auto* enabledParameter = parameterWithId (
+                    equalizer, "band" + juce::String (band + 1) + "_enabled");
+                if (enabledParameter == nullptr || enabledParameter->getValue() < 0.5f)
+                    continue;
+                const double centre = parameterPhysicalValue (band, 1);
+                const double gain = parameterPhysicalValue (band, 2);
+                const double quality = parameterPhysicalValue (band, 3);
+                const int typeIndex = std::clamp (static_cast<int> (std::round (
+                    parameterWithId (equalizer, "band" + juce::String (band + 1)
+                                     + "_type")->getValue() * 3.0f)), 0, 3);
+                const int slopeIndex = std::clamp (static_cast<int> (std::round (
+                    parameterWithId (equalizer, "band" + juce::String (band + 1)
+                                     + "_slope")->getValue() * 2.0f)), 0, 2);
+                if (typeIndex == 0 && std::abs (gain) < 0.001)
+                    continue;
+                int stageCount = 0;
+                const auto stages = makeBandCoefficients (typeIndex, slopeIndex, centre, gain,
+                    quality, equalizer.getSampleRate(), stageCount);
+                for (int stage = 0; stage < stageCount; ++stage)
+                    totalGain += responseDb (stages[static_cast<std::size_t> (stage)], frequency,
+                                             equalizer.getSampleRate());
+            }
+            const float x = graph.getX() + graph.getWidth()
+                          * static_cast<float> (point) / static_cast<float> (points);
+            const float y = graphYForGain (graph, juce::jlimit (-18.0, 18.0, totalGain));
+            if (point == 0)
+                response.startNewSubPath (x, y);
+            else
+                response.lineTo (x, y);
+        }
+        g.setColour (theme::accent());
+        drawAnalyzer (g, graph);
+        g.strokePath (response, juce::PathStrokeType (2.0f));
+
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        {
+            const auto frequency = parameterPhysicalValue (band, 1);
+            const auto* filterType = parameterWithId (
+                equalizer, "band" + juce::String (band + 1) + "_type");
+            const auto gain = filterType != nullptr && filterType->getValue() < 0.1667f
+                ? parameterPhysicalValue (band, 2) : 0.0;
+            const auto centre = juce::Point<float> (
+                graphXForFrequency (graph, frequency), graphYForGain (graph, gain));
+            const bool enabledBand = parameterWithId (
+                equalizer, "band" + juce::String (band + 1) + "_enabled")->getValue() >= 0.5f;
+            const auto color = enabledBand ? theme::accent() : theme::textDim();
+            g.setColour (color);
+            g.fillEllipse (juce::Rectangle<float> (centre.x - (band == selectedBand ? 6.0f : 4.0f),
+                                                   centre.y - (band == selectedBand ? 6.0f : 4.0f),
+                                                   band == selectedBand ? 12.0f : 8.0f,
+                                                   band == selectedBand ? 12.0f : 8.0f));
+            g.setColour (theme::text());
+            g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+            g.drawText (juce::String (band + 1),
+                        juce::Rectangle<int> (juce::roundToInt (centre.x + 5.0f),
+                                               juce::roundToInt (centre.y - 17.0f), 18, 14),
+                        juce::Justification::centred);
+        }
+    }
+
+    void timerCallback() override
+    {
+        refreshSelectedBand();
+        if (auto* mode = parameterWithId (equalizer, "mode"))
+            channelMode.setSelectedId (static_cast<int> (std::round (mode->getValue() * 2.0f)) + 1,
+                                       juce::dontSendNotification);
+        if (auto* analyzer = parameterWithId (equalizer, "analyzer_mode"))
+            analyzerMode.setSelectedId (static_cast<int> (std::round (analyzer->getValue())) + 1,
+                                        juce::dontSendNotification);
+        if (auto* parameter = parameterWithId (equalizer, "bypass"))
+            bypass.setToggleState (parameter->getValue() >= 0.5f,
+                                   juce::dontSendNotification);
+        ab.setButtonText (equalizer.activeABSlot() == 0 ? "A" : "B");
+        updateAnalyzer();
+        repaint();
+    }
+
+    void updateAnalyzer()
+    {
+        const bool postEq = parameterWithId (equalizer, "analyzer_mode")->getValue() >= 0.5f;
+        const int count = equalizer.copyAnalyzerSnapshot (
+            postEq, analyzerSamples.data(), static_cast<int> (analyzerSamples.size()));
+        fftData.fill (0.0f);
+        const int start = static_cast<int> (analyzerSamples.size()) - count;
+        for (int index = 0; index < count; ++index)
+        {
+            const int position = start + index;
+            const float window = 0.5f - 0.5f * std::cos (
+                juce::MathConstants<float>::twoPi * static_cast<float> (position)
+                / static_cast<float> (EqMasterProcessor::analyzerBufferSize - 1));
+            fftData[static_cast<std::size_t> (position)] =
+                analyzerSamples[static_cast<std::size_t> (index)] * window;
+        }
+        fft.performFrequencyOnlyForwardTransform (fftData.data());
+        for (int bin = 0; bin <= EqMasterProcessor::analyzerBufferSize / 2; ++bin)
+            analyzerMagnitudes[static_cast<std::size_t> (bin)] =
+                fftData[static_cast<std::size_t> (bin)]
+                / static_cast<float> (EqMasterProcessor::analyzerBufferSize / 2);
+    }
+
+    void drawAnalyzer (juce::Graphics& g, juce::Rectangle<float> graph)
+    {
+        juce::Path path;
+        constexpr int points = 240;
+        const double rate = std::max (equalizer.getSampleRate(), 1.0);
+        for (int point = 0; point <= points; ++point)
+        {
+            const double frequency = 20.0 * std::pow (
+                1000.0, static_cast<double> (point) / points);
+            const int bin = std::clamp (juce::roundToInt (
+                frequency * EqMasterProcessor::analyzerBufferSize / rate),
+                0, EqMasterProcessor::analyzerBufferSize / 2);
+            const float magnitude = analyzerMagnitudes[static_cast<std::size_t> (bin)];
+            const float db = juce::Decibels::gainToDecibels (magnitude, -90.0f);
+            const float normalized = juce::jlimit (0.0f, 1.0f, (db + 90.0f) / 90.0f);
+            const float x = graph.getX() + graph.getWidth()
+                          * static_cast<float> (point) / static_cast<float> (points);
+            const float y = graph.getBottom() - normalized * graph.getHeight();
+            if (point == 0)
+                path.startNewSubPath (x, y);
+            else
+                path.lineTo (x, y);
+        }
+        g.setColour (theme::accent().withAlpha (0.18f));
+        auto filled = path;
+        filled.lineTo (graph.getRight(), graph.getBottom());
+        filled.lineTo (graph.getX(), graph.getBottom());
+        filled.closeSubPath();
+        g.fillPath (filled);
+        g.setColour (theme::accent().withAlpha (0.6f));
+        g.strokePath (path, juce::PathStrokeType (1.0f));
+    }
+
+    EqMasterProcessor& equalizer;
+    std::array<ParameterButton, EqMasterProcessor::bandCount> bandButtons;
+    juce::ToggleButton enabled;
+    ParameterComboBox type, slope;
+    juce::ComboBox channelMode, analyzerMode;
+    juce::TextButton bypass, ab;
+    juce::dsp::FFT fft;
+    std::array<float, EqMasterProcessor::analyzerBufferSize * 2> fftData {};
+    std::array<float, EqMasterProcessor::analyzerBufferSize> analyzerSamples {};
+    std::array<float, EqMasterProcessor::analyzerBufferSize / 2 + 1> analyzerMagnitudes {};
+    std::vector<std::unique_ptr<ParameterKnob>> controls;
+    int selectedBand = 0;
+    bool draggingNode = false;
+};
+}
+
+CompMasterProcessor::CompMasterProcessor()
+    : juce::AudioProcessor (BusesProperties()
+        .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+        .withInput ("Sidechain", juce::AudioChannelSet::stereo(), true)
+        .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+    , scopeMinimums (std::make_unique<std::atomic<float>[]> (scopeBufferSize))
+    , scopeMaximums (std::make_unique<std::atomic<float>[]> (scopeBufferSize))
+    , scopeGainReductions (std::make_unique<std::atomic<float>[]> (scopeBufferSize))
+{
+    addParameter (new EffectParameter ("threshold", "Threshold", 0.7f, 0.7f,
+                                       EffectParameter::Kind::Threshold));
+    addParameter (new EffectParameter ("ratio", "Ratio", 3.0f / 19.0f, 3.0f / 19.0f,
+                                       EffectParameter::Kind::Ratio));
+    addParameter (new EffectParameter ("attack", "Attack",
+        std::log (10.0f / 0.1f) / std::log (2000.0f),
+        std::log (10.0f / 0.1f) / std::log (2000.0f), EffectParameter::Kind::Attack));
+    addParameter (new EffectParameter ("release", "Release",
+        std::log (100.0f) / std::log (1000.0f),
+        std::log (100.0f) / std::log (1000.0f), EffectParameter::Kind::Release));
+    addParameter (new EffectParameter ("knee", "Knee", 0.25f, 0.25f,
+                                       EffectParameter::Kind::Knee));
+    addParameter (new EffectParameter ("makeup", "Makeup", 0.0f, 0.0f,
+                                       EffectParameter::Kind::Makeup));
+    addParameter (new EffectParameter ("sidechain_low", "Sidechain Low Cut", 0.0f, 0.0f,
+                                       EffectParameter::Kind::Frequency));
+    addParameter (new EffectParameter ("sidechain_high", "Sidechain High Cut", 1.0f, 1.0f,
+                                       EffectParameter::Kind::Frequency));
+    addParameter (new EffectParameter ("bypass", "Bypass", 0.0f, 0.0f,
+                                       EffectParameter::Kind::Toggle));
+    for (int index = 0; index < scopeBufferSize; ++index)
+    {
+        scopeMinimums[static_cast<std::size_t> (index)].store (0.0f);
+        scopeMaximums[static_cast<std::size_t> (index)].store (0.0f);
+        scopeGainReductions[static_cast<std::size_t> (index)].store (0.0f);
+    }
+    initializeABState (*this, abState);
+}
+
+void CompMasterProcessor::prepareToPlay (double newSampleRate, int)
+{
+    sampleRate = std::max (newSampleRate, 1.0);
+    scopeDivider = std::max (1, static_cast<int> (sampleRate / 120.0));
+    scopeCounter = 0;
+    scopeWritePosition.store (0, std::memory_order_relaxed);
+    scopeAvailable.store (0, std::memory_order_relaxed);
+    envelope = 0.0f;
+    scopeMinimum = std::numeric_limits<float>::max();
+    scopeMaximum = std::numeric_limits<float>::lowest();
+    scopeGainReduction = 0.0f;
+    gainReduction.store (0.0f, std::memory_order_relaxed);
+    sidechainFilterStates = {};
+    lastSidechainSourceId = sidechainSource.load (std::memory_order_relaxed);
+    for (auto& peak : outputPeaks)
+        peak.store (0.0f, std::memory_order_relaxed);
+    for (auto& peak : inputPeaks)
+        peak.store (0.0f, std::memory_order_relaxed);
+}
+
+void CompMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    auto input = getBusBuffer (buffer, true, 0);
+    auto sidechain = getBusBuffer (buffer, true, 1);
+    auto output = getBusBuffer (buffer, false, 0);
+    if (input.getNumChannels() == 0 || output.getNumChannels() == 0)
+        return;
+
+    const auto parameters = getParameters();
+    const float thresholdDb = parameters[0]->getValue() * 60.0f - 60.0f;
+    const float ratio = 1.0f + parameters[1]->getValue() * 19.0f;
+    const float attackMs = 0.1f * std::pow (2000.0f, parameters[2]->getValue());
+    const float releaseMs = std::pow (1000.0f, parameters[3]->getValue());
+    const float kneeDb = parameters[4]->getValue() * 24.0f;
+    const float makeupDb = parameters[5]->getValue() * 24.0f;
+    const float lowCut = 20.0f * std::pow (1000.0f, parameters[6]->getValue());
+    const float highCut = 20.0f * std::pow (1000.0f, parameters[7]->getValue());
+    const bool bypass = parameters[8]->getValue() >= 0.5f;
+    const int sourceTrackId = sidechainSource.load (std::memory_order_relaxed);
+    if (sourceTrackId != lastSidechainSourceId)
+    {
+        sidechainFilterStates = {};
+        lastSidechainSourceId = sourceTrackId;
+    }
+    const bool useSidechain = sourceTrackId >= 0;
+    const double safeHighCut = std::min (
+        std::max (static_cast<double> (highCut), static_cast<double> (lowCut) * 1.01),
+        sampleRate * 0.45);
+    const auto highPass = makeHighPassCoefficients (lowCut, 0.70710678, sampleRate);
+    const auto lowPass = makeLowPassCoefficients (safeHighCut, 0.70710678, sampleRate);
+    const float attackCoefficient = std::exp (-1.0f / (static_cast<float> (sampleRate)
+                                                    * attackMs * 0.001f));
+    const float releaseCoefficient = std::exp (-1.0f / (static_cast<float> (sampleRate)
+                                                     * releaseMs * 0.001f));
+    float blockPeakLeft = 0.0f, blockPeakRight = 0.0f, blockReduction = 0.0f;
+    const auto* inputLeft = input.getReadPointer (0);
+    const auto* inputRight = input.getNumChannels() > 1 ? input.getReadPointer (1) : inputLeft;
+    auto* outputLeft = output.getWritePointer (0);
+    auto* outputRight = output.getNumChannels() > 1 ? output.getWritePointer (1) : outputLeft;
+    const auto* sidechainLeft = sidechain.getNumChannels() > 0 ? sidechain.getReadPointer (0) : nullptr;
+    const auto* sidechainRight = sidechain.getNumChannels() > 1 ? sidechain.getReadPointer (1)
+                                                                 : sidechainLeft;
+    const bool captureScope = std::max (input.getMagnitude (0, 0, input.getNumSamples()),
+        input.getNumChannels() > 1 ? input.getMagnitude (1, 0, input.getNumSamples()) : 0.0f) > 1.0e-6f;
+    float blockInputPeakLeft = 0.0f, blockInputPeakRight = 0.0f;
+
+    for (int sample = 0; sample < input.getNumSamples(); ++sample)
+    {
+        const float dryLeft = inputLeft[sample];
+        const float dryRight = inputRight[sample];
+        blockInputPeakLeft = std::max (blockInputPeakLeft, std::abs (dryLeft));
+        blockInputPeakRight = std::max (blockInputPeakRight, std::abs (dryRight));
+        float detectorLeft = dryLeft;
+        float detectorRight = dryRight;
+        if (useSidechain)
+        {
+            detectorLeft = sidechainLeft != nullptr ? sidechainLeft[sample] : 0.0f;
+            detectorRight = sidechainRight != nullptr ? sidechainRight[sample] : detectorLeft;
+            const auto filterDetector = [&] (float value, int channel)
+            {
+                for (int filter = 0; filter < 2; ++filter)
+                {
+                    const auto& c = filter == 0 ? highPass : lowPass;
+                    auto& state = sidechainFilterStates[static_cast<std::size_t> (filter)]
+                                                       [static_cast<std::size_t> (channel)];
+                    const double filtered = c.b0 * value + c.b1 * state.x1 + c.b2 * state.x2
+                                          - c.a1 * state.y1 - c.a2 * state.y2;
+                    state.x2 = state.x1;
+                    state.x1 = value;
+                    state.y2 = state.y1;
+                    state.y1 = filtered;
+                    value = static_cast<float> (filtered);
+                }
+                return value;
+            };
+            detectorLeft = filterDetector (detectorLeft, 0);
+            detectorRight = filterDetector (detectorRight, 1);
+        }
+        const float detector = std::max (std::abs (detectorLeft), std::abs (detectorRight));
+        const float coefficient = detector > envelope ? attackCoefficient : releaseCoefficient;
+        envelope = coefficient * envelope + (1.0f - coefficient) * detector;
+        const float levelDb = juce::Decibels::gainToDecibels (std::max (envelope, 1.0e-9f));
+        float reductionDb = 0.0f;
+        if (kneeDb > 0.0f && levelDb > thresholdDb - kneeDb * 0.5f
+            && levelDb < thresholdDb + kneeDb * 0.5f)
+        {
+            const float distance = levelDb - thresholdDb + kneeDb * 0.5f;
+            reductionDb = (1.0f / ratio - 1.0f) * distance * distance / (2.0f * kneeDb);
+        }
+        else if (levelDb >= thresholdDb + kneeDb * 0.5f)
+        {
+            reductionDb = (thresholdDb - levelDb) * (1.0f - 1.0f / ratio);
+        }
+        blockReduction = std::max (blockReduction, -reductionDb);
+        const float gain = bypass ? 1.0f
+            : juce::Decibels::decibelsToGain (reductionDb + makeupDb);
+        outputLeft[sample] = dryLeft * gain;
+        if (output.getNumChannels() > 1)
+            outputRight[sample] = dryRight * gain;
+
+        blockPeakLeft = std::max (blockPeakLeft, std::abs (outputLeft[sample]));
+        blockPeakRight = std::max (blockPeakRight, std::abs (output.getNumChannels() > 1
+                                                              ? outputRight[sample] : outputLeft[sample]));
+        if (captureScope)
+        {
+            scopeMinimum = std::min (scopeMinimum, std::min (outputLeft[sample], outputRight[sample]));
+            scopeMaximum = std::max (scopeMaximum, std::max (outputLeft[sample], outputRight[sample]));
+            scopeGainReduction = std::max (scopeGainReduction, -reductionDb);
+            if (++scopeCounter >= scopeDivider)
+            {
+                scopeCounter = 0;
+                const int position = scopeWritePosition.load (std::memory_order_relaxed);
+                scopeMinimums[static_cast<std::size_t> (position)].store (scopeMinimum,
+                                                                           std::memory_order_relaxed);
+                scopeMaximums[static_cast<std::size_t> (position)].store (scopeMaximum,
+                                                                           std::memory_order_relaxed);
+                scopeGainReductions[static_cast<std::size_t> (position)].store (scopeGainReduction,
+                                                                                 std::memory_order_relaxed);
+                const int next = (position + 1) % scopeBufferSize;
+                scopeWritePosition.store (next, std::memory_order_release);
+                scopeAvailable.store (std::min (scopeBufferSize,
+                    scopeAvailable.load (std::memory_order_relaxed) + 1), std::memory_order_release);
+                scopeMinimum = std::numeric_limits<float>::max();
+                scopeMaximum = std::numeric_limits<float>::lowest();
+                scopeGainReduction = 0.0f;
+            }
+        }
+    }
+
+    inputPeaks[0].store (std::max (blockInputPeakLeft,
+        inputPeaks[0].load (std::memory_order_relaxed) * 0.92f), std::memory_order_relaxed);
+    inputPeaks[1].store (std::max (blockInputPeakRight,
+        inputPeaks[1].load (std::memory_order_relaxed) * 0.92f), std::memory_order_relaxed);
+    outputPeaks[0].store (std::max (blockPeakLeft,
+        outputPeaks[0].load (std::memory_order_relaxed) * 0.92f), std::memory_order_relaxed);
+    outputPeaks[1].store (std::max (blockPeakRight,
+        outputPeaks[1].load (std::memory_order_relaxed) * 0.92f), std::memory_order_relaxed);
+    gainReduction.store (blockReduction, std::memory_order_relaxed);
+}
+
+int CompMasterProcessor::copyScopeSnapshot (ScopeColumn* destination, int capacity) const
+{
+    if (destination == nullptr || capacity <= 0)
+        return 0;
+    const int count = std::min (capacity, scopeAvailable.load (std::memory_order_acquire));
+    const int writePosition = scopeWritePosition.load (std::memory_order_acquire);
+    const int start = (writePosition - count + scopeBufferSize) % scopeBufferSize;
+    for (int index = 0; index < count; ++index)
+    {
+        const int position = (start + index) % scopeBufferSize;
+        destination[index] = {
+            scopeMinimums[static_cast<std::size_t> (position)].load (std::memory_order_relaxed),
+            scopeMaximums[static_cast<std::size_t> (position)].load (std::memory_order_relaxed),
+            scopeGainReductions[static_cast<std::size_t> (position)].load (std::memory_order_relaxed)
+        };
+    }
+    return count;
+}
+
+float CompMasterProcessor::inputPeak (int channel) const
+{
+    return inputPeaks[static_cast<std::size_t> (std::clamp (channel, 0, 1))]
+        .load (std::memory_order_relaxed);
+}
+
+float CompMasterProcessor::outputPeak (int channel) const
+{
+    return outputPeaks[static_cast<std::size_t> (std::clamp (channel, 0, 1))]
+        .load (std::memory_order_relaxed);
+}
+
+juce::AudioProcessorEditor* CompMasterProcessor::createEditor()
+{
+    return new CompMasterEditor (*this);
+}
+
+void CompMasterProcessor::getStateInformation (juce::MemoryBlock& destination)
+{
+    captureABState (*this, abState, activeAB);
+    storeNativeParameterState (*this, destination);
+    auto xml = juce::XmlDocument::parse (juce::String::fromUTF8 (
+        static_cast<const char*> (destination.getData()), static_cast<int> (destination.getSize())));
+    if (xml != nullptr)
+    {
+        xml->setAttribute ("sidechainSourceTrackId", sidechainSourceTrackId());
+        saveABState (*xml, abState, activeAB);
+        juce::MemoryOutputStream stream;
+        xml->writeTo (stream);
+        destination.replaceAll (stream.getData(), stream.getDataSize());
+    }
+}
+
+void CompMasterProcessor::setStateInformation (const void* data, int size)
+{
+    restoreNativeParameterState (*this, data, size);
+    if (data != nullptr && size > 0)
+    {
+        auto xml = juce::XmlDocument::parse (juce::String::fromUTF8 (
+            static_cast<const char*> (data), size));
+        if (xml != nullptr)
+        {
+            restoreABState (*this, *xml, abState, activeAB);
+            if (xml->hasAttribute ("sidechainSourceTrackId"))
+                setSidechainSourceTrackId (xml->getIntAttribute ("sidechainSourceTrackId"));
+        }
+    }
+}
+
+void CompMasterProcessor::selectABState (int slot)
+{
+    ::selectABState (*this, abState, activeAB, slot);
+}
+
+void CompMasterProcessor::setSidechainSourceTrackId (int trackId, bool notify)
+{
+    if (notify && onSidechainSourceChanged != nullptr
+        && ! onSidechainSourceChanged (trackId))
+        return;
+    sidechainSource.store (trackId, std::memory_order_relaxed);
+}
+
+void CompMasterProcessor::setSidechainSources (std::vector<SidechainSource> sources)
+{
+    sidechainSources = std::move (sources);
+}
+
+EqMasterProcessor::EqMasterProcessor()
+    : juce::AudioProcessor (BusesProperties()
+        .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+        .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+{
+    constexpr std::array<float, bandCount> initialFrequencies {
+        60.0f, 150.0f, 350.0f, 800.0f, 1800.0f, 4000.0f, 8000.0f, 14000.0f
+    };
+    for (int band = 0; band < bandCount; ++band)
+    {
+        const auto prefix = "band" + juce::String (band + 1) + "_";
+        const float normalizedFrequency = std::log (initialFrequencies[static_cast<std::size_t> (band)] / 20.0f)
+                                        / std::log (1000.0f);
+        addParameter (new EffectParameter (prefix + "enabled", "Band Enabled", 1.0f, 1.0f,
+                                           EffectParameter::Kind::Toggle));
+        addParameter (new EffectParameter (prefix + "frequency", "Frequency",
+                                           normalizedFrequency, normalizedFrequency,
+                                           EffectParameter::Kind::Frequency));
+        addParameter (new EffectParameter (prefix + "gain", "Gain", 0.5f, 0.5f,
+                                           EffectParameter::Kind::EqGain));
+        addParameter (new EffectParameter (prefix + "quality", "Q", 0.5f, 0.5f,
+                                           EffectParameter::Kind::Quality));
+        addParameter (new EffectParameter (prefix + "type", "Filter Type", 0.0f, 0.0f,
+                                           EffectParameter::Kind::FilterType));
+        addParameter (new EffectParameter (prefix + "slope", "Slope", 0.0f, 0.0f,
+                                           EffectParameter::Kind::FilterSlope));
+    }
+    addParameter (new EffectParameter ("mode", "Processing Mode", 0.0f, 0.0f,
+                                       EffectParameter::Kind::MidSide));
+    addParameter (new EffectParameter ("bypass", "Bypass", 0.0f, 0.0f,
+                                       EffectParameter::Kind::Toggle));
+    addParameter (new EffectParameter ("analyzer_mode", "Analyzer", 0.0f, 0.0f,
+                                       EffectParameter::Kind::Toggle));
+    initializeABState (*this, abState);
+}
+
+void EqMasterProcessor::prepareToPlay (double newSampleRate, int)
+{
+    sampleRate = std::max (newSampleRate, 1.0);
+    states = {};
+    lastFilterTypes.fill (-1);
+    lastFilterSlopes.fill (-1);
+    analyzerWritePosition.store (0, std::memory_order_relaxed);
+    for (auto& sample : analyzerPre)
+        sample.store (0.0f, std::memory_order_relaxed);
+    for (auto& sample : analyzerPost)
+        sample.store (0.0f, std::memory_order_relaxed);
+}
+
+void EqMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    std::array<std::array<BiquadCoefficients, 4>, bandCount> coefficients {};
+    std::array<int, bandCount> stageCounts {};
+    std::array<bool, bandCount> enabledBands {};
+    const auto parameters = getParameters();
+    const int mode = std::clamp (static_cast<int> (std::round (
+        parameters[bandCount * 6]->getValue() * 2.0f)), 0, 2);
+    const bool bypass = parameters[bandCount * 6 + 1]->getValue() >= 0.5f;
+    for (int band = 0; band < bandCount; ++band)
+    {
+        const int offset = band * 6;
+        enabledBands[static_cast<std::size_t> (band)] = parameters[offset]->getValue() >= 0.5f;
+        const double frequency = 20.0 * std::pow (1000.0, parameters[offset + 1]->getValue());
+        const double gain = parameters[offset + 2]->getValue() * 36.0 - 18.0;
+        const double quality = 0.1 * std::pow (100.0, parameters[offset + 3]->getValue());
+        const int type = std::clamp (static_cast<int> (std::round (
+            parameters[offset + 4]->getValue() * 3.0f)), 0, 3);
+        const int slope = std::clamp (static_cast<int> (std::round (
+            parameters[offset + 5]->getValue() * 2.0f)), 0, 2);
+        if (type != lastFilterTypes[static_cast<std::size_t> (band)]
+            || slope != lastFilterSlopes[static_cast<std::size_t> (band)])
+        {
+            states[static_cast<std::size_t> (band)] = {};
+            lastFilterTypes[static_cast<std::size_t> (band)] = type;
+            lastFilterSlopes[static_cast<std::size_t> (band)] = slope;
+        }
+        coefficients[static_cast<std::size_t> (band)] = makeBandCoefficients (
+            type, slope, frequency, gain, quality, sampleRate,
+            stageCounts[static_cast<std::size_t> (band)]);
+        enabledBands[static_cast<std::size_t> (band)] = enabledBands[static_cast<std::size_t> (band)]
+            && (type != 0 || std::abs (gain) > 0.0001);
+    }
+
+    if (buffer.getNumChannels() == 0)
+        return;
+
+    auto processChannel = [&] (double value, int channel)
+    {
+        for (int band = 0; band < bandCount; ++band)
+        {
+            if (! enabledBands[static_cast<std::size_t> (band)])
+                continue;
+            for (int stage = 0; stage < stageCounts[static_cast<std::size_t> (band)]; ++stage)
+            {
+                const auto& c = coefficients[static_cast<std::size_t> (band)]
+                                              [static_cast<std::size_t> (stage)];
+                auto& state = states[static_cast<std::size_t> (band)]
+                                     [static_cast<std::size_t> (stage)]
+                                     [static_cast<std::size_t> (channel)];
+                const double output = c.b0 * value + c.b1 * state.x1 + c.b2 * state.x2
+                                    - c.a1 * state.y1 - c.a2 * state.y2;
+                state.x2 = state.x1;
+                state.x1 = value;
+                state.y2 = state.y1;
+                state.y1 = output;
+                value = output;
+            }
+        }
+        return value;
+    };
+
+    const int channels = std::min (2, buffer.getNumChannels());
+    auto* left = buffer.getWritePointer (0);
+    auto* right = channels > 1 ? buffer.getWritePointer (1) : left;
+    int writePosition = analyzerWritePosition.load (std::memory_order_relaxed);
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        const double inputLeft = left[sample];
+        const double inputRight = channels > 1 ? right[sample] : inputLeft;
+        const float preEq = static_cast<float> (mode == 0 ? inputLeft
+            : mode == 1 ? (inputLeft + inputRight) * 0.5
+                        : (inputLeft - inputRight) * 0.5);
+        double outputLeft = inputLeft;
+        double outputRight = inputRight;
+        if (! bypass)
+        {
+            if (mode == 0)
+            {
+                outputLeft = processChannel (inputLeft, 0);
+                outputRight = channels > 1 ? processChannel (inputRight, 1) : outputLeft;
+            }
+            else
+            {
+                double mid = (inputLeft + inputRight) * 0.5;
+                double side = (inputLeft - inputRight) * 0.5;
+                if (mode == 1)
+                    mid = processChannel (mid, 0);
+                else
+                    side = processChannel (side, 1);
+                outputLeft = mid + side;
+                outputRight = mid - side;
+            }
+        }
+        left[sample] = static_cast<float> (outputLeft);
+        if (channels > 1)
+            right[sample] = static_cast<float> (outputRight);
+        analyzerPre[static_cast<std::size_t> (writePosition)].store (preEq,
+                                                                     std::memory_order_relaxed);
+        analyzerPost[static_cast<std::size_t> (writePosition)].store (
+            static_cast<float> (mode == 0 ? outputLeft
+                : mode == 1 ? (outputLeft + outputRight) * 0.5
+                            : (outputLeft - outputRight) * 0.5),
+            std::memory_order_relaxed);
+        writePosition = (writePosition + 1) % analyzerBufferSize;
+    }
+    analyzerWritePosition.store (writePosition, std::memory_order_release);
+}
+
+int EqMasterProcessor::copyAnalyzerSnapshot (bool postEq, float* destination, int capacity) const
+{
+    if (destination == nullptr || capacity <= 0)
+        return 0;
+    const int count = std::min (capacity, analyzerBufferSize);
+    const int writePosition = analyzerWritePosition.load (std::memory_order_acquire);
+    const int start = (writePosition - count + analyzerBufferSize) % analyzerBufferSize;
+    const auto& source = postEq ? analyzerPost : analyzerPre;
+    for (int index = 0; index < count; ++index)
+        destination[index] = source[static_cast<std::size_t> (
+            (start + index) % analyzerBufferSize)].load (std::memory_order_relaxed);
+    return count;
+}
+
+juce::AudioProcessorEditor* EqMasterProcessor::createEditor()
+{
+    return new EqMasterEditor (*this);
+}
+
+void EqMasterProcessor::getStateInformation (juce::MemoryBlock& destination)
+{
+    captureABState (*this, abState, activeAB);
+    storeNativeParameterState (*this, destination);
+    auto xml = juce::XmlDocument::parse (juce::String::fromUTF8 (
+        static_cast<const char*> (destination.getData()), static_cast<int> (destination.getSize())));
+    if (xml != nullptr)
+    {
+        saveABState (*xml, abState, activeAB);
+        juce::MemoryOutputStream stream;
+        xml->writeTo (stream);
+        destination.replaceAll (stream.getData(), stream.getDataSize());
+    }
+}
+
+void EqMasterProcessor::setStateInformation (const void* data, int size)
+{
+    restoreNativeParameterState (*this, data, size);
+    if (data != nullptr && size > 0)
+    {
+        auto xml = juce::XmlDocument::parse (juce::String::fromUTF8 (
+            static_cast<const char*> (data), size));
+        if (xml != nullptr)
+            restoreABState (*this, *xml, abState, activeAB);
+    }
+}
+
+void EqMasterProcessor::selectABState (int slot)
+{
+    ::selectABState (*this, abState, activeAB, slot);
 }

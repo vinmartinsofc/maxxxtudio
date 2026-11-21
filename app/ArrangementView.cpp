@@ -24,8 +24,8 @@ constexpr std::array<std::uint32_t, 9> trackColours {
     0xff2196f3, 0xff3f51b5, 0xff9c27b0, 0xff9e9e9e
 };
 constexpr std::array<const char*, trackColours.size()> trackColourNames {
-    "Vermelho", "Laranja", "Amarelo", "Verde", "Ciano",
-    "Azul", "Indigo", "Roxo", "Cinza"
+    "Red", "Orange", "Yellow", "Green", "Cyan",
+    "Blue", "Indigo", "Purple", "Gray"
 };
 
 juce::Colour spectrumWaveformColour (float frequency, float flatness)
@@ -127,8 +127,8 @@ void showMidiMappingMenu (juce::Component& component, const juce::String& mappin
     juce::PopupMenu menu;
     if (mappingInfo.isNotEmpty())
         menu.addSectionHeader ("MIDI: " + mappingInfo);
-    menu.addItem (1, theme::ui ("Aprender controle MIDI..."));
-    menu.addItem (2, theme::ui ("Remover mapeamento MIDI"), mappingInfo.isNotEmpty());
+    menu.addItem (1, theme::ui ("Learn MIDI Control..."));
+    menu.addItem (2, theme::ui ("Remove MIDI Mapping"), mappingInfo.isNotEmpty());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&component),
                         [onLearn = std::move (onLearn), onClear = std::move (onClear)] (int result)
                         {
@@ -150,7 +150,7 @@ juce::String midiMappingInfo (const ProjectModel& project, int trackId, MidiMapp
         return {};
 
     return "Ch " + juce::String (mapping->channel) + " / "
-         + (mapping->messageType == MidiMappingMessageType::ControlChange ? "CC " : "Nota ")
+         + (mapping->messageType == MidiMappingMessageType::ControlChange ? "CC " : "Note ")
          + juce::String (mapping->number);
 }
 
@@ -478,7 +478,7 @@ public:
                 g.fillRect (cb.getX(), y, cb.getWidth(), height);
                 g.setColour (theme::textDim().withAlpha (0.45f));
                 g.setFont (juce::FontOptions (12.5f));
-                g.drawText (theme::ui ("Master Bus  (Saida Estereo 1/2)"), cb.getX() + 12, y + 4, 300, 20, juce::Justification::centredLeft);
+                g.drawText (theme::ui ("Master Bus (Stereo Output 1/2)"), cb.getX() + 12, y + 4, 300, 20, juce::Justification::centredLeft);
             }
             else
             {
@@ -494,7 +494,7 @@ public:
             g.drawHorizontalLine (y + height - 1, static_cast<float> (cb.getX()), static_cast<float> (cb.getRight()));
         }
 
-        // regiao de loop
+        // Loop region.
         const float lx0 = static_cast<float> (project.loopStart * ppb), lx1 = static_cast<float> (project.loopEnd * ppb);
         g.setColour (theme::accent().withAlpha (owner.loopEnabled ? 0.07f : 0.03f));
         g.fillRect (lx0, 0.0f, lx1 - lx0, static_cast<float> (getHeight()));
@@ -611,7 +611,7 @@ public:
                             g.setColour (juce::Colours::white.withAlpha (0.85f));
                             g.setFont (juce::FontOptions (9.5f, juce::Font::bold));
                             g.drawText (
-                                juce::String ("Origem ") + juce::String (clip->sourceOffsetSeconds, 2) + " s",
+                                juce::String ("Source ") + juce::String (clip->sourceOffsetSeconds, 2) + " s",
                                 r.toNearestInt().withTrimmedLeft (7).withTrimmedTop (15).withHeight (14),
                                 juce::Justification::centredLeft, true);
                         }
@@ -679,7 +679,7 @@ public:
                         g.fillRect (r);
                         g.setColour (juce::Colours::white.withAlpha (0.9f));
                         g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-                        g.drawText (theme::ui ("Desativado"), r.toNearestInt().reduced (3),
+                        g.drawText (theme::ui ("Disabled"), r.toNearestInt().reduced (3),
                                     juce::Justification::centred, true);
                     }
                     g.restoreState();
@@ -754,7 +754,7 @@ public:
                     g.fillRect (r);
                     g.setColour (juce::Colours::white.withAlpha (0.9f));
                     g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
-                    g.drawText (theme::ui ("Desativado"), r.toNearestInt().reduced (3),
+                    g.drawText (theme::ui ("Disabled"), r.toNearestInt().reduced (3),
                                 juce::Justification::centred, true);
                 }
                 g.restoreState();
@@ -892,7 +892,7 @@ public:
                 g.fillRoundedRectangle (label.toFloat(), 3.0f);
                 g.setColour (theme::text());
                 g.setFont (juce::FontOptions (11.5f));
-                g.drawText (theme::ui ("Selecao de tempo"),
+                g.drawText (theme::ui ("Time Selection"),
                             label.reduced (4, 0), juce::Justification::centredLeft, true);
             }
             if (! selecting && height >= 48.0f && width >= 245.0f)
@@ -903,7 +903,7 @@ public:
                 g.fillRoundedRectangle (hint.toFloat(), 3.0f);
                 g.setColour (theme::text());
                 g.setFont (juce::FontOptions (11.5f));
-                g.drawText ("Ctrl+D duplicar | Delete apagar | Ctrl+J consolidar",
+                g.drawText ("Ctrl+D duplicate | Delete remove | Ctrl+J consolidate",
                             hint.reduced (4, 0), juce::Justification::centredLeft, true);
             }
         }
@@ -931,11 +931,11 @@ public:
 
             const bool masterTarget = dragTrackIndex == static_cast<int> (project.tracks.size());
             const juce::String message = dragDropAllowed
-                ? (masterTarget ? "Solte efeito para adicionar ao Master"
-                                : dragDropIsAudio ? "Solte para adicionar audio"
-                                : "Solte para adicionar conteudo")
-                : (masterTarget ? "Master aceita apenas efeitos"
-                                : dragDropIsAudio ? "Audio indisponivel nesta trilha" : "Plugin indisponivel nesta trilha");
+                ? (masterTarget ? "Drop an effect to add it to Master"
+                                : dragDropIsAudio ? "Drop audio to add it"
+                                : "Drop content to add it")
+                : (masterTarget ? "The Master track only accepts effects"
+                                : dragDropIsAudio ? "Audio unavailable on this track" : "Plugin unavailable on this track");
             const auto hint = juce::Rectangle<int> (8, y + 6, 220, 22);
             g.setColour (theme::panel().withAlpha (0.95f));
             g.fillRoundedRectangle (hint.toFloat(), 5.0f);
@@ -968,7 +968,7 @@ public:
         updateDragTarget (details);
         const auto description = details.description.toString();
         const bool audio = description.startsWith ("audio:");
-        notifyAction (audio ? "Arrastando audio para o arrangement" : "Arrastando plugin para o arrangement",
+        notifyAction (audio ? "Dragging audio into the Arrangement" : "Dragging a plugin into the Arrangement",
                      audio ? icons::Icon::Waveform : icons::Icon::Mixer, true, 0);
     }
     void itemDragMove (const SourceDetails& details) override  { updateDragTarget (details); }
@@ -999,7 +999,7 @@ public:
         if (audioDrop)
         {
             const juce::File file (description.substring (6));
-            notifyAction ("Audio solto no arrangement", icons::Icon::Waveform, false, 650);
+            notifyAction ("Audio dropped in the Arrangement", icons::Icon::Waveform, false, 650);
             if (owner.canAcceptAudioDrop && owner.canAcceptAudioDrop (file, trackId) && owner.onAudioDropped)
                 owner.onAudioDropped (file, trackId, beat);
             return;
@@ -1008,7 +1008,7 @@ public:
         if (midiDrop)
         {
             juce::File file (description.substring (13));
-            notifyAction ("MIDI solto no arrangement", icons::Icon::PianoRoll, false, 650);
+            notifyAction ("MIDI dropped in the Arrangement", icons::Icon::PianoRoll, false, 650);
             if (owner.onMidiDropped)
                 owner.onMidiDropped (file, trackId, beat);
             return;
@@ -1017,7 +1017,7 @@ public:
         if (description.startsWith ("plugin:") && owner.canAcceptPluginDrop
             && owner.canAcceptPluginDrop (description.substring (7), trackId) && owner.onPluginDropped)
         {
-            notifyAction ("Plugin solto no arrangement", icons::Icon::Mixer, false, 650);
+            notifyAction ("Plugin dropped in the Arrangement", icons::Icon::Mixer, false, 650);
             owner.onPluginDropped (description.substring (7), trackId, beat);
         }
     }
@@ -1034,8 +1034,8 @@ public:
         updateFileDragTarget (files, x, y);
         const juce::File file (files.size() == 1 ? files[0] : juce::String());
         notifyAction (file.hasFileExtension (".mid;.midi")
-            ? "Arrastando MIDI para o arrangement"
-            : "Arrastando audio para o arrangement",
+            ? "Dragging MIDI into the Arrangement"
+            : "Dragging audio into the Arrangement",
             file.hasFileExtension (".mid;.midi") ? icons::Icon::PianoRoll : icons::Icon::Waveform,
             true, 0);
     }
@@ -1059,7 +1059,7 @@ public:
             dragTrackIndex = -1;
             dragDropAllowed = false;
             dragDropIsAudio = false;
-            notifyAction ("Solte um arquivo de audio", icons::Icon::Waveform, false, 650);
+            notifyAction ("Drop an audio file", icons::Icon::Waveform, false, 650);
             repaint();
             return;
         }
@@ -1067,13 +1067,13 @@ public:
         const int trackId = trackIdAt (trackIndex);
         if (file.hasFileExtension (".mid;.midi"))
         {
-            notifyAction ("MIDI solto no arrangement", icons::Icon::PianoRoll, false, 650);
+            notifyAction ("MIDI dropped in the Arrangement", icons::Icon::PianoRoll, false, 650);
             if (owner.onMidiDropped)
                 owner.onMidiDropped (file, trackId, snapClipBeat (static_cast<double> (x) / owner.pixelsPerBeat));
         }
         else if (owner.canAcceptAudioDrop && owner.canAcceptAudioDrop (file, trackId) && owner.onAudioDropped)
         {
-            notifyAction ("Audio solto no arrangement", icons::Icon::Waveform, false, 650);
+            notifyAction ("Audio dropped in the Arrangement", icons::Icon::Waveform, false, 650);
             owner.onAudioDropped (file, trackId, snapClipBeat (static_cast<double> (x) / owner.pixelsPerBeat));
         }
         dragTrackIndex = -1;
@@ -1137,7 +1137,7 @@ public:
             selectedClips.clear();
             selectionAnchor = {};
             project.selectTrack (0);
-            notifyAction ("Barramento selecionado", icons::Icon::Pointer, false, 700);
+            notifyAction ("Selected Bus", icons::Icon::Pointer, false, 700);
             return;
         }
 
@@ -1165,7 +1165,7 @@ public:
                 project.selectClip (trackId, -1);
 
             showContextMenu (h, trackId);
-            notifyAction ("Menu do clipe", icons::Icon::Pointer, false, 700);
+            notifyAction ("Clip Menu", icons::Icon::Pointer, false, 700);
             return;
         }
 
@@ -1295,12 +1295,12 @@ public:
         juce::PopupMenu menu, gridMenu;
         const bool isAudio = h.audioClip != nullptr;
         const int clipId = isAudio ? h.audioClip->id : (h.clip != nullptr ? h.clip->id : -1);
-        menu.addItem (6, theme::ui ("Selecionar tudo (Ctrl+A)"));
+        menu.addItem (6, theme::ui ("Select All (Ctrl+A)"));
         menu.addSeparator();
 
         if (clipId >= 0)
         {
-            menu.addItem (1, theme::ui ("Loopar clipe"));
+            menu.addItem (1, theme::ui ("Toggle Clip Loop"));
             const auto* selectedTrack = project.track (trackId);
             const auto* audioClip = isAudio && selectedTrack != nullptr
                 ? selectedTrack->findAudioClip (clipId) : nullptr;
@@ -1308,17 +1308,17 @@ public:
                 ? selectedTrack->find (clipId) : nullptr;
             const bool enabled = isAudio ? (audioClip != nullptr && audioClip->enabled)
                                          : (midiClip != nullptr && midiClip->enabled);
-            menu.addItem (4, theme::ui (enabled ? "Desativar clipe (0)" : "Ativar clipe (0)"));
+            menu.addItem (4, theme::ui (enabled ? "Disable Clip (0)" : "Enable Clip (0)"));
             if (isAudio)
-                menu.addItem (5, theme::ui ("Localizar no navegador"));
-            menu.addItem (2, theme::ui ("Apagar clipe"));
+                menu.addItem (5, theme::ui ("Locate in Browser"));
+            menu.addItem (2, theme::ui ("Delete Clip"));
             const double clipStart = isAudio ? (audioClip != nullptr ? audioClip->start : 0.0)
                                              : (midiClip != nullptr ? midiClip->start : 0.0);
             const double clipEnd = isAudio ? (audioClip != nullptr ? audioClip->end() : 0.0)
                                            : (midiClip != nullptr ? midiClip->end() : 0.0);
             const bool canSplit = owner.playhead > clipStart + 1.0e-9
                                && owner.playhead < clipEnd - 1.0e-9;
-            menu.addItem (3, theme::ui ("Dividir no marcador (Ctrl+E)"), canSplit);
+            menu.addItem (3, theme::ui ("Split at Locator (Ctrl+E)"), canSplit);
             menu.addSeparator();
         }
 
@@ -1326,12 +1326,12 @@ public:
                                                 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0,
                                                 1.0 / 12.0, 4.0 };
         static constexpr const char* gridLabels[] { "1/4", "1/8", "1/16", "1/32", "1/64",
-                                                     "1/4T", "1/8T", "1/16T", "1/32T", "1 compasso" };
+                                                     "1/4T", "1/8T", "1/16T", "1/32T", "1 bar" };
         for (int i = 0; i < 10; ++i)
             gridMenu.addItem (100 + i, theme::ui (gridLabels[i]), true,
                               std::abs (owner.gridBeats() - gridValues[i]) < 1.0e-9);
-        gridMenu.addItem (110, theme::ui ("Sem grade"), true, owner.gridBeats() <= 0.0);
-        menu.addSubMenu (theme::ui ("Grade de edicao"), gridMenu);
+        gridMenu.addItem (110, theme::ui ("No Grid"), true, owner.gridBeats() <= 0.0);
+        menu.addSubMenu (theme::ui ("Editing Grid"), gridMenu);
 
         juce::Component::SafePointer<Lanes> safeThis (this);
         const double splitBeat = owner.playhead;
@@ -1646,7 +1646,7 @@ public:
 
             const int bar = static_cast<int> (std::floor (beat / 4.0)) + 1;
             const double beatInBar = std::fmod (beat, 4.0) + 1.0;
-            notifyAction ("Cursor: compasso " + juce::String (bar) + " | beat "
+            notifyAction ("Cursor: bar " + juce::String (bar) + " | beat "
                               + juce::String (beatInBar, 2),
                           icons::Icon::Pointer, false, 900);
             mode = Mode::None;
@@ -1658,7 +1658,7 @@ public:
 
         if (mode == Mode::ClipTimeSelectPending)
         {
-            notifyAction ("Ponto de reproducao posicionado", icons::Icon::Pointer, false, 650);
+            notifyAction ("Playback position set", icons::Icon::Pointer, false, 650);
             mode = Mode::None;
             movePreviewActive = false;
             curAudioClipId = -1;
@@ -1670,7 +1670,7 @@ public:
         if (mode == Mode::ShiftPending)
         {
             extendClipSelection (pendingSelection);
-            notifyAction ("Clipe selecionado", icons::Icon::Pointer, false, 650);
+            notifyAction ("Clip selected", icons::Icon::Pointer, false, 650);
             mode = Mode::None;
             movePreviewActive = false;
             curAudioClipId = -1;
@@ -1680,7 +1680,7 @@ public:
         if (mode == Mode::CtrlPending)
         {
             toggleClipSelection (pendingSelection);
-            notifyAction ("Selecao atualizada", icons::Icon::SelectRegion, false, 650);
+            notifyAction ("Selection updated", icons::Icon::SelectRegion, false, 650);
             mode = Mode::None;
             movePreviewActive = false;
             multiDragSources.clear();
@@ -1876,9 +1876,9 @@ public:
         }
 
         if (mode != Mode::RangeSelect && e.getDistanceFromDragStart() < 4.0f)
-            notifyAction ("Clipe selecionado", icons::Icon::Pointer, false, 650);
+            notifyAction ("Clip selected", icons::Icon::Pointer, false, 650);
         else if (moveFailed)
-            notifyAction ("Nao foi possivel soltar o clipe nessa trilha",
+            notifyAction ("Could not drop the clip on this track.",
                           icons::Icon::Pointer, false, 900);
         else
             notifyInteraction (false, 700);
@@ -2074,7 +2074,7 @@ public:
 
                 if (std::any_of (tracksToDelete.begin(), tracksToDelete.end(),
                                  [this] (int trackId) { return project.track (trackId) != nullptr; }))
-                    notifyAction ("O projeto precisa manter ao menos uma trilha", icons::Icon::Pointer, false, 1200);
+                    notifyAction ("The project must contain at least one track.", icons::Icon::Pointer, false, 1200);
                 return true;
             }
             if (t != nullptr)
@@ -2139,7 +2139,7 @@ public:
             project.endEdit();
             if (changed)
             {
-                notifyAction ("Selecao recortada", icons::Icon::Cut, false, 700);
+                notifyAction ("Selection cut", icons::Icon::Cut, false, 700);
                 return true;
             }
         }
@@ -2353,7 +2353,7 @@ private:
             if (match == choices.end())
             {
                 automationEditTrackId = -1;
-                notifyAction ("Parametro indisponivel nesta trilha",
+                notifyAction ("Parameter unavailable on this track",
                               icons::Icon::Automation, false, 1000);
                 return;
             }
@@ -2504,7 +2504,7 @@ private:
         if (automationEditEnvelope.points.empty())
             project.removeAutomationEnvelope (automationEditTrackId, owner.automationTarget);
         else if (! project.setAutomationEnvelope (automationEditTrackId, automationEditEnvelope))
-            notifyAction ("Nao foi possivel salvar a automacao", icons::Icon::Automation, false, 1000);
+            notifyAction ("Could not save automation.", icons::Icon::Automation, false, 1000);
         automationEditTrackId = -1;
         automationPointIndex = -1;
         automationPointValueText.clear();
@@ -2522,20 +2522,20 @@ private:
         auto icon = icons::Icon::Pointer;
         switch (mode)
         {
-            case Mode::Move:          message = active ? (dragging ? "Arrastando clipe" : "Segurando clipe")
-                                                       : (movePreviewIsCopy ? "Clipe copiado" : "Clipe reposicionado");
+            case Mode::Move:          message = active ? (dragging ? "Dragging clip" : "Moving clip")
+                                                       : (movePreviewIsCopy ? "Clip copied" : "Clip moved");
                                           icon = icons::Icon::Move; break;
-            case Mode::Resize:        message = active ? (dragging ? "Redimensionando clipe" : "Segurando borda do clipe") : "Clipe redimensionado"; icon = icons::Icon::Resize; break;
-            case Mode::FadeIn:        message = active ? (dragging ? "Ajustando fade de entrada" : "Segurando fade de entrada") : "Fade de entrada ajustado"; icon = icons::Icon::FadeIn; break;
-            case Mode::FadeOut:       message = active ? (dragging ? "Ajustando fade de saida" : "Segurando fade de saida") : "Fade de saida ajustado"; icon = icons::Icon::FadeOut; break;
-            case Mode::FadeInCurve:   message = active ? (dragging ? "Ajustando curva do fade" : "Segurando curva do fade") : "Curva do fade ajustada"; icon = icons::Icon::FadeIn; break;
-            case Mode::FadeOutCurve:  message = active ? (dragging ? "Ajustando curva do fade" : "Segurando curva do fade") : "Curva do fade ajustada"; icon = icons::Icon::FadeOut; break;
-            case Mode::AutomationEdit: message = active ? "Editando automacao" : "Automacao editada"; icon = icons::Icon::Automation; break;
-            case Mode::RangeSelect:   message = active ? "Selecionando regiao" : "Regiao selecionada"; icon = icons::Icon::SelectRegion; break;
-            case Mode::EmptyClickPending: message = active ? "Posicionando cursor" : "Cursor posicionado"; break;
-            case Mode::ClipTimeSelectPending: message = "Focando regiao do clipe"; icon = icons::Icon::SelectRegion; break;
-            case Mode::ShiftPending:  message = active ? "Segurando selecao de clipe" : "Clipe selecionado"; break;
-            case Mode::CtrlPending:   message = active ? "Segurando selecao de clipe" : "Selecao atualizada"; break;
+            case Mode::Resize:        message = active ? (dragging ? "Resizing clip" : "Dragging clip edge") : "Clip resized"; icon = icons::Icon::Resize; break;
+            case Mode::FadeIn:        message = active ? (dragging ? "Adjusting fade-in" : "Holding fade-in") : "Fade-in adjusted"; icon = icons::Icon::FadeIn; break;
+            case Mode::FadeOut:       message = active ? (dragging ? "Adjusting fade-out" : "Holding fade-out") : "Fade-out adjusted"; icon = icons::Icon::FadeOut; break;
+            case Mode::FadeInCurve:   message = active ? (dragging ? "Adjusting fade curve" : "Dragging fade curve") : "Fade curve adjusted"; icon = icons::Icon::FadeIn; break;
+            case Mode::FadeOutCurve:  message = active ? (dragging ? "Adjusting fade curve" : "Dragging fade curve") : "Fade curve adjusted"; icon = icons::Icon::FadeOut; break;
+            case Mode::AutomationEdit: message = active ? "Editing automation" : "Automation edited"; icon = icons::Icon::Automation; break;
+            case Mode::RangeSelect:   message = active ? "Selecting region" : "Region selected"; icon = icons::Icon::SelectRegion; break;
+            case Mode::EmptyClickPending: message = active ? "Positioning cursor" : "Cursor positioned"; break;
+            case Mode::ClipTimeSelectPending: message = "Focusing clip region"; icon = icons::Icon::SelectRegion; break;
+            case Mode::ShiftPending:  message = active ? "Dragging clip selection" : "Clip selected"; break;
+            case Mode::CtrlPending:   message = active ? "Dragging clip selection" : "Selection updated"; break;
             case Mode::None:          return;
         }
         notifyAction (message, icon, active, holdMilliseconds);
@@ -2977,7 +2977,7 @@ private:
         if (! succeeded)
         {
             project.undo();
-            notifyAction ("Nao foi possivel duplicar a selecao", icons::Icon::Pointer, false, 900);
+            notifyAction ("Could not duplicate the selection.", icons::Icon::Pointer, false, 900);
             return;
         }
 
@@ -3121,14 +3121,14 @@ private:
             const int targetRow = baseTrackRow + item.trackOffset;
             if (targetRow < 0 || targetRow >= static_cast<int> (project.tracks.size()))
             {
-                notifyAction ("Nao ha trilha de destino para todos os clips", icons::Icon::Pointer, false, 900);
+                notifyAction ("No destination track is available for all clips.", icons::Icon::Pointer, false, 900);
                 return true;
             }
             const auto& targetTrack = *project.tracks[static_cast<std::size_t> (targetRow)];
             if ((item.audio && targetTrack.type != roll::TrackType::Audio)
                 || (! item.audio && targetTrack.type != roll::TrackType::Midi))
             {
-                notifyAction ("O tipo da trilha nao corresponde ao clip copiado", icons::Icon::Pointer, false, 900);
+                notifyAction ("The track type does not match the copied clip.", icons::Icon::Pointer, false, 900);
                 return true;
             }
             targetTrackIds.push_back (targetTrack.id);
@@ -3156,7 +3156,7 @@ private:
         if (! succeeded)
         {
             project.undo();
-            notifyAction ("Nao foi possivel colar os clips nesse local", icons::Icon::Pointer, false, 900);
+            notifyAction ("Could not paste the clips here.", icons::Icon::Pointer, false, 900);
             return true;
         }
 
@@ -3235,7 +3235,7 @@ private:
         }
         project.endEdit();
         if (changed)
-            notifyAction ("Faixa removida", icons::Icon::Eraser, false, 700);
+            notifyAction ("Track removed", icons::Icon::Eraser, false, 700);
         repaint();
     }
 
@@ -3448,9 +3448,9 @@ private:
                     g.setColour (juce::Colours::white);
                     g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
                     g.drawText (movePreviewAllowed
-                                    ? (movePreviewIsCopy ? (item.replacesSource ? "SUBSTITUI" : "COPIA")
-                                                         : "MOVER")
-                                    : "TIPO INCOMPATIVEL",
+                                    ? (movePreviewIsCopy ? (item.replacesSource ? "REPLACE" : "COPY")
+                                                         : "MOVE")
+                                    : "INCOMPATIBLE TYPE",
                                 preview.toNearestInt().reduced (5, 0),
                                 juce::Justification::centredLeft, true);
                 }
@@ -3493,8 +3493,8 @@ private:
             g.setColour (juce::Colours::white);
             g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
             g.drawText (movePreviewAllowed
-                            ? (movePreviewReplacesSource ? "SUBSTITUI" : movePreviewIsCopy ? "COPIA" : "MOVER")
-                            : "TIPO INCOMPATIVEL",
+                            ? (movePreviewReplacesSource ? "REPLACE" : movePreviewIsCopy ? "COPY" : "MOVE")
+                            : "INCOMPATIBLE TYPE",
                         preview.toNearestInt().reduced (5, 0),
                         juce::Justification::centredLeft, true);
         }
@@ -3524,8 +3524,8 @@ private:
 
         juce::String message;
         if (mode == Mode::Resize)
-            message = "Clipe: " + juce::String (clipLength / 4.0, 1)
-                    + " compassos; loop: "
+            message = "Clip: " + juce::String (clipLength / 4.0, 1)
+                    + " bars; loop: "
                     + juce::String ((project.loopEnd - project.loopStart) / 4.0, 1);
         else if (mode == Mode::FadeIn || mode == Mode::FadeOut)
         {
@@ -3546,13 +3546,13 @@ private:
         else if (movePreviewActive)
         {
             clipStart = movePreviewStart;
-            message = juce::String (movePreviewReplacesSource ? "Substituindo"
-                                    : movePreviewIsCopy ? "Copiando" : "Movendo")
-                    + ": compasso "
+            message = juce::String (movePreviewReplacesSource ? "Replacing"
+                                    : movePreviewIsCopy ? "Copying" : "Moving")
+                    + ": bar "
                     + juce::String (static_cast<int> (std::floor (clipStart / 4.0)) + 1);
         }
         else
-            message = "Movendo: compasso " + juce::String (static_cast<int> (std::floor (clipStart / 4.0)) + 1);
+            message = "Moving: bar " + juce::String (static_cast<int> (std::floor (clipStart / 4.0)) + 1);
         const int targetRow = movePreviewActive ? movePreviewTrackIndex : project.trackIndex (curTrack);
         const int hintWidth = mode == Mode::Resize ? 310 : 230;
         const int x = std::clamp (static_cast<int> ((clipStart + clipLength) * owner.pixelsPerBeat) + 8,
@@ -3600,14 +3600,14 @@ private:
     juce::Point<float> selectionDownPosition;
 };
 
-// ============================================================ Ruler (regua + brace de loop)
+// ============================================================ Ruler (ruler + loop bracket)
 
 class ArrangementView::Ruler : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     Ruler (ProjectModel& p, ArrangementView& o) : project (p), owner (o)
     {
-        setTooltip ("Na regua: arraste verticalmente para ajustar o zoom e horizontalmente para navegar.");
+        setTooltip ("On the ruler: drag vertically to zoom and horizontally to scroll.");
     }
 
     void paint (juce::Graphics& g) override
@@ -3632,7 +3632,7 @@ public:
         const auto cb = g.getClipBounds();
         const double ppb = owner.pixelsPerBeat;
 
-        // brace de loop
+        // Loop bracket.
         const float lx0 = static_cast<float> (project.loopStart * ppb), lx1 = static_cast<float> (project.loopEnd * ppb);
         const bool loopInteraction = mode == Mode::LoopLeft || mode == Mode::LoopRight || mode == Mode::LoopMove
                                   || hoverMode == Mode::LoopLeft || hoverMode == Mode::LoopRight || hoverMode == Mode::LoopMove;
@@ -3962,12 +3962,12 @@ private:
         auto icon = icons::Icon::Pointer;
         switch (mode)
         {
-            case Mode::Seek:       message = active ? (dragging ? "Arrastando playhead" : "Segurando playhead") : "Cursor posicionado"; break;
-            case Mode::PanZoomView:message = active ? "Ajustando zoom e navegando" : "Zoom e navegacao ajustados"; icon = icons::Icon::Resize; break;
+            case Mode::Seek:       message = active ? (dragging ? "Dragging playhead" : "Dragging playhead") : "Cursor positioned"; break;
+            case Mode::PanZoomView:message = active ? "Adjusting zoom and scrolling" : "Zoom and scrolling adjusted"; icon = icons::Icon::Resize; break;
             case Mode::LoopLeft:
-            case Mode::LoopRight:  message = active ? (dragging ? "Ajustando loop" : "Segurando limite do loop") : "Loop ajustado"; icon = icons::Icon::SelectRegion; break;
-            case Mode::LoopMove:   message = active ? (dragging ? "Movendo loop" : "Segurando loop") : "Loop movido"; icon = icons::Icon::Loop; break;
-            case Mode::LocatorMove:message = active ? (dragging ? "Movendo marcador" : "Segurando marcador") : "Marcador movido"; icon = icons::Icon::Move; break;
+            case Mode::LoopRight:  message = active ? (dragging ? "Adjusting loop" : "Dragging loop boundary") : "Loop adjusted"; icon = icons::Icon::SelectRegion; break;
+            case Mode::LoopMove:   message = active ? (dragging ? "Moving loop" : "Dragging loop") : "Loop moved"; icon = icons::Icon::Loop; break;
+            case Mode::LocatorMove:message = active ? (dragging ? "Moving locator" : "Dragging locator") : "Locator moved"; icon = icons::Icon::Move; break;
         }
         owner.onInteractionChanged (message, icon, active, holdMilliseconds);
     }
@@ -4116,11 +4116,11 @@ private:
 
         juce::Component::SafePointer<Ruler> safeThis (this);
         AppModalDialog::showInput (
-            *this, editInfo ? "Editar informacoes do locator" : "Renomear locator",
-            editInfo ? "Informacoes do locator:" : "Nome do locator:",
+            *this, editInfo ? "Edit Locator Information" : "Rename Locator",
+            editInfo ? "Locator Information:" : "Locator Name:",
             juce::String (editInfo ? marker->info : marker->name), {},
             { { "OK", 1, AppModalDialog::ButtonStyle::Primary },
-              { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
+              { "Cancel", 0, AppModalDialog::ButtonStyle::Tertiary } },
             [safeThis, id, editInfo] (int result, juce::String value)
             {
                 if (safeThis != nullptr && result == 1)
@@ -4188,13 +4188,13 @@ private:
     {
         juce::String message;
         if (mode == Mode::LoopLeft)
-            message = "Inicio do loop: " + formatPosition (project.loopStart);
+            message = "Loop start: " + formatPosition (project.loopStart);
         else if (mode == Mode::LoopRight)
-            message = "Fim do loop: " + formatPosition (project.loopEnd);
+            message = "Loop end: " + formatPosition (project.loopEnd);
         else
             message = "Loop: " + formatPosition (project.loopStart) + " - "
                     + formatPosition (project.loopEnd) + "  ("
-                    + juce::String ((project.loopEnd - project.loopStart) / 4.0, 1) + " compassos)";
+                    + juce::String ((project.loopEnd - project.loopStart) / 4.0, 1) + " bars)";
 
         const auto hint = juce::Rectangle<int> (
             std::clamp (static_cast<int> (lastMouseX) + 12, 4, std::max (4, getWidth() - 274)),
@@ -4256,7 +4256,7 @@ private:
     ArrangementView& owner;
 };
 
-// ============================================================ Header (cabecalho de trilha)
+// ============================================================ Header (track header)
 
 class ArrangementView::Header : public juce::Component
 {
@@ -4298,7 +4298,7 @@ public:
         name.setEditable (false, true, false);
         name.setColour (juce::Label::textColourId, theme::text());
         name.setFont (juce::FontOptions (14.5f, juce::Font::bold));
-        name.setTooltip (theme::ui ("Arraste o nome para reordenar a trilha; duplo clique para renomear."));
+        name.setTooltip (theme::ui ("Drag the track name to reorder it; double-click to rename."));
         name.addMouseListener (this, false);
         name.onTextChange = [this]
         {
@@ -4338,9 +4338,9 @@ public:
         mute.setColour (juce::TextButton::buttonOnColourId, theme::accent());
         mute.setColour (juce::TextButton::textColourOnId, theme::text());
         solo.setColour (juce::TextButton::textColourOnId, theme::text());
-        mute.setTooltip (theme::ui ("Ativador da trilha: desativa a saida MIDI/audio"));
-        solo.setTooltip (theme::ui ("Clique para solo exclusivo; Ctrl+clique adiciona/remove solo. "
-                                    "Com varias trilhas selecionadas, clique aplica a todas."));
+        mute.setTooltip (theme::ui ("Track enable: disables MIDI/audio output."));
+        solo.setTooltip (theme::ui ("Click for exclusive solo; Ctrl-click to add or remove solo. "
+                                    "With multiple tracks selected, click to apply to all."));
         mute.setToggleState (t->mute, juce::dontSendNotification);
         mute.setButtonText (t->mute ? "OFF" : "ON");
         solo.setToggleState (t->solo, juce::dontSendNotification);
@@ -4372,7 +4372,7 @@ public:
         panValue.setJustificationType (juce::Justification::centredRight);
         pan.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         pan.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-        pan.setTooltip (theme::ui ("Panorama: esquerda (-100%) / direita (+100%); duplo clique centraliza; clique para habilitar a rodinha"));
+        pan.setTooltip (theme::ui ("Pan: left (-100%) / right (+100%); double-click to center; click to enable the mouse wheel."));
         pan.setRange (-1.0, 1.0, 0.01);
         pan.centreValue = 0.0;
         pan.bipolar = true;
@@ -4397,7 +4397,7 @@ public:
 
         volume.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         volume.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-        volume.setTooltip (theme::ui ("Volume da trilha; clique para habilitar a rodinha do mouse"));
+        volume.setTooltip (theme::ui ("Track volume; click to enable the mouse wheel."));
         volume.setRange (0.0, 1.5, 0.001);
         volume.bipolar = false;
         volume.setValue (t->volume, juce::dontSendNotification);
@@ -4524,8 +4524,8 @@ public:
             routingButton.setButtonText (ext ? "Ext. Out" : "Master");
             routingButton.setColour (juce::TextButton::buttonColourId, ext ? theme::accent() : theme::panelLight());
             routingButton.setColour (juce::TextButton::textColourOffId, ext ? theme::text() : theme::textDim());
-            routingButton.setTooltip (ext ? theme::ui ("Destino: Ext. Out (Direto - bypassa o Master)")
-                                          : theme::ui ("Destino: Master (processado pelo canal Master)"));
+            routingButton.setTooltip (ext ? theme::ui ("Destination: Ext. Out (Direct - bypasses Master)")
+                                          : theme::ui ("Destination: Master (processed by the Master channel)"));
         }
     }
 
@@ -4566,7 +4566,7 @@ public:
             g.setColour (theme::textDim());
             g.setFont (juce::FontOptions (12.5f));
             const juce::String summary = owner.deviceSummary ? owner.deviceSummary (trackId) : juce::String();
-            g.drawText (summary.isEmpty() ? theme::ui ("sem instrumento") : summary,
+            g.drawText (summary.isEmpty() ? theme::ui ("No instrument") : summary,
                         14, 26, getWidth() - 30, 14, juce::Justification::centredLeft, true);
         }
 
@@ -4731,14 +4731,14 @@ public:
         juce::PopupMenu m;
         juce::PopupMenu colourMenu;
         const auto* selected = project.track (trackId);
-        colourMenu.addItem (10, theme::ui ("Automatica"), true,
+        colourMenu.addItem (10, theme::ui ("Automatic"), true,
                             selected != nullptr && selected->colour == 0);
         for (std::size_t i = 0; i < trackColourNames.size(); ++i)
             colourMenu.addItem (11 + static_cast<int> (i), theme::ui (trackColourNames[i]), true,
                 selected != nullptr && selected->colour == trackColours[i]);
-        m.addSubMenu (theme::ui ("Cor da trilha"), colourMenu, selected != nullptr);
-        m.addItem (1, theme::ui ("Nova trilha MIDI"));
-        m.addItem (3, theme::ui ("Nova trilha de audio"));
+        m.addSubMenu (theme::ui ("Track Color"), colourMenu, selected != nullptr);
+        m.addItem (1, theme::ui ("New MIDI Track"));
+        m.addItem (3, theme::ui ("New Audio Track"));
         const bool canGroup = project.selectedTrackIds.size() >= 2
             && std::all_of (project.selectedTrackIds.begin(), project.selectedTrackIds.end(),
                 [this] (int id)
@@ -4747,15 +4747,15 @@ public:
                     return selected != nullptr && selected->type != roll::TrackType::Group
                         && selected->parentGroupId == 0;
                 });
-        m.addItem (4, theme::ui ("Agrupar faixas selecionadas (Ctrl+G)"), canGroup);
+        m.addItem (4, theme::ui ("Group Selected Tracks (Ctrl+G)"), canGroup);
         const int tid = trackId;
         const bool isGroup = selected != nullptr && selected->type == roll::TrackType::Group;
         if (isGroup)
-            m.addItem (5, theme::ui ("Desagrupar faixa (Ctrl+Shift+G)"));
+            m.addItem (5, theme::ui ("Ungroup Track (Ctrl+Shift+G)"));
         else
         {
-            m.addItem (6, theme::ui ("Duplicar faixa (Ctrl+D)"));
-            m.addItem (2, theme::ui ("Apagar trilha"), project.tracks.size() > 1);
+            m.addItem (6, theme::ui ("Duplicate Track (Ctrl+D)"));
+            m.addItem (2, theme::ui ("Delete Track"), project.tracks.size() > 1);
         }
         auto* proj = &project;
         auto* arrangement = &owner;
@@ -4781,7 +4781,7 @@ private:
         const auto* track = project.track (trackId);
         const bool collapsed = track != nullptr && track->collapsed;
         foldButton.setButtonText (collapsed ? ">" : "v");
-        foldButton.setTooltip (theme::ui (collapsed ? "Expandir trilha" : "Recolher trilha"));
+        foldButton.setTooltip (theme::ui (collapsed ? "Expand Track" : "Collapse Track"));
     }
 
     void updateReorderDropIndex (const juce::MouseEvent& e)
@@ -4805,7 +4805,7 @@ private:
     float peak = 0.0f;
 };
 
-// ============================================================ MasterHeader (trilha Master)
+// ============================================================ MasterHeader (Master track)
 
 class ArrangementView::MasterHeader : public juce::Component, public juce::DragAndDropTarget
 {
@@ -4845,7 +4845,7 @@ public:
         refreshMidiMappingInfo();
 
         name.setText ("Master", juce::dontSendNotification);
-        name.setTooltip (theme::ui ("Clique para selecionar; botao direito escolhe a cor; arraste um efeito para adicionar ao Master."));
+        name.setTooltip (theme::ui ("Click to select; right-click to choose a color; drag an effect here to add it to Master."));
         name.setInterceptsMouseClicks (false, false);
         name.setFont (juce::FontOptions (14.5f, juce::Font::bold));
         name.setColour (juce::Label::textColourId, theme::text());
@@ -4865,7 +4865,7 @@ public:
         };
         volume.setValue (0.0, juce::dontSendNotification);
         volume.setDoubleClickReturnValue (true, 0.0);
-        volume.setTooltip (theme::ui ("Volume Master (-inf a +6.0 dB); duplo clique retorna a 0 dB; clique para habilitar a rodinha"));
+        volume.setTooltip (theme::ui ("Master volume (-inf to +6.0 dB); double-click to reset to 0 dB; click to enable the mouse wheel."));
         volume.setMouseClickGrabsKeyboardFocus (false);
         volume.setPopupDisplayEnabled (true, true, nullptr);
         volume.setColour (juce::Slider::textBoxTextColourId, theme::text());
@@ -4900,7 +4900,7 @@ public:
         pan.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border().brighter (0.35f));
         pan.setColour (juce::Slider::thumbColourId, theme::text());
         pan.setMouseClickGrabsKeyboardFocus (false);
-        pan.setTooltip (theme::ui ("Panorama Master: esquerda (-100%) / direita (+100%); duplo clique centraliza; clique para habilitar a rodinha"));
+        pan.setTooltip (theme::ui ("Master pan: left (-100%) / right (+100%); double-click to center; click to enable the mouse wheel."));
         pan.setPopupDisplayEnabled (true, true, nullptr);
         updatePanText (pan.getValue());
         pan.onDragStart = [this]
@@ -4933,7 +4933,7 @@ public:
         peakDbLabel.setFont (juce::FontOptions (13.5f, juce::Font::bold));
         peakDbLabel.setColour (juce::Label::textColourId, theme::text());
         peakDbLabel.setJustificationType (juce::Justification::centredRight);
-        peakDbLabel.setTooltip (theme::ui ("Peak do Master; clique no indicador para zerar"));
+        peakDbLabel.setTooltip (theme::ui ("Master peak; click the meter to reset it."));
         updatePeakDbText (0.0f);
 
         volume.onValueChange = [this]
@@ -5080,7 +5080,7 @@ public:
         g.setColour (sel ? theme::panelLight().brighter (0.15f) : theme::panel());
         g.fillRect (getLocalBounds());
 
-        // Faixa de cor da trilha Master (ouro/laranja)
+        // Master track color band (gold/orange).
         g.setColour (project.masterTrack != nullptr && project.masterTrack->colour != 0
                          ? ArrangementView::colourFor (*project.masterTrack)
                          : theme::accent());
@@ -5095,7 +5095,7 @@ public:
             g.setColour (theme::textDim());
             g.setFont (juce::FontOptions (12.5f));
             const juce::String summary = owner.deviceSummary ? owner.deviceSummary (0) : juce::String();
-            g.drawText (summary.isEmpty() ? theme::ui ("sem efeitos") : summary,
+            g.drawText (summary.isEmpty() ? theme::ui ("No effects") : summary,
                         14, 26, getWidth() - 122, 14, juce::Justification::centredLeft, true);
 
             g.setColour (theme::textDim());
@@ -5171,7 +5171,7 @@ public:
         g.setColour (theme::accent());
         g.drawRect (getLocalBounds(), 2);
         g.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-        g.drawText (theme::ui ("Solte para adicionar efeito ao Master"),
+        g.drawText (theme::ui ("Drop an effect here to add it to Master."),
                     getLocalBounds().reduced (8), juce::Justification::centred, true);
     }
 
@@ -5230,7 +5230,7 @@ public:
         project.selectTrack (0);
         owner.grabFocus();
 
-        // Se clicou no clip box, reseta o clip
+        // If the clip box was clicked, reset the clip.
         if (e.x >= getWidth() - 24 && e.y <= 16)
         {
             clipHeld = false;
@@ -5250,21 +5250,21 @@ private:
     {
         const bool collapsed = project.masterTrack != nullptr && project.masterTrack->collapsed;
         foldButton.setButtonText (collapsed ? ">" : "v");
-        foldButton.setTooltip (theme::ui (collapsed ? "Expandir Master" : "Recolher Master"));
+        foldButton.setTooltip (theme::ui (collapsed ?         "Expand Master" : "Collapse Master"));
     }
 
     void showTrackMenu()
     {
         juce::PopupMenu colourMenu;
         const auto* selected = project.masterTrack.get();
-        colourMenu.addItem (10, theme::ui ("Automatica"), true,
+        colourMenu.addItem (10, theme::ui ("Automatic"), true,
                             selected != nullptr && selected->colour == 0);
         for (std::size_t i = 0; i < trackColourNames.size(); ++i)
             colourMenu.addItem (11 + static_cast<int> (i), theme::ui (trackColourNames[i]), true,
                 selected != nullptr && selected->colour == trackColours[i]);
 
         juce::PopupMenu menu;
-        menu.addSubMenu (theme::ui ("Cor da trilha"), colourMenu, selected != nullptr);
+        menu.addSubMenu (theme::ui ("Track Color"), colourMenu, selected != nullptr);
         auto* proj = &project;
         menu.showMenuAsync ({}, [proj] (int result)
         {
@@ -5293,7 +5293,7 @@ public:
     Overview (ProjectModel& p, ArrangementView& o) : project (p), owner (o)
     {
         setMouseCursor (juce::MouseCursor::PointingHandCursor);
-        setTooltip ("Arraste na horizontal para navegar e na vertical para ajustar o zoom; duplo clique no contorno para enquadrar o arrangement.");
+        setTooltip ("Drag horizontally to scroll and vertically to zoom; double-click the ruler to fit the arrangement.");
     }
 
     void paint (juce::Graphics& g) override
@@ -5490,8 +5490,8 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
 
     addTrackButton.setMouseClickGrabsKeyboardFocus (false);
     addAudioTrackButton.setMouseClickGrabsKeyboardFocus (false);
-    addTrackButton.setTooltip ("Adicionar trilha MIDI (Ctrl+Shift+T)");
-    addAudioTrackButton.setTooltip ("Adicionar trilha de audio (Ctrl+T)");
+    addTrackButton.setTooltip ("Add MIDI Track (Ctrl+Shift+T)");
+    addAudioTrackButton.setTooltip ("Add Audio Track (Ctrl+T)");
     gridBox.setMouseClickGrabsKeyboardFocus (false);
     locatorPreviousButton.setMouseClickGrabsKeyboardFocus (false);
     locatorSetButton.setMouseClickGrabsKeyboardFocus (false);
@@ -5508,13 +5508,13 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     automationStatusLabel.setMinimumHorizontalScale (0.7f);
     automationStatusLabel.setVisible (false);
     addAndMakeVisible (automationStatusLabel);
-    locatorPreviousButton.setTooltip ("Ir para a marcacao anterior");
-    locatorSetButton.setTooltip ("Adicionar marcacao no playhead (Ctrl+Shift+M)");
-    locatorNextButton.setTooltip ("Ir para a proxima marcacao");
-    locatorDeleteButton.setTooltip ("Remover a marcacao selecionada");
+    locatorPreviousButton.setTooltip ("Go to Previous Locator");
+    locatorSetButton.setTooltip ("Add a locator at the playhead (Ctrl+Shift+M)");
+    locatorNextButton.setTooltip ("Go to Next Locator");
+    locatorDeleteButton.setTooltip ("Remove the selected locator");
     locatorOverflowButton.setTooltip ("Locators e automacao");
-    automationModeButton.setTooltip ("Alternar modo de automacao (A)");
-    automationTargetButton.setTooltip ("Selecionar parametro para visualizar e editar");
+    automationModeButton.setTooltip ("Toggle Automation Mode (A)");
+    automationTargetButton.setTooltip ("Select a parameter to view and edit");
     locatorPreviousButton.onClick = [this] { navigateLocator (false); };
     locatorSetButton.onClick = [this] { addLocatorAtPlayhead(); };
     locatorNextButton.onClick = [this] { navigateLocator (true); };
@@ -5530,21 +5530,21 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     timeReadout.setColour (juce::Label::textColourId, theme::text());
     timeReadout.setFont (juce::FontOptions (11.5f));
     timeReadout.setJustificationType (juce::Justification::centred);
-    timeReadout.setTooltip ("Posicao atual no projeto");
+    timeReadout.setTooltip ("Current project position");
     addTrackButton.onClick = [this] { project.addTrack(); };
     addAudioTrackButton.onClick = [this] { project.addTrack (roll::TrackType::Audio); };
     static constexpr double gridValues[] { 1.0, 0.5, 0.25, 0.125, 0.0625,
                                            2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0,
                                            1.0 / 12.0, 4.0 };
     static constexpr const char* gridLabels[] { "1/4", "1/8", "1/16", "1/32", "1/64",
-                                                "1/4T", "1/8T", "1/16T", "1/32T", "1 compasso" };
+                                                "1/4T", "1/8T", "1/16T", "1/32T", "1 bar" };
     for (int i = 0; i < 10; ++i)
         gridBox.addItem (gridLabels[i], i + 1);
-    gridBox.addItem ("Sem grade", 11);
-    gridBox.addItem ("Adaptativa", 12);
+    gridBox.addItem ("No Grid", 11);
+    gridBox.addItem ("Adaptive", 12);
     gridBox.setSelectedId (3, juce::dontSendNotification);
-    gridBox.setTooltip ("Ctrl+1 Narrow (grade mais fina), Ctrl+2 Widen (grade mais larga), "
-                        "Ctrl+4 alterna o snap e Ctrl+5 alterna a grade adaptativa");
+    gridBox.setTooltip ("Ctrl+1 Narrow (finer grid), Ctrl+2 Widen (coarser grid), "
+                        "Ctrl+4 toggles snap and Ctrl+5 toggles the adaptive grid");
     gridBox.onChange = [this]
     {
         const int id = gridBox.getSelectedId();
@@ -5769,7 +5769,7 @@ void ArrangementView::selectMixerAutomationParameter (
         envelopeCreated = project.setAutomationEnvelope (trackId, std::move (envelope));
         if (! envelopeCreated)
             juce::Logger::writeToLog (
-                "ArrangementView: nao foi possivel inicializar a automacao do mixer.");
+                "ArrangementView: Could not initialize mixer automation.");
     }
 
     if (targetChanged || envelopeCreated)
@@ -5870,7 +5870,7 @@ void ArrangementView::showAutomationTargetMenu()
     if (track != nullptr && automationParametersProvider)
     {
         menu.addSeparator();
-        menu.addSectionHeader (theme::ui ("Plugins e efeitos"));
+        menu.addSectionHeader (theme::ui ("Plugins and Effects"));
         int nextId = 100;
         for (auto& choice : automationParametersProvider (trackId))
         {
@@ -5936,8 +5936,8 @@ void ArrangementView::updateAutomationTargetButton()
     }
     automationTargetButton.setButtonText (label);
     automationTargetButton.setTooltip (
-        "Parametro ativo. Ao tocar um controle do plugin, ele e selecionado automaticamente; "
-        "clique aqui para escolher manualmente.");
+        "Active parameter. Adjusting a plugin control selects it automatically; "
+        "click here to choose manually.");
 }
 
 void ArrangementView::updateAutomationStatus()
@@ -6432,13 +6432,13 @@ void ArrangementView::showLocatorAutomationMenu()
 {
     juce::PopupMenu menu;
     const bool hasLocators = ! project.locators.empty();
-    menu.addItem (1, "Ir para locator anterior", hasLocators);
-    menu.addItem (2, "Adicionar locator no playhead");
-    menu.addItem (3, "Ir para proximo locator", hasLocators);
-    menu.addItem (4, "Remover locator selecionado", hasLocators);
+    menu.addItem (1, "Go to Previous Locator", hasLocators);
+    menu.addItem (2, "Add Locator at Playhead");
+    menu.addItem (3, "Go to Next Locator", hasLocators);
+    menu.addItem (4, "Remove Selected Locator", hasLocators);
     menu.addSeparator();
-    menu.addItem (5, "Modo de automacao", true, automationMode);
-    menu.addItem (6, "Selecionar parametro de automacao");
+    menu.addItem (5, "Automation Mode", true, automationMode);
+    menu.addItem (6, "Select Automation Parameter");
 
     juce::Component::SafePointer<ArrangementView> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&locatorOverflowButton),

@@ -20,7 +20,7 @@ TaskRegistry::TaskId TaskRegistry::begin (juce::String label, juce::String targe
 {
     jassert (! cancelable || static_cast<bool> (cancelCallback));
     if (cancelable && ! cancelCallback)
-        juce::Logger::writeToLog ("TaskRegistry: tarefa cancelavel criada sem callback de cancelamento.");
+        juce::Logger::writeToLog ("TaskRegistry: A cancellable task was created without a cancellation callback.");
 
     Task task;
     task.id = state->nextId.fetch_add (1, std::memory_order_relaxed);
@@ -72,7 +72,7 @@ bool TaskRegistry::cancel (TaskId id)
     jassert (manager != nullptr && manager->isThisTheMessageThread());
     if (manager == nullptr || ! manager->isThisTheMessageThread())
     {
-        juce::Logger::writeToLog ("TaskRegistry: cancel() deve ser chamado na message thread.");
+        juce::Logger::writeToLog ("TaskRegistry: cancel() must be called on the message thread.");
         return false;
     }
 
@@ -94,7 +94,7 @@ std::vector<TaskRegistry::Task> TaskRegistry::tasksForTarget (const juce::String
     jassert (manager != nullptr && manager->isThisTheMessageThread());
     if (manager == nullptr || ! manager->isThisTheMessageThread())
     {
-        juce::Logger::writeToLog ("TaskRegistry: consulta deve ser feita na message thread.");
+        juce::Logger::writeToLog ("TaskRegistry: Queries must be made on the message thread.");
         return {};
     }
 
@@ -127,7 +127,7 @@ void TaskRegistry::addListener (Listener& listener)
     if (manager != nullptr && manager->isThisTheMessageThread())
         state->listeners.add (&listener);
     else
-        juce::Logger::writeToLog ("TaskRegistry: addListener deve ser chamado na message thread.");
+        juce::Logger::writeToLog ("TaskRegistry: addListener must be called on the message thread.");
 }
 
 void TaskRegistry::removeListener (Listener& listener)
@@ -137,7 +137,7 @@ void TaskRegistry::removeListener (Listener& listener)
     if (manager != nullptr && manager->isThisTheMessageThread())
         state->listeners.remove (&listener);
     else
-        juce::Logger::writeToLog ("TaskRegistry: removeListener deve ser chamado na message thread.");
+        juce::Logger::writeToLog ("TaskRegistry: removeListener must be called on the message thread.");
 }
 
 bool TaskRegistry::targetMatches (const juce::String& taskTarget, const juce::String& queryTarget)
@@ -167,7 +167,7 @@ void TaskRegistry::dispatch (std::weak_ptr<State> weakState, std::function<void(
             operation (*lockedState);
     }))
     {
-        juce::Logger::writeToLog ("TaskRegistry: nao foi possivel enviar a atualizacao para a message thread.");
+        juce::Logger::writeToLog ("TaskRegistry: Could not send the update to the message thread.");
     }
 }
 

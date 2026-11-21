@@ -39,7 +39,7 @@ struct MidiMapping
     int number = 0;
 };
 
-// Estado do projeto: trilhas, clips, selecao e regiao de loop. Vive na thread principal.
+// Project state: tracks, clips, selection, and loop region. Lives on the main thread.
 // O engine de audio e as views ouvem os callbacks.
 class ProjectModel : public juce::ChangeBroadcaster
 {
@@ -64,17 +64,17 @@ public:
     std::vector<int> selectedTrackIds;
     int selectedTrackId = -1, selectedClipId = -1, selectedAudioClipId = -1;
     double loopStart = 0.0, loopEnd = 16.0;
-    double totalBeats = 256.0;                       // 64 compassos visiveis (cresce com os clips)
+    double totalBeats = 256.0;                       // 64 visible bars (grows with clips).
     std::vector<ArrangementLocator> locators;
     std::vector<MidiMapping> midiMappings;
     int selectedLocatorId = -1, songStartLocatorId = -1;
 
-    std::function<void (int trackId)> onTrackAdded, onTrackRemoved;   // removed: antes de apagar
-    std::function<void (int trackId)> onTrackNotes;                   // notas da trilha mudaram
+    std::function<void (int trackId)> onTrackAdded, onTrackRemoved;   // onTrackRemoved: before deletion.
+    std::function<void (int trackId)> onTrackNotes;                   // Track notes changed.
     std::function<void (int trackId)> onAudioClipsChanged;
     std::function<void (int trackId)> onAudioClipAutomationChanged;
     std::function<void()> onMixerChanged;
-    std::function<void()> onSelectionChanged;                         // trilha/clip selecionados mudaram
+    std::function<void()> onSelectionChanged;                         // Selected track/clip changed.
     std::function<void()> onLoopChanged;
     std::function<std::vector<PluginState>()> capturePluginHistoryState;
     std::function<void (const std::vector<PluginState>&)> restorePluginHistoryState;
@@ -137,8 +137,8 @@ public:
     bool cropRange (int trackId, double start, double end);
     bool setAutomationEnvelope (int trackId, roll::AutomationEnvelope);
     bool removeAutomationEnvelope (int trackId, const roll::AutomationTarget&);
-    // Move para outra trilha/posicao, substituindo apenas o trecho sobreposto.
-    // Devolve o novo id do clip (ou -1 se os argumentos forem invalidos).
+    // Move to another track/position, replacing only the overlapping section.
+    // Returns the new clip ID (or -1 if the arguments are invalid).
     int  moveClip (int fromTrack, int clipId, int toTrack, double newStart);
     int  moveAudioClip (int fromTrack, int clipId, int toTrack, double newStart);
     void selectAudioClip (int trackId, int clipId);

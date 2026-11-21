@@ -46,7 +46,7 @@ TEST_CASE("Adaptive arrangement grid keeps snap spacing usable while zooming")
     REQUIRE(adaptiveGridBeat (24.0, 0.0) == 0.25);
 }
 
-TEST_CASE("Clips nao podem se sobrepor na mesma trilha")
+TEST_CASE("Clips cannot overlap on the same track")
 {
     Track t;
     auto* a = t.addClip(0.0, 4.0);
@@ -55,22 +55,22 @@ TEST_CASE("Clips nao podem se sobrepor na mesma trilha")
     REQUIRE(t.isFree(0.0, 4.0, a->id));       // ignora a si mesmo
 }
 
-TEST_CASE("flatten converte notas do clip para tempo absoluto")
+TEST_CASE("flatten converts clip notes to absolute time")
 {
     Track t;
-    auto* c = t.addClip(8.0, 4.0);             // comeca no beat 8
+    auto* c = t.addClip(8.0, 4.0);             // Starts at beat 8.
     c->clip.addNote({ 60, 1.0, 1.0, 100 });
     auto flat = flatten(t);
     REQUIRE(flat.size() == 1);
     REQUIRE(flat[0].startBeats == 9.0);
 }
 
-TEST_CASE("flatten corta notas que passam do fim do clip e descarta as de fora")
+TEST_CASE("flatten trims notes that extend past the clip and discards out-of-range notes")
 {
     Track t;
     auto* c = t.addClip(0.0, 4.0);
-    c->clip.addNote({ 60, 3.5, 2.0, 100 });    // sai do clip: cortada em 0.5
-    c->clip.addNote({ 62, 5.0, 1.0, 100 });    // totalmente fora
+    c->clip.addNote({ 60, 3.5, 2.0, 100 });    // Extends past the clip: trimmed to 0.5.
+    c->clip.addNote({ 62, 5.0, 1.0, 100 });    // Entirely outside.
     auto flat = flatten(t);
     REQUIRE(flat.size() == 1);
     REQUIRE(flat[0].lengthBeats == 0.5);
@@ -97,7 +97,7 @@ TEST_CASE("Grooves transform playback without changing the MIDI clip")
     REQUIRE (clip->clip.notes()[0].velocity == 100);
 }
 
-TEST_CASE("Clips desativados nao tocam e permanecem desativados ao copiar e dividir")
+TEST_CASE("Disabled clips do not play and stay disabled when copied or split")
 {
     Track midi;
     auto* midiClip = midi.addClip (0.0, 4.0);
@@ -129,7 +129,7 @@ TEST_CASE("Clips desativados nao tocam e permanecem desativados ao copiar e divi
     REQUIRE_FALSE (audio.findAudioClip (rightAudioId)->enabled);
 }
 
-TEST_CASE("Mover clip entre trilhas preserva as notas")
+TEST_CASE("Moving a clip between tracks preserves its notes")
 {
     Track a, b;
     auto* c = a.addClip(0.0, 4.0);
@@ -142,7 +142,7 @@ TEST_CASE("Mover clip entre trilhas preserva as notas")
     REQUIRE(b.clips[0]->clip.notes().size() == 1);
 }
 
-TEST_CASE("Copiar clip MIDI preserva notas e nao altera o original")
+TEST_CASE("Copying a MIDI clip preserves its notes and leaves the original unchanged")
 {
     Track track;
     auto* original = track.addClip (0.0, 4.0);
@@ -159,7 +159,7 @@ TEST_CASE("Copiar clip MIDI preserva notas e nao altera o original")
     REQUIRE(track.copyClip (*original, 2.0) == nullptr);
 }
 
-TEST_CASE("Dividir clip MIDI preserva notas e divide notas que cruzam o corte")
+TEST_CASE("Splitting a MIDI clip preserves notes and splits notes crossing the cut")
 {
     Track track;
     auto* original = track.addClip (4.0, 8.0);
@@ -186,7 +186,7 @@ TEST_CASE("Dividir clip MIDI preserva notas e divide notas que cruzam o corte")
     REQUIRE(right->clip.notes()[1].startBeats == 2.0);
 }
 
-TEST_CASE("Clips de audio preservam arquivo, waveform e limites de sobreposicao")
+TEST_CASE("Audio clips preserve file, waveform, and overlap boundaries")
 {
     Track track;
     track.type = TrackType::Audio;
@@ -205,7 +205,7 @@ TEST_CASE("Clips de audio preservam arquivo, waveform e limites de sobreposicao"
     REQUIRE(track.isAudioFree (2.0, 3.0, a->id));
 }
 
-TEST_CASE("Curvas de fade sao suaves e permitem ajustar o perfil")
+TEST_CASE("Fade curves are smooth and allow profile adjustment")
 {
     REQUIRE(audioFadeCurveValue (0.0, 0.0) == 0.0);
     REQUIRE(audioFadeCurveValue (1.0, 0.0) == 1.0);
@@ -214,7 +214,7 @@ TEST_CASE("Curvas de fade sao suaves e permitem ajustar o perfil")
     REQUIRE(audioFadeCurveValue (0.25, -1.0) < audioFadeCurveValue (0.25, 0.0));
 }
 
-TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
+TEST_CASE("Splitting an audio clip preserves its source and separates waveform and offset")
 {
     Track track;
     track.type = TrackType::Audio;
@@ -253,7 +253,7 @@ TEST_CASE("Dividir clip de audio preserva a origem e separa waveform e offset")
     REQUIRE(right->fadeOutCurve == -0.3);
 }
 
-TEST_CASE("Copiar clip de audio preserva offset e fades")
+TEST_CASE("Copying an audio clip preserves offset and fades")
 {
     Track track;
     track.type = TrackType::Audio;
@@ -278,7 +278,7 @@ TEST_CASE("Copiar clip de audio preserva offset e fades")
     REQUIRE(track.copyAudioClip (*original, 2.0) == nullptr);
 }
 
-TEST_CASE("Dividir clips fora de seus limites nao altera a trilha")
+TEST_CASE("Splitting clips outside their bounds does not change the track")
 {
     Track midi;
     auto* midiClip = midi.addClip (4.0, 4.0);
@@ -294,7 +294,7 @@ TEST_CASE("Dividir clips fora de seus limites nao altera a trilha")
     REQUIRE(audio.audioClips.size() == 1);
 }
 
-TEST_CASE("Mover clip de audio preserva seus metadados")
+TEST_CASE("Moving an audio clip preserves its metadata")
 {
     Track source, destination;
     auto* clip = source.addAudioClip (1.0, 4.0, "C:/audio/voice.wav", "voice.wav",
@@ -310,7 +310,7 @@ TEST_CASE("Mover clip de audio preserva seus metadados")
     REQUIRE(destination.audioClips.front()->sourceBpm == 120.0);
 }
 
-TEST_CASE("Roteamento de saida da trilha padrao e Master e pode ser alterado para ExtOut")
+TEST_CASE("The default track output routes to Master and can be changed to ExtOut")
 {
     Track track;
     REQUIRE(track.outputRouting == TrackOutputRouting::Master);
@@ -319,14 +319,14 @@ TEST_CASE("Roteamento de saida da trilha padrao e Master e pode ser alterado par
     REQUIRE(track.outputRouting == TrackOutputRouting::ExtOut);
 }
 
-TEST_CASE("Trilhas iniciam com ganho unitario")
+TEST_CASE("Tracks start at unity gain")
 {
     Track track;
     REQUIRE(track.volume == 1.0);
     REQUIRE(std::abs(gainToDecibels(static_cast<float>(track.volume))) < 0.001f);
 }
 
-TEST_CASE("Conversao linear e decibeis com ganho unitario e menos infinito")
+TEST_CASE("Linear and decibel conversion handles unity gain and negative infinity")
 {
     // Ganho unitario 1.0 = 0.0 dB
     REQUIRE(std::abs(gainToDecibels(1.0f) - 0.0f) < 0.001f);
@@ -345,7 +345,7 @@ TEST_CASE("Conversao linear e decibeis com ganho unitario e menos infinito")
     REQUIRE(decibelsToGain(-60.0f) == 0.0f);
 }
 
-TEST_CASE("Copiar uma trilha preserva clips e IDs seguintes")
+TEST_CASE("Copying a track preserves clips and subsequent IDs")
 {
     Track original;
     original.id = 7;

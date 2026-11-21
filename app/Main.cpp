@@ -76,7 +76,7 @@ public:
         const bool stdRegistered = registerProjectFileAssociation (
             ".std", "MaXXXtudioProject", "MaXXXtudio Session", executable);
         if (! stdRegistered)
-            juce::Logger::writeToLog ("MaXXXtudio: nao foi possivel registrar as associacoes de projeto.");
+            juce::Logger::writeToLog ("MaXXXtudio: Could not register project file associations.");
         else
             SHChangeNotify (SHCNE_ASSOCCHANGED, SHCNF_IDLIST, nullptr, nullptr);
 #endif

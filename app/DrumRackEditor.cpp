@@ -32,7 +32,7 @@ bool isSharpPad (int pad)
 DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
     : juce::AudioProcessorEditor (owner), processor (owner)
 {
-    title.setText ("Drum Rack - 15 teclas MIDI", juce::dontSendNotification);
+    title.setText ("Drum Rack - 15 MIDI Keys", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centredLeft);
     title.setColour (juce::Label::textColourId, theme::text());
     selectedPadLabel.setColour (juce::Label::textColourId, theme::text());
@@ -67,7 +67,7 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
 
     modeBox.addItem ("One-Shot", 1);
     modeBox.addItem ("Classic", 2);
-    modeBox.setTooltip ("One-Shot ignora o note-off; Classic pode sustentar loops enquanto a nota esta pressionada.");
+    modeBox.setTooltip ("One-Shot ignores note-off; Classic can sustain loops while the note is held.");
     gainSlider.setRange (0.0, 4.0, 0.01);
     pitchSlider.setRange (-48.0, 48.0, 1.0);
     startSlider.setRange (0.0, 1000.0, 1.0);
@@ -78,18 +78,18 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
         slider->setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 22);
     }
     bypassEffectButton.setClickingTogglesState (true);
-    moveEffectUpButton.setTooltip ("Mover o efeito selecionado uma posicao para cima na cadeia.");
-    moveEffectDownButton.setTooltip ("Mover o efeito selecionado uma posicao para baixo na cadeia.");
+    moveEffectUpButton.setTooltip ("Move the selected effect up one position in the chain.");
+    moveEffectDownButton.setTooltip ("Move the selected effect down one position in the chain.");
 
     clearButton.onClick = [this]
     {
         juce::Component::SafePointer<DrumRackEditor> safeThis (this);
         AppModalDialog::show (
-            *this, "Limpar todos os pads?",
-            "Isso remove os samples dos 15 pads. Use Desfazer para restaurar.",
+            *this, "Clear all pads?",
+            "This removes the samples from all 15 pads. Use Undo to restore them.",
             AppModalDialog::Icon::Warning,
-            { { "Limpar todos", 1, AppModalDialog::ButtonStyle::Primary },
-              { "Cancelar", 0, AppModalDialog::ButtonStyle::Tertiary } },
+            { { "Clear All", 1, AppModalDialog::ButtonStyle::Primary },
+              { "Cancel", 0, AppModalDialog::ButtonStyle::Tertiary } },
             [safeThis] (int result)
             {
                 if (safeThis == nullptr || result == 0)
@@ -358,7 +358,7 @@ void DrumRackEditor::filesDropped (const juce::StringArray& files, int x, int y)
 void DrumRackEditor::chooseSample()
 {
     fileChooser = std::make_unique<juce::FileChooser> (
-        "Carregar sample para MIDI "
+        "Load Sample for MIDI "
             + juce::String (DrumRackProcessor::firstMidiNote + selectedPad), juce::File(),
         "*.wav;*.aif;*.aiff;*.flac;*.ogg");
     juce::Component::SafePointer<DrumRackEditor> safeThis (this);
@@ -529,7 +529,7 @@ void DrumRackEditor::refreshPadLabels()
         const int pad = index;
         auto* button = pads[static_cast<std::size_t> (pad)].get();
         const auto sampleName = processor.padSampleLength (pad) > 0
-            ? processor.padName (pad) : juce::String ("vazio");
+            ? processor.padName (pad) : juce::String ("Empty");
         button->setButtonText (padKeyboardKey (pad) + "  MIDI "
                                + juce::String (DrumRackProcessor::firstMidiNote + pad)
                                + "\n" + sampleName);
@@ -547,10 +547,10 @@ void DrumRackEditor::refreshPadControls()
 {
     const auto settings = processor.padSettings (selectedPad);
     const int sampleLength = processor.padSampleLength (selectedPad);
-    selectedPadLabel.setText ("Pad selecionado: " + padKeyboardKey (selectedPad)
+    selectedPadLabel.setText ("Selected pad: " + padKeyboardKey (selectedPad)
                               + " - MIDI " + juce::String (DrumRackProcessor::firstMidiNote + selectedPad)
                               + " - " + (sampleLength > 0 ? processor.padName (selectedPad)
-                                                           : juce::String ("vazio")),
+                                                           : juce::String ("Empty")),
                               juce::dontSendNotification);
     gainSlider.setValue (settings.gain, juce::dontSendNotification);
     pitchSlider.setValue (settings.pitchSemitones, juce::dontSendNotification);
@@ -603,7 +603,7 @@ void DrumRackEditor::refreshPadEffectButtons()
     {
         const bool bypassed = effects[static_cast<std::size_t> (selectedEffect)].bypassed;
         bypassEffectButton.setToggleState (bypassed, juce::dontSendNotification);
-        bypassEffectButton.setButtonText (bypassed ? "Ativar" : "Bypass");
+        bypassEffectButton.setButtonText (bypassed ? "Enable" : "Bypass");
     }
 }
 

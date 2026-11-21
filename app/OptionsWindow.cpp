@@ -25,7 +25,7 @@ public:
     }
 
 private:
-    juce::Label description { {}, "Configure audio e habilite as entradas MIDI usadas pelo MIDI Learn." };
+    juce::Label description { {}, "Configure audio and enable the MIDI inputs used by MIDI Learn." };
     juce::AudioDeviceSelectorComponent selector;
 };
 
@@ -41,7 +41,7 @@ public:
         description.setColour (juce::Label::textColourId, theme::textDim());
         addAndMakeVisible (description);
 
-        paths.setTextWhenNothingSelected ("Nenhuma pasta customizada");
+        paths.setTextWhenNothingSelected ("No custom folders");
         addAndMakeVisible (paths);
         addAndMakeVisible (addButton);
         addAndMakeVisible (removeButton);
@@ -55,7 +55,7 @@ public:
         scanButton.onClick = [this]
         {
             scanner.startScan();
-            status.setText ("Varredura iniciada...", juce::dontSendNotification);
+            status.setText ("Scan started...", juce::dontSendNotification);
         };
         paths.onChange = [this] { removeButton.setEnabled (paths.getSelectedId() > 0); };
         refreshSearchPaths();
@@ -88,12 +88,12 @@ private:
         if (scanning)
         {
             scanWasActive = true;
-            status.setText ("Varredura de plugins em andamento...", juce::dontSendNotification);
+            status.setText ("Plugin scan in progress...", juce::dontSendNotification);
         }
         else if (scanWasActive)
         {
             scanWasActive = false;
-            status.setText ("Varredura concluida. Confira os plugins no navegador.",
+            status.setText ("Scan complete. Check the browser for plugins.",
                             juce::dontSendNotification);
         }
     }
@@ -114,7 +114,7 @@ private:
             return;
 
         fileChooser = std::make_unique<juce::FileChooser> (
-            "Adicionar pasta de plugins VST3",
+            "Add VST3 Plugin Folder",
             juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory));
         const juce::Component::SafePointer<PluginPreferencesPage> safeThis (this);
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode
@@ -137,7 +137,7 @@ private:
                 }
 
                 safeThis->refreshSearchPaths();
-                safeThis->status.setText ("Pasta adicionada; iniciando nova varredura...",
+                safeThis->status.setText ("Folder added; starting a new scan...",
                                           juce::dontSendNotification);
                 safeThis->scanner.startScan();
             });
@@ -158,16 +158,16 @@ private:
         }
 
         refreshSearchPaths();
-        status.setText ("Pasta removida; iniciando nova varredura...", juce::dontSendNotification);
+        status.setText ("Folder removed; starting a new scan...", juce::dontSendNotification);
         scanner.startScan();
     }
 
     PluginScanner& scanner;
-    juce::Label title { {}, "Plugins VST3" };
-    juce::Label description { {}, "Adicione pastas personalizadas ou execute novamente a busca de plugins." };
+    juce::Label title { {}, "VST3 Plugins" };
+    juce::Label description { {}, "Add custom folders or run the plugin scan again." };
     juce::ComboBox paths;
-    juce::TextButton addButton { "Adicionar pasta..." }, removeButton { "Remover pasta" },
-                     scanButton { "Escanear plugins" };
+    juce::TextButton addButton { "Add Folder..." }, removeButton { "Remove Folder" },
+                     scanButton { "Scan Plugins" };
     juce::Label status;
     std::vector<juce::File> customPaths;
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -185,7 +185,7 @@ public:
         title.setText ("Record / Warp / Launch", juce::dontSendNotification);
         addAndMakeVisible (title);
 
-        edgeFades.setButtonText ("Criar fades curtos nas bordas do audio importado (4 ms)");
+        edgeFades.setButtonText ("Create short fades at the edges of imported audio (4 ms)");
         edgeFades.setToggleState (enabled, juce::dontSendNotification);
         edgeFades.onClick = [this]
         {
@@ -195,8 +195,8 @@ public:
         addAndMakeVisible (edgeFades);
 
         description.setText (
-            "Quando ativado, novos clips de audio recebem fades curtos de entrada e saida para reduzir cliques. "
-            "Os fades podem ser ajustados no Arrangement; clips existentes nao sao alterados.",
+            "When enabled, new audio clips get short fade-ins and fade-outs to reduce clicks. "
+            "Fades can be adjusted in the Arrangement; existing clips are not changed.",
             juce::dontSendNotification);
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::topLeft);
@@ -226,31 +226,35 @@ public:
     explicit AppearancePreferencesPage (std::function<void (theme::Palette)> onChanged)
         : changed (std::move (onChanged))
     {
-        title.setText ("Tema da interface", juce::dontSendNotification);
+        title.setText ("Interface Theme", juce::dontSendNotification);
         title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
         description.setText (
-            "Escolha o contraste da interface. Os temas escuros usam texto claro; o tema branco usa texto escuro.",
+            "Choose the interface contrast. Dark themes use light text; the white theme uses dark text.",
             juce::dontSendNotification);
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (description);
 
-        themeBox.addItem ("Cinza grafite + laranja", 1);
-        themeBox.addItem ("Preto + laranja", 2);
-        themeBox.addItem ("Branco + laranja", 3);
-        themeBox.addItem ("Cinza grafite + azul", 4);
-        themeBox.addItem ("Preto + azul", 5);
-        themeBox.addItem ("Matrix 1", 6);
-        themeBox.addItem ("Matrix 2", 7);
+        themeBox.addItem ("Graphite + Orange", 1);
+        themeBox.addItem ("Black + Orange", 2);
+        themeBox.addItem ("White + Orange", 3);
+        themeBox.addItem ("Graphite + Blue", 4);
+        themeBox.addItem ("Black + Blue", 5);
+        themeBox.addItem ("Graphite + Red", 6);
+        themeBox.addItem ("Black + Red", 7);
+        themeBox.addItem ("Matrix 1", 8);
+        themeBox.addItem ("Matrix 2", 9);
         themeBox.setSelectedId (theme::current() == theme::Palette::GraphiteOrange ? 1
                                : theme::current() == theme::Palette::BlackOrange ? 2
                                : theme::current() == theme::Palette::WhiteOrange ? 3
                                : theme::current() == theme::Palette::GraphiteBlue ? 4
                                : theme::current() == theme::Palette::BlackBlue ? 5
-                               : theme::current() == theme::Palette::MatrixGraphite ? 6 : 7,
+                               : theme::current() == theme::Palette::GraphiteRed ? 6
+                               : theme::current() == theme::Palette::BlackRed ? 7
+                               : theme::current() == theme::Palette::MatrixGraphite ? 8 : 9,
                                juce::dontSendNotification);
         themeBox.onChange = [this]
         {
@@ -260,7 +264,9 @@ public:
                 : themeBox.getSelectedId() == 3 ? theme::Palette::WhiteOrange
                 : themeBox.getSelectedId() == 4 ? theme::Palette::GraphiteBlue
                 : themeBox.getSelectedId() == 5 ? theme::Palette::BlackBlue
-                : themeBox.getSelectedId() == 6 ? theme::Palette::MatrixGraphite
+                : themeBox.getSelectedId() == 6 ? theme::Palette::GraphiteRed
+                : themeBox.getSelectedId() == 7 ? theme::Palette::BlackRed
+                : themeBox.getSelectedId() == 8 ? theme::Palette::MatrixGraphite
                                                 : theme::Palette::MatrixBlack;
             if (changed)
                 changed (palette);
@@ -290,19 +296,19 @@ public:
                              std::function<void (theme::WaveformStyle)> onChanged)
         : changed (std::move (onChanged))
     {
-        title.setText ("Estilo da waveform", juce::dontSendNotification);
+        title.setText ("Waveform Style", juce::dontSendNotification);
         title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
         description.setText (
-            "Escolha como as formas de onda dos clips aparecem no Arrangement.",
+            "Choose how clip waveforms appear in the Arrangement.",
             juce::dontSendNotification);
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (description);
 
-        styleBox.addItem ("Classic (padrao)", 1);
+        styleBox.addItem ("Classic (Default)", 1);
         styleBox.addItem ("Ultraviolet", 2);
         styleBox.addItem ("Spectrum", 3);
         styleBox.setSelectedId (currentStyle == theme::WaveformStyle::Ultraviolet ? 2
@@ -342,7 +348,7 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
                               std::function<void (theme::Palette)> onThemeChanged,
                               theme::WaveformStyle waveformStyle,
                               std::function<void (theme::WaveformStyle)> onWaveformStyleChanged)
-    : juce::DocumentWindow (theme::ui ("Preferencias"), theme::panel(),
+    : juce::DocumentWindow (theme::ui ("Preferences"), theme::panel(),
                             juce::DocumentWindow::closeButton)
 {
     auto tabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
@@ -350,7 +356,7 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
     tabs->addTab (theme::ui ("Plugins"), theme::panel(), new PluginPreferencesPage (scanner), true);
     tabs->addTab (theme::ui ("Record/Warp/Launch"), theme::panel(),
                   new FadePreferencesPage (createEdgeFades, std::move (onCreateEdgeFadesChanged)), true);
-    tabs->addTab (theme::ui ("Aparencia"), theme::panel(),
+    tabs->addTab (theme::ui ("Appearance"), theme::panel(),
                   new AppearancePreferencesPage (std::move (onThemeChanged)), true);
     tabs->addTab (theme::ui ("Waveform"), theme::panel(),
                   new WaveformPreferencesPage (waveformStyle,

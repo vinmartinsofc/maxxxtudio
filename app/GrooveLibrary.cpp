@@ -295,14 +295,14 @@ std::vector<GrooveLibraryCategory> GrooveLibrary::loadCategories (const juce::Fi
 juce::Result GrooveLibrary::loadFile (const juce::File& file, roll::GrooveTemplate& groove)
 {
     if (! file.existsAsFile() || ! file.getFileExtension().equalsIgnoreCase (".agr"))
-        return juce::Result::fail ("Selecione um arquivo .agr existente.");
+        return juce::Result::fail ("Select an existing .agr file.");
 
     if (file.getSize() <= 0 || file.getSize() > 1024 * 1024)
-        return juce::Result::fail ("O arquivo .agr esta vazio ou excede o limite de 1 MB.");
+        return juce::Result::fail ("The .agr file is empty or exceeds the 1 MB limit.");
 
     juce::MemoryBlock bytes;
     if (! file.loadFileAsData (bytes))
-        return juce::Result::fail ("Nao foi possivel ler o arquivo .agr.");
+        return juce::Result::fail ("Could not read the .agr file.");
 
     const auto fileName = file.getFileNameWithoutExtension();
     double grid = gridForName (fileName);
@@ -341,7 +341,7 @@ juce::Result GrooveLibrary::loadFile (const juce::File& file, roll::GrooveTempla
         }
 
         if (! extracted)
-            return juce::Result::fail ("O formato binario deste groove ainda nao e compativel.");
+            return juce::Result::fail ("This groove binary format is not supported yet.");
     }
 
     std::sort (notes.begin(), notes.end(), [] (const auto& first, const auto& second)
@@ -351,10 +351,10 @@ juce::Result GrooveLibrary::loadFile (const juce::File& file, roll::GrooveTempla
 
     const double inferredGrid = grid > 0.0 ? grid : inferGridFromNotes (fileName, file, notes);
     if (inferredGrid <= 0.0)
-        return juce::Result::fail ("Nao foi possivel identificar a divisao ritmica pelo nome do groove.");
+        return juce::Result::fail ("Could not identify the groove time division from its name.");
 
     if (! makeTemplate (fileName, file, inferredGrid, notes, groove))
-        return juce::Result::fail ("O groove nao contem um padrao de notas compativel com sua divisao.");
+        return juce::Result::fail ("The groove does not contain a note pattern compatible with its time division.");
 
     return juce::Result::ok();
 }

@@ -30,7 +30,7 @@ public:
     {
         return isFolder ? text + " (" + juce::String (count) + ")"
                         : description.name + " - " + description.manufacturerName
-                            + " (" + description.pluginFormatName + "); clique com o botao direito para favoritos";
+                            + " (" + description.pluginFormatName + "); right-click to add to Favorites";
     }
 
     juce::var getDragSourceDescription() override
@@ -178,7 +178,7 @@ BrowserPanel::NativeToolCard::NativeToolCard (const juce::String& name,
     : juce::TextButton (name), detail (description), dragDescription (sourceDescription)
 {
     setMouseClickGrabsKeyboardFocus (false);
-    setTooltip ("Clique para adicionar ao canal selecionado ou arraste para um canal MIDI.");
+    setTooltip ("Click to add to the selected channel or drag to a MIDI channel.");
 }
 
 void BrowserPanel::NativeToolCard::mouseDown (const juce::MouseEvent& event)
@@ -255,12 +255,16 @@ void BrowserPanel::NativeToolCard::paintButton (juce::Graphics& graphics,
 
 BrowserPanel::BrowserPanel (PluginScanner& s)
     : scanner (s), tree (std::make_unique<PluginTree> (*this)),
-      drumRackCard ("Drum Rack", "Arraste para o canal MIDI desejado",
+      drumRackCard ("Drum Rack", "Drag to the desired MIDI channel",
                     "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier)),
-      utilityCard ("Volume Master", theme::ui ("Volume, estereo, mono, fase e modulacao"),
+      utilityCard ("Master Volume", theme::ui ("Volume, stereo, mono, phase, and modulation"),
                    "plugin:" + juce::String ("MaXXXtudio.Utility")),
+      compMasterCard ("Comp Master", "Compressor, oscilloscope, and stereo meters",
+                      "plugin:MaXXXtudio.CompMaster"),
+      eqMasterCard ("EQ Master", "Eight-band parametric equalizer",
+                    "plugin:MaXXXtudio.EqMaster"),
       referenceCard ("Reference Master",
-                     "Deck de referencia: BPM, KEY, waveform e espectro",
+                     "Reference deck: BPM, key, waveform, and spectrum",
                      "tool:reference-master")
 {
     juce::PropertiesFile::Options options;
@@ -291,7 +295,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     vstTab.onClick = [this] { setMaXXXtudioTab (false); };
     maXXXtudioTab.onClick = [this] { setMaXXXtudioTab (true); };
 
-    search.setTextToShowWhenEmpty ("Buscar (nome ou fabricante)", theme::textDim());
+    search.setTextToShowWhenEmpty ("Search (name or vendor)", theme::textDim());
     search.setColour (juce::TextEditor::backgroundColourId, theme::control());
     search.setColour (juce::TextEditor::textColourId, theme::text());
     search.setColour (juce::TextEditor::outlineColourId, theme::border());
@@ -316,12 +320,12 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         addAndMakeVisible (b);
     }
     allButton.setToggleState (true, juce::dontSendNotification);
-    allButton.setTooltip ("Todos os plugins");
-    instrumentsButton.setTooltip ("Instrumentos");
-    effectsButton.setTooltip ("Efeitos");
+    allButton.setTooltip ("All Plugins");
+    instrumentsButton.setTooltip ("Instruments");
+    effectsButton.setTooltip ("Effects");
     favoritesButton.setTooltip (
-        "Ctrl+clique ou Shift+clique para selecionar varios favoritos; "
-        "clique direito para mudar a cor ou remover");
+        "Ctrl-click or Shift-click to select multiple favorites; "
+        "right-click to change the color or remove");
     allButton.onClick         = [this] { setFilter (Filter::All); };
     instrumentsButton.onClick = [this] { setFilter (Filter::Instruments); };
     effectsButton.onClick     = [this] { setFilter (Filter::Effects); };
@@ -331,7 +335,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
 
-    maXXXtudioDescription.setText ("Instrumentos e efeitos nativos.", juce::dontSendNotification);
+    maXXXtudioDescription.setText ("Native instruments and effects.", juce::dontSendNotification);
     maXXXtudioDescription.setFont (juce::FontOptions (14.0f, juce::Font::bold));
     maXXXtudioDescription.setColour (juce::Label::textColourId, theme::text());
     addAndMakeVisible (maXXXtudioDescription);
@@ -345,6 +349,16 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         if (onAddUtilityRequested)
             setStatus (onAddUtilityRequested());
     };
+    compMasterCard.onClick = [this]
+    {
+        if (onAddCompMasterRequested)
+            setStatus (onAddCompMasterRequested());
+    };
+    eqMasterCard.onClick = [this]
+    {
+        if (onAddEqMasterRequested)
+            setStatus (onAddEqMasterRequested());
+    };
     referenceCard.onClick = [this]
     {
         if (onOpenReferenceRequested)
@@ -352,6 +366,8 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     };
     addAndMakeVisible (drumRackCard);
     addAndMakeVisible (utilityCard);
+    addAndMakeVisible (compMasterCard);
+    addAndMakeVisible (eqMasterCard);
     addAndMakeVisible (referenceCard);
     setMaXXXtudioTab (false);
 
@@ -398,7 +414,7 @@ void BrowserPanel::setMaXXXtudioTab (bool showTools)
     showingMaXXXtudioTools = showTools;
     vstTab.setToggleState (! showTools, juce::dontSendNotification);
     maXXXtudioTab.setToggleState (showTools, juce::dontSendNotification);
-    title.setText (showTools ? "Ferramentas do MaXXXtudio" : "Plugins VST",
+    title.setText (showTools ? "MaXXXtudio Tools" : "VST Plugins",
                    juce::dontSendNotification);
     search.setVisible (! showTools);
     allButton.setVisible (! showTools);
@@ -409,6 +425,8 @@ void BrowserPanel::setMaXXXtudioTab (bool showTools)
     maXXXtudioDescription.setVisible (showTools);
     drumRackCard.setVisible (showTools);
     utilityCard.setVisible (showTools);
+    compMasterCard.setVisible (showTools);
+    eqMasterCard.setVisible (showTools);
     referenceCard.setVisible (showTools);
     resized();
 }
@@ -567,7 +585,7 @@ void BrowserPanel::refresh()
     }
 
     auto root = std::make_unique<TreeItem> (
-        *this, showingFavorites ? "Favoritos" : "Plugins", totalPluginCount,
+        *this, showingFavorites ? "Favorites" : "Plugins", totalPluginCount,
         showingFavorites ? "favorites" : "root");
     auto* rootPointer = root.get();
     if (showingFavorites)
@@ -702,10 +720,10 @@ void BrowserPanel::showPluginMenu (const juce::PluginDescription& description,
                         currentColor == static_cast<int> (color));
 
     juce::PopupMenu menu;
-    menu.addSubMenu (theme::ui (favorite ? "Alterar cor do favorito" : "Adicionar aos favoritos"),
+    menu.addSubMenu (theme::ui (favorite ? "Change Favorite Color" : "Add to Favorites"),
                      colors);
     if (favorite)
-        menu.addItem (20, theme::ui ("Remover dos favoritos"));
+        menu.addItem (20, theme::ui ("Remove from Favorites"));
 
     juce::Component::SafePointer<BrowserPanel> safeThis (this);
     menu.showMenuAsync (
@@ -733,8 +751,8 @@ void BrowserPanel::showFavoriteSelectionMenu (
                         theme::ui (favoriteColorPalette::names[color]));
 
     juce::PopupMenu menu;
-    menu.addSubMenu (theme::ui ("Alterar cor de ") + count + theme::ui (" favoritos"), colors);
-    menu.addItem (20, theme::ui ("Remover ") + count + theme::ui (" favoritos"));
+    menu.addSubMenu (theme::ui ("Change color of ") + count + theme::ui (" favorites"), colors);
+    menu.addItem (20, theme::ui ("Remove ") + count + theme::ui (" favorites"));
 
     juce::Component::SafePointer<BrowserPanel> safeThis (this);
     menu.showMenuAsync (
@@ -911,11 +929,15 @@ void BrowserPanel::resized()
         area.removeFromTop (12);
         maXXXtudioDescription.setBounds (area.removeFromTop (24));
         area.removeFromTop (8);
-        drumRackCard.setBounds (area.removeFromTop (78));
-        area.removeFromTop (8);
-        utilityCard.setBounds (area.removeFromTop (78));
-        area.removeFromTop (8);
-        referenceCard.setBounds (area.removeFromTop (78));
+        drumRackCard.setBounds (area.removeFromTop (68));
+        area.removeFromTop (6);
+        utilityCard.setBounds (area.removeFromTop (68));
+        area.removeFromTop (6);
+        compMasterCard.setBounds (area.removeFromTop (68));
+        area.removeFromTop (6);
+        eqMasterCard.setBounds (area.removeFromTop (68));
+        area.removeFromTop (6);
+        referenceCard.setBounds (area.removeFromTop (68));
     }
     else
     {
@@ -924,9 +946,9 @@ void BrowserPanel::resized()
         area.removeFromTop (6);
         tabs = area.removeFromTop (24);
         const bool compactFilters = tabs.getWidth() < 360;
-        instrumentsButton.setButtonText (compactFilters ? "Inst." : "Instrumentos");
-        effectsButton.setButtonText (compactFilters ? "Efe." : "Efeitos");
-        favoritesButton.setButtonText (compactFilters ? "Fav." : "Favoritos");
+        instrumentsButton.setButtonText (compactFilters ? "Inst." : "Instruments");
+        effectsButton.setButtonText (compactFilters ? "Efe." : "Effects");
+        favoritesButton.setButtonText (compactFilters ? "Fav." : "Favorites");
         const int gap = 3;
         const int buttonWidth = (tabs.getWidth() - gap * 3) / 4;
         allButton.setBounds (tabs.removeFromLeft (buttonWidth));

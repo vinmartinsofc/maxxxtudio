@@ -59,12 +59,12 @@ void Clip::resolveOverlaps (const std::vector<int>& ids)
         for (auto& o : notesVec)
         {
             if (o.id == moved.id || o.pitch != moved.pitch) continue;
-            if (std::find (ids.begin(), ids.end(), o.id) != ids.end()) continue;   // outra nota nova
+            if (std::find (ids.begin(), ids.end(), o.id) != ids.end()) continue;   // Another new note.
 
             if (o.startBeats >= moved.startBeats - eps && o.startBeats < moved.endBeats() - eps)
-                toRemove.push_back (o.id);                                         // coberta pelo inicio
+                toRemove.push_back (o.id);                                         // Covered at the beginning.
             else if (o.startBeats < moved.startBeats - eps && o.endBeats() > moved.startBeats + eps)
-                o.lengthBeats = moved.startBeats - o.startBeats;                   // cauda cortada
+                o.lengthBeats = moved.startBeats - o.startBeats;                   // Tail trimmed.
         }
     }
 

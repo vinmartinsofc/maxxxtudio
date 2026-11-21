@@ -137,7 +137,7 @@ bool DrumRackProcessor::preparePadEffect (const juce::PluginDescription& descrip
 {
     if (instance == nullptr || description.isInstrument)
     {
-        error = "Selecione um efeito de audio valido.";
+        error = "Select a valid audio effect.";
         return false;
     }
 
@@ -145,7 +145,7 @@ bool DrumRackProcessor::preparePadEffect (const juce::PluginDescription& descrip
     const int outputChannels = instance->getBusesLayout().getMainOutputChannelSet().size();
     if (inputChannels < 1 || inputChannels > 2 || outputChannels < 1 || outputChannels > 2)
     {
-        error = "O efeito precisa aceitar de 1 a 2 canais de entrada e saida.";
+        error = "The effect must support 1 to 2 input and output channels.";
         return false;
     }
 
@@ -179,7 +179,7 @@ bool DrumRackProcessor::addPadEffect (int pad, const juce::PluginDescription& de
 {
     if (pad < 0 || pad >= numPads)
     {
-        error = "Pad MIDI invalido.";
+        error = "Invalid MIDI pad.";
         return false;
     }
 
@@ -343,21 +343,21 @@ bool DrumRackProcessor::loadPadFromFileInternal (int pad, const juce::File& file
 {
     if (pad < 0 || pad >= numPads)
     {
-        error = "Pad MIDI invalido.";
+        error = "Invalid MIDI pad.";
         return false;
     }
 
     auto reader = std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file));
     if (reader == nullptr)
     {
-        error = "Formato de audio nao suportado.";
+        error = "Unsupported audio format.";
         return false;
     }
 
     if (reader->lengthInSamples <= 0 || reader->lengthInSamples > std::numeric_limits<int>::max()
         || reader->sampleRate <= 0.0 || reader->numChannels == 0)
     {
-        error = "Arquivo de audio vazio ou invalido.";
+        error = "The audio file is empty or invalid.";
         return false;
     }
 
@@ -367,14 +367,14 @@ bool DrumRackProcessor::loadPadFromFileInternal (int pad, const juce::File& file
     if (static_cast<std::uint64_t> (numSamples) * static_cast<std::uint64_t> (numChannels)
             * sizeof (float) > maxDecodedBytes)
     {
-        error = "O sample excede o limite de 512 MB decodificados.";
+        error = "The sample exceeds the 512 MB decoded size limit.";
         return false;
     }
 
     auto samples = std::make_shared<juce::AudioBuffer<float>> (numChannels, numSamples);
     if (! reader->read (samples.get(), 0, numSamples, 0, true, true))
     {
-        error = "Falha ao decodificar o arquivo de audio.";
+        error = "Failed to decode the audio file.";
         return false;
     }
 
@@ -499,7 +499,7 @@ juce::String DrumRackProcessor::padName (int pad) const
     const juce::SpinLock::ScopedLockType lock (padsLock);
     const auto& sample = pendingPads[static_cast<std::size_t> (pad)];
     return sample.file.existsAsFile() ? sample.file.getFileName()
-                                     : "MIDI " + juce::String (firstMidiNote + pad) + " - vazio";
+                                     : "MIDI " + juce::String (firstMidiNote + pad) + " - Empty";
 }
 
 int DrumRackProcessor::padSampleLength (int pad) const

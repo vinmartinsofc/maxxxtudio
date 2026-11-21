@@ -56,6 +56,56 @@ TEST_CASE ("Project files preserve flat group bus membership")
     REQUIRE (loaded.project.master.colour == 0xff9c27b0);
 }
 
+TEST_CASE ("Project files preserve Comp Master and EQ Master plugin state")
+{
+    TemporaryProjectFolder temporary;
+    ProjectFileData data;
+    data.project.master.id = AudioEngine::masterTrackId;
+    roll::Track track;
+    track.id = 1;
+    data.project.tracks.push_back (track);
+
+    juce::XmlElement compressorStateXml ("NativeEffect");
+    auto* threshold = compressorStateXml.createNewChildElement ("Parameter");
+    threshold->setAttribute ("id", "threshold");
+    threshold->setAttribute ("value", 0.7);
+    juce::MemoryOutputStream compressorStateStream;
+    compressorStateXml.writeTo (compressorStateStream);
+    PluginState compressorPlugin;
+    compressorPlugin.trackId = 1;
+    compressorPlugin.order = 0;
+    compressorPlugin.identifier = AudioEngine::compMasterPluginIdentifier;
+    compressorPlugin.state.replaceAll (compressorStateStream.getData(),
+                                        compressorStateStream.getDataSize());
+    data.plugins.push_back (std::move (compressorPlugin));
+
+    juce::XmlElement equalizerStateXml ("NativeEffect");
+    auto* bandGain = equalizerStateXml.createNewChildElement ("Parameter");
+    bandGain->setAttribute ("id", "band1_gain");
+    bandGain->setAttribute ("value", 0.5);
+    juce::MemoryOutputStream equalizerStateStream;
+    equalizerStateXml.writeTo (equalizerStateStream);
+    PluginState equalizerPlugin;
+    equalizerPlugin.trackId = 1;
+    equalizerPlugin.order = 1;
+    equalizerPlugin.identifier = AudioEngine::eqMasterPluginIdentifier;
+    equalizerPlugin.state.replaceAll (equalizerStateStream.getData(),
+                                      equalizerStateStream.getDataSize());
+    data.plugins.push_back (std::move (equalizerPlugin));
+
+    const auto file = temporary.folder.getChildFile ("native_master_effects.std");
+    REQUIRE (ProjectFile::save (file, data).wasOk());
+    ProjectFileData loaded;
+    REQUIRE (ProjectFile::load (file, loaded).wasOk());
+    REQUIRE (loaded.plugins.size() == 2);
+    CHECK (loaded.plugins[0].identifier == AudioEngine::compMasterPluginIdentifier);
+    CHECK (loaded.plugins[0].order == 0);
+    CHECK (loaded.plugins[0].state.getSize() > 0);
+    CHECK (loaded.plugins[1].identifier == AudioEngine::eqMasterPluginIdentifier);
+    CHECK (loaded.plugins[1].order == 1);
+    CHECK (loaded.plugins[1].state.getSize() > 0);
+}
+
 TEST_CASE ("Project files preserve mixer MIDI mappings")
 {
     TemporaryProjectFolder temporary;

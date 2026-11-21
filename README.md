@@ -1,65 +1,65 @@
 <p align="center">
-  <img src="app/assets/icons/app/maxxx-tudio.png" alt="Identidade visual do MaXXXtudio" width="240">
+  <img src="app/assets/icons/app/maxxx-tudio.png" alt="MaXXXtudio visual identity" width="240">
 </p>
 
 <h1 align="center">MaXXXtudio</h1>
 
 <p align="center">
-  Uma estação de áudio digital para criar, organizar, processar e mixar música.
+  A digital audio workstation for creating, organizing, processing, and mixing music.
 </p>
 
-O MaXXXtudio é um DAW open source para Windows e Linux, desenvolvido em C++20
-com JUCE. O projeto está em evolução e reúne ferramentas essenciais de produção,
-instrumentos, efeitos e edição musical em uma interface própria.
+MaXXXtudio is an open-source DAW for Windows and Linux, built with C++20 and JUCE.
+The project is evolving and brings essential production tools, instruments, effects,
+and music editing together in a custom interface.
 
-## Recursos implementados
+## Implemented Features
 
-- **Arrangement:** trilhas MIDI e áudio, clips, navegação, zoom, grades, locators, loop e transporte.
-- **Piano Roll:** criação e edição de notas, velocity, quantização, escalas, fold, grooves e ferramentas de seleção.
-- **Edição de áudio:** divisão e união de clips, cortes de borda, fades de entrada e saída, curvas de fade, análise de transientes, Warp, BPM original, ×2 e ÷2.
-- **Seleção:** seleção por clique, Shift/Ctrl por faixa de tempo, seleção em várias trilhas e operações sobre a seleção.
-- **Mixer:** volume, pan, mute, solo, medição de pico e canal Master.
-- **Automação:** envelopes globais para volume, pan, mute e parâmetros de plugins; seleção automática ao tocar um controle.
-- **Plugins VST3:** varredura de fabricantes, favoritos, pastas personalizadas, execução isolada e estado salvo no projeto.
-- **Navegadores:** arquivos de áudio, favoritos por cor, busca, pré-escuta, histórico e localização no Explorer.
-- **Drum Rack:** 16 pads, carregamento de samples, modos One-Shot e Classic, pitch, volume, início, fim, reverso, loop e efeitos por pad.
-- **MIDI Learn:** mapeamento de controles MIDI para volume, pan, mute e solo.
-- **Teclado MIDI:** execução pelo teclado do computador, oitavas e velocidade.
-- **Projetos:** salvar e abrir `.std`, histórico de undo/redo, recuperação e exportação do Master como WAV.
-- **Temas:** preto, cinza grafite e branco com laranja; cinza/preto com azul; Matrix 1 e Matrix 2 com verde.
-- **Interface:** tooltips acessíveis, ícones vetoriais, estados ativos, hover e texto legível por tema.
+- **Arrangement:** MIDI and audio tracks, clips, navigation, zoom, grids, locators, loop, and transport.
+- **Piano Roll:** create and edit notes, velocity, quantization, scales, fold, grooves, and selection tools.
+- **Audio Editing:** split and merge clips, trim edges, fade-in and fade-out curves, transient analysis, Warp, source BPM, ×2, and ÷2.
+- **Selection:** click, Shift/Ctrl time-range selection, multi-track selection, and selection operations.
+- **Mixer:** volume, pan, mute, solo, peak metering, and Master channel.
+- **Automation:** global envelopes for volume, pan, mute, and plugin parameters; automatic parameter selection when adjusting a control.
+- **VST3 Plugins:** vendor scanning, favorites, custom folders, isolated execution, and project-saved state.
+- **Browsers:** audio files, color-coded favorites, search, preview, history, and File Explorer location.
+- **Drum Rack:** 16 pads, sample loading, One-Shot and Classic modes, pitch, volume, start, end, reverse, loop, and per-pad effects.
+- **MIDI Learn:** map MIDI controls to volume, pan, mute, and solo.
+- **Computer MIDI Keyboard:** play from the computer keyboard with octave and velocity controls.
+- **Projects:** save and open `.std` files, undo/redo history, recovery, and Master WAV export.
+- **Themes:** graphite/black with orange, blue, or red; white with orange; Matrix 1 and Matrix 2 with green.
+- **Interface:** accessible tooltips, vector icons, active and hover states, and theme-aware readable text.
 
-## Plugins nativos
+## Native Plugins
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="app/assets/readme/drum-rack.svg" alt="Miniatura do Drum Rack" width="300"><br>
+      <img src="app/assets/readme/drum-rack.svg" alt="Drum Rack preview" width="300"><br>
       <strong>Drum Rack</strong><br>
-      Instrumento de 16 pads para tocar samples por MIDI. Inclui carga de áudio, volume, pitch,
-      trecho inicial/final, reverso, loop, um modo One-Shot e cadeias de efeitos independentes por pad.
+      A 16-pad instrument for playing samples over MIDI. Includes audio loading, volume, pitch,
+      start/end positions, reverse, loop, One-Shot mode, and independent effect chains per pad.
     </td>
     <td align="center" width="50%">
-      <img src="app/assets/readme/volume-master.svg" alt="Miniatura do Volume Master" width="300"><br>
+      <img src="app/assets/readme/volume-master.svg" alt="Master Volume preview" width="300"><br>
       <strong>Volume Master</strong><br>
-      Utilidade para ganho, largura estéreo, balanceamento, entrada mono/left/right/swap,
-      inversão de fase, mono baixo, mute, filtro DC e auto-pan configurável.
+      A utility for gain, stereo width, balance, mono/left/right/swap input, phase inversion,
+      bass mono, mute, DC filtering, and configurable auto-pan.
     </td>
   </tr>
 </table>
 
-## Compilar
+## Build
 
-Requisitos: CMake 3.22+ e compilador C++20.
+Requirements: CMake 3.22+ and a C++20 compiler.
 
-**Windows** — com Visual Studio e o componente “Desenvolvimento para desktop com C++”:
+**Windows** — Visual Studio with the “Desktop development with C++” workload:
 
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-Executável: `build\app\MaXXXtudio_artefacts\Release\MaXXXtudio.exe`
+Executable: `build\app\MaXXXtudio_artefacts\Release\MaXXXtudio.exe`
 
 **Linux (Ubuntu/Debian):**
 
@@ -70,19 +70,19 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j2
 ```
 
-Execute os testes com:
+Run the tests with:
 
 ```sh
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-No navegador de plugins, **Pastas** permite adicionar ou remover diretórios de busca VST3.
-Esses caminhos ficam salvos nas configurações do usuário.
+In the plugin browser, **Folders** lets you add or remove VST3 search directories.
+These paths are saved in the user settings.
 
-## Estrutura
+## Project Structure
 
 ```text
-core/    modelo musical e sequenciador
-tests/   testes automatizados
-app/     aplicativo JUCE, interface, áudio, plugins e ferramentas de produção
+core/    music model and sequencer
+tests/   automated tests
+app/     JUCE application, interface, audio, plugins, and production tools
 ```

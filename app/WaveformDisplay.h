@@ -63,6 +63,16 @@ inline void drawWaveformEnvelope (juce::Graphics& g, juce::Rectangle<float> area
     g.strokePath (envelope, juce::PathStrokeType (0.8f));
 }
 
+inline juce::Colour ultravioletWaveformColour (float amplitude)
+{
+    const float clampedAmplitude = std::clamp (amplitude, 0.0f, 1.0f);
+    const float hue = clampedAmplitude <= 0.5f
+        ? juce::jmap (clampedAmplitude, 0.0f, 0.5f, 0.0f, 0.08f)
+        : juce::jmap (clampedAmplitude, 0.5f, 1.0f, 0.08f, 0.33f);
+    const float lightness = juce::jmap (clampedAmplitude, 0.38f, 0.66f);
+    return juce::Colour::fromHSL (hue, 0.9f, lightness, 1.0f);
+}
+
 inline void drawReferenceWaveform (juce::Graphics& g, juce::Rectangle<float> area,
                                    const std::vector<roll::WaveformRange>& waveform,
                                    float halfHeight)
@@ -93,9 +103,7 @@ inline void drawReferenceWaveform (juce::Graphics& g, juce::Rectangle<float> are
         const float amplitude = std::pow (std::clamp (peak, 0.0f, 1.0f), 0.72f);
         const float x = area.getX() + static_cast<float> (column * columnStep);
         const float width = std::min (barWidth, area.getRight() - x);
-        const float hue = juce::jmap (amplitude, 0.76f, 0.54f);
-        const float lightness = juce::jmap (amplitude, 0.38f, 0.66f);
-        g.setColour (juce::Colour::fromHSL (hue, 0.9f, lightness, 1.0f));
+        g.setColour (ultravioletWaveformColour (amplitude));
         const float height = std::max (0.75f, amplitude * halfHeight);
         g.fillRect (x, centre - height, width, height * 2.0f);
     }

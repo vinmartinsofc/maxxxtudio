@@ -2,7 +2,7 @@
 
 namespace roll
 {
-// Uma nota MIDI dentro de um clip. Tempo medido em beats (seminimas),
+// A MIDI note within a clip. Time is measured in beats (quarter notes),
 // independente de BPM e de sample rate.
 struct Note
 {
@@ -10,8 +10,8 @@ struct Note
     double startBeats  = 0.0;
     double lengthBeats = 1.0;
     int    velocity    = 100;   // 1..127
-    bool   muted       = false; // nota desativada (nao toca)
-    int    id          = 0;     // atribuido pelo Clip, estavel durante a vida da nota
+    bool   muted       = false; // Disabled note (does not play).
+    int    id          = 0;     // Assigned by Clip; stable for the note's lifetime.
 
     double endBeats() const { return startBeats + lengthBeats; }
 };

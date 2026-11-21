@@ -11,7 +11,7 @@ TaskStatusBar::TaskStatusBar (TaskRegistry& taskRegistry)
     label.setColour (juce::Label::textColourId, theme::textDim());
     label.setFont (juce::FontOptions (12.5f));
 
-    cancelButton.setTooltip ("Cancelar a tarefa em andamento");
+    cancelButton.setTooltip ("Cancel the current task.");
     cancelButton.setMouseClickGrabsKeyboardFocus (false);
     cancelButton.setColour (juce::TextButton::buttonColourId, theme::control());
     cancelButton.setColour (juce::TextButton::buttonOnColourId, theme::pressed());
@@ -67,7 +67,7 @@ void TaskStatusBar::taskRegistryChanged()
 void TaskStatusBar::refreshTask()
 {
     currentTask = registry.latestForTarget ("global");
-    label.setText (currentTask.has_value() ? currentTask->label : theme::ui ("Pronto"),
+    label.setText (currentTask.has_value() ? currentTask->label : theme::ui ("Ready"),
                    juce::dontSendNotification);
     label.setColour (juce::Label::textColourId,
                      currentTask.has_value() ? theme::text() : theme::textDim());

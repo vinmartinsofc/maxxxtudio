@@ -52,17 +52,17 @@ public:
         foldButton.setVisible (false);
         moveLeftButton.setEnabled (canMoveLeft);
         moveRightButton.setEnabled (canMoveRight);
-        openButton.setTooltip ("Abrir ou restaurar a janela do plugin");
-        openButton.setName ("Abrir ou restaurar a janela do plugin");
-        bypassButton.setName (info.isBypassed ? "Plugin em bypass" : "Plugin ativo");
-        removeButton.setName ("Remover plugin");
-        moveLeftButton.setTooltip (theme::ui ("Mover este plugin uma posicao para a esquerda"));
-        moveRightButton.setTooltip (theme::ui ("Mover este plugin uma posicao para a direita"));
+        openButton.setTooltip ("Open or restore the plugin window");
+        openButton.setName ("Open or restore the plugin window");
+        bypassButton.setName (info.isBypassed ? "Plugin Bypassed" : "Active Plugin");
+        removeButton.setName ("Remove Plugin");
+        moveLeftButton.setTooltip (theme::ui ("Move this plugin one position to the left"));
+        moveRightButton.setTooltip (theme::ui ("Move this plugin one position to the right"));
         openButton.onClick = [this] { if (owner.onOpen) owner.onOpen (owner.trackId, info.id); };
         bypassButton.setClickingTogglesState (true);
         bypassButton.setToggleState (info.isBypassed, juce::dontSendNotification);
-        bypassButton.setTooltip (info.isBypassed ? "Ativar plugin" : "Colocar plugin em bypass");
-        removeButton.setTooltip ("Remover plugin");
+        bypassButton.setTooltip (info.isBypassed ? "Enable Plugin" : "Bypass Plugin");
+        removeButton.setTooltip ("Remove Plugin");
         bypassButton.onClick = [this]
         {
             const int tid = owner.trackId, did = info.id;
@@ -74,7 +74,7 @@ public:
         removeButton.onClick = [this]
         {
             const int tid = owner.trackId, did = info.id;
-            auto cb = owner.onRemove;                                // o Box sera destruido no callback
+            auto cb = owner.onRemove;                                // The box will be destroyed in the callback.
             juce::MessageManager::callAsync ([cb, tid, did] { if (cb) cb (tid, did); });
         };
         const auto requestMove = [this] (int direction)
@@ -212,7 +212,7 @@ public:
                         juce::Justification::centredLeft, true);
             g.setColour (theme::textDim());
             g.setFont (juce::FontOptions (12.5f));
-            g.drawText (theme::ui ("Cadeia em serie"), 10, 46, getWidth() - 20, 16,
+            g.drawText (theme::ui ("Serial Chain"), 10, 46, getWidth() - 20, 16,
                         juce::Justification::centredLeft);
         }
         else
@@ -225,7 +225,7 @@ public:
             g.drawText (info.name, title, juce::Justification::centredLeft, true);
             g.setColour (theme::textDim());
             g.setFont (juce::FontOptions (12.5f));
-            g.drawText (info.isInstrument ? theme::ui ("Instrumento") : theme::ui ("Efeito"),
+            g.drawText (info.isInstrument ? theme::ui ("Instrument") : theme::ui ("Effect"),
                         10, 46, getWidth() - 20, 16, juce::Justification::centredLeft);
         }
 
@@ -272,8 +272,8 @@ public:
     {
         info.isBypassed = bypassed;
         bypassButton.setToggleState (bypassed, juce::dontSendNotification);
-        bypassButton.setTooltip (bypassed ? "Ativar plugin" : "Colocar plugin em bypass");
-        bypassButton.setName (bypassed ? "Plugin em bypass" : "Plugin ativo");
+        bypassButton.setTooltip (bypassed ? "Enable Plugin" : "Bypass Plugin");
+        bypassButton.setName (bypassed ? "Plugin Bypassed" : "Active Plugin");
         bypassButton.repaint();
     }
 
@@ -284,7 +284,7 @@ public:
         rackSize = size;
         foldButton.setVisible (isHeader);
         foldButton.setButtonText (collapsed ? "+" : "-");
-        foldButton.setTooltip (collapsed ? theme::ui ("Expandir rack") : theme::ui ("Recolher rack"));
+        foldButton.setTooltip (collapsed ? theme::ui ("Expand Rack") : theme::ui ("Collapse Rack"));
         openButton.setVisible (! rackCollapsed);
         bypassButton.setVisible (! rackCollapsed);
         moveLeftButton.setVisible (! rackCollapsed);
@@ -336,10 +336,10 @@ private:
     bool rackHeader = false, rackCollapsed = false;
     int rackSize = 0;
     bool dragStarted = false, dropHighlight = false, dropAfterTarget = false, popupMenuRequested = false;
-    IconButton openButton { icons::Icon::OpenWindow, "Abrir ou restaurar a janela do plugin" };
-    IconButton bypassButton { icons::Icon::Power, "Ativar ou colocar plugin em bypass", true };
+    IconButton openButton { icons::Icon::OpenWindow, "Open or restore the plugin window" };
+    IconButton bypassButton { icons::Icon::Power, "Enable or bypass plugin", true };
     juce::TextButton moveLeftButton { "<" }, moveRightButton { ">" };
-    IconButton removeButton { icons::Icon::Close, "Remover plugin" };
+    IconButton removeButton { icons::Icon::Close, "Remove Plugin" };
     juce::TextButton foldButton { "-" };
 };
 
@@ -573,7 +573,7 @@ void DeviceView::refreshLoadingIndicators()
         const auto prefix = "track:" + juce::String (trackId) + ":plugin";
         for (const auto& task : registry.tasksForTarget (prefix))
         {
-            // O sufixo do target identifica o slot que recebera o plugin.
+            // The target suffix identifies the slot that will receive the plugin.
             if (! task.target.startsWith (prefix + ":"))
                 continue;
 
@@ -690,10 +690,10 @@ void DeviceView::paint (juce::Graphics& g)
     if (boxes.empty())
     {
         if (trackId == 0)
-            g.drawFittedText (theme::ui ("Trilha Master sem efeitos.\nDe duplo clique em um plugin da lista para adicionar efeitos de masterizacao.\n(A trilha Master aceita apenas efeitos.)"),
+            g.drawFittedText (theme::ui ("The Master track has no effects.\nDouble-click a plugin in the list to add mastering effects.\n(The Master track only accepts effects.)"),
                               getLocalBounds().reduced (20), juce::Justification::centred, 4);
         else
-            g.drawFittedText (theme::ui ("Trilha \"") + trackName + theme::ui ("\" sem dispositivos.\nDe duplo clique em um plugin da lista para adicionar.\n(O instrumento vai primeiro; efeitos entram em sequencia.)"),
+            g.drawFittedText (theme::ui ("Track \"") + trackName + theme::ui ("\" has no devices.\nDouble-click a plugin in the list to add it.\n(The instrument goes first; effects are added after it.)"),
                               getLocalBounds().reduced (20), juce::Justification::centred, 4);
     }
 }
@@ -706,7 +706,7 @@ void DeviceView::paintOverChildren (juce::Graphics& g)
     g.setColour (theme::accent());
     if (boxes.empty())
     {
-        g.drawFittedText (theme::ui ("Solte o plugin para adicionar"),
+        g.drawFittedText (theme::ui ("Drop a plugin here to add it"),
                           getLocalBounds().reduced (20), juce::Justification::centred, 1);
         return;
     }
@@ -928,23 +928,23 @@ void DeviceView::showDeviceContextMenu (int deviceId, juce::Point<int> screenPos
     if (clickedBox != nullptr)
     {
         const auto info = clickedBox->deviceInfo();
-        menu.addItem (10, "Abrir interface do plugin", static_cast<bool> (onOpen));
-        menu.addItem (11, info.isBypassed ? "Ativar plugin" : "Desativar plugin", static_cast<bool> (onBypass));
-        menu.addItem (12, "Mover plugin para antes", clickedBox->canMoveLeft() && static_cast<bool> (onMove));
-        menu.addItem (13, "Mover plugin para depois", clickedBox->canMoveRight() && static_cast<bool> (onMove));
-        menu.addItem (14, "Remover plugin", static_cast<bool> (onRemove));
-        menu.addItem (15, "Copiar plugin(s) configurado(s) (Ctrl+C)",
+        menu.addItem (10, "Open Plugin Interface", static_cast<bool> (onOpen));
+        menu.addItem (11, info.isBypassed ? "Enable Plugin" : "Disable Plugin", static_cast<bool> (onBypass));
+        menu.addItem (12, "Move Plugin Earlier", clickedBox->canMoveLeft() && static_cast<bool> (onMove));
+        menu.addItem (13, "Move Plugin Later", clickedBox->canMoveRight() && static_cast<bool> (onMove));
+        menu.addItem (14, "Remove Plugin", static_cast<bool> (onRemove));
+        menu.addItem (15, "Copy configured plugin(s) (Ctrl+C)",
                       ! selectedDevicesInOrder().empty() && static_cast<bool> (onCopyDevices));
         menu.addSeparator();
     }
-    menu.addItem (16, "Colar plugin(s) configurado(s) (Ctrl+V)",
+    menu.addItem (16, "Paste configured plugin(s) (Ctrl+V)",
                   canPasteDevices && canPasteDevices() && static_cast<bool> (onPasteDevices));
-    menu.addItem (1, "Agrupar selecionados em rack (Ctrl+G)", canGroupSelection() && static_cast<bool> (onGroupRequested));
-    menu.addItem (2, "Desagrupar rack (Ctrl+Shift+G)", canUngroupSelection() && static_cast<bool> (onUngroupRequested));
+    menu.addItem (1, "Group Selected in Rack (Ctrl+G)", canGroupSelection() && static_cast<bool> (onGroupRequested));
+    menu.addItem (2, "Ungroup Rack (Ctrl+Shift+G)", canUngroupSelection() && static_cast<bool> (onUngroupRequested));
     if (clickedGroupId > 0)
     {
         menu.addSeparator();
-        menu.addItem (3, collapsedGroupIds.contains (clickedGroupId) ? "Expandir rack" : "Recolher rack");
+        menu.addItem (3, collapsedGroupIds.contains (clickedGroupId) ? "Expand Rack" : "Collapse Rack");
     }
 
     juce::Component::SafePointer<DeviceView> safeThis (this);

@@ -483,7 +483,7 @@ roll::Track* ProjectModel::addTrack (roll::TrackType type)
 
 void ProjectModel::removeTrack (int id)
 {
-    if (tracks.size() <= 1) return;                       // sempre resta uma trilha
+    if (tracks.size() <= 1) return;                       // Keep at least one track.
     const int idx = trackIndex (id);
     if (idx < 0) return;
     if (tracks[static_cast<size_t> (idx)]->type == roll::TrackType::Group)
@@ -497,7 +497,7 @@ void ProjectModel::removeTrack (int id)
     {
         selectedClipId = -1;
         selectedAudioClipId = -1;
-        if (onSelectionChanged) onSelectionChanged();     // o piano roll solta o clip antes dele ser apagado
+        if (onSelectionChanged) onSelectionChanged();     // The piano roll releases the clip before it is deleted.
     }
     if (onTrackRemoved) onTrackRemoved (id);
     std::erase_if (midiMappings, [id] (const MidiMapping& mapping)

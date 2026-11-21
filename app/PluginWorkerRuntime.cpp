@@ -88,7 +88,7 @@ void setNativeWindowIcon (juce::DocumentWindow& window)
                                                       0, 0, LR_DEFAULTSIZE | LR_SHARED));
     if (largeIcon == nullptr)
     {
-        juce::Logger::writeToLog ("PluginWorker: nao foi possivel carregar o icone do MaXXXtudio.");
+        juce::Logger::writeToLog ("PluginWorker: Could not load the MaXXXtudio icon.");
         return;
     }
 
@@ -191,7 +191,7 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
     mapping = OpenFileMappingW (FILE_MAP_ALL_ACCESS, FALSE, mappingName.toWideCharPointer());
     if (mapping == nullptr)
     {
-        error = "Nao foi possivel abrir a memoria compartilhada do plugin.";
+        error = "Could not open plugin shared memory.";
         return;
     }
 
@@ -202,14 +202,14 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
     parentProcess = OpenProcess (SYNCHRONIZE, FALSE, parentProcessId);
     if (shared == nullptr || requestEvent == nullptr || responseEvent == nullptr || parentProcess == nullptr)
     {
-        error = "Nao foi possivel conectar ao processo principal.";
+        error = "Could not connect to the main process.";
         publishError (error);
         return;
     }
 
     if (shared->version != pluginworker::protocolVersion)
     {
-        error = "Versao incompativel do protocolo de plugins.";
+        error = "Incompatible plugin protocol version.";
         publishError (error);
         return;
     }
@@ -220,7 +220,7 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
     juce::PluginDescription description;
     if (xml == nullptr || ! description.loadFromXml (*xml))
     {
-        error = "Descricao do plugin invalida.";
+        error = "Invalid plugin description.";
         publishError (error);
         return;
     }
@@ -229,7 +229,7 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
     processor = formats.createPluginInstance (description, shared->sampleRate, shared->blockSize, loadError);
     if (processor == nullptr)
     {
-        error = loadError.isNotEmpty() ? loadError : "Falha ao carregar o plugin.";
+        error = loadError.isNotEmpty() ? loadError : "Failed to load the plugin.";
         publishError (error);
         return;
     }
@@ -239,7 +239,7 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
     const int outputChannels = processor->getTotalNumOutputChannels();
     if (inputChannels > pluginworker::maxChannels || outputChannels > pluginworker::maxChannels)
     {
-        error = "O plugin excede o limite de canais suportado pelo worker.";
+        error = "The plugin exceeds the channel limit supported by the worker.";
         processor.reset();
         publishError (error);
         return;
@@ -345,7 +345,7 @@ void PluginWorkerRuntime::run()
         }
         if (result != WAIT_OBJECT_0)
         {
-            publishError ("Falha de comunicacao com o processo principal.");
+            publishError ("Communication with the main process failed.");
             break;
         }
 
@@ -448,7 +448,7 @@ void PluginWorkerRuntime::processRequest (pluginworker::Command command)
             else
             {
                 copyString (shared->error, pluginworker::errorLength,
-                            "Nao foi possivel salvar o estado do plugin.");
+                            "Could not save plugin state.");
             }
             break;
         }

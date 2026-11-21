@@ -264,7 +264,7 @@ bool AppModalDialog::keyPressed (const juce::KeyPress& key)
     {
         const auto cancel = std::find_if (buttons.begin(), buttons.end(), [] (const auto& button)
         {
-            return button->getButtonText().equalsIgnoreCase ("Cancelar");
+            return button->getButtonText().equalsIgnoreCase ("Cancel");
         });
         if (cancel != buttons.end())
         {

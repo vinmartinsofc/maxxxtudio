@@ -53,16 +53,16 @@ private:
     DrumRackProcessor& processor;
     juce::Label title;
     juce::Label selectedPadLabel;
-    juce::TextButton clearButton { "Limpar rack..." };
-    juce::TextButton undoButton { "Desfazer" }, redoButton { "Refazer" };
-    juce::TextButton loadButton { "Carregar sample" }, clearSelectedButton { "Remover sample" };
-    juce::TextButton editEffectButton { "Abrir" }, removeEffectButton { "Remover" },
+    juce::TextButton clearButton { "Clear Rack..." };
+    juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
+    juce::TextButton loadButton { "Load Sample" }, clearSelectedButton { "Remove Sample" };
+    juce::TextButton editEffectButton { "Open" }, removeEffectButton { "Remove" },
                      bypassEffectButton { "Bypass" }, moveEffectUpButton { "Subir" },
                      moveEffectDownButton { "Descer" };
-    juce::Label modeLabel { {}, "Modo de reproducao" };
-    juce::Label effectsLabel { {}, "Efeitos do pad" };
+    juce::Label modeLabel { {}, "Playback Mode" };
+    juce::Label effectsLabel { {}, "Pad Effects" };
     juce::Label gainLabel { {}, "Volume" }, pitchLabel { {}, "Transpose (st)" };
-    juce::Label startLabel { {}, "Inicio (%)" }, endLabel { {}, "Fim (%)" };
+    juce::Label startLabel { {}, "Start (%)" }, endLabel { {}, "End (%)" };
     juce::Slider gainSlider, pitchSlider, startSlider, endSlider;
     juce::ToggleButton reverseButton { "Reverse" }, loopButton { "Loop" };
     juce::ComboBox modeBox;

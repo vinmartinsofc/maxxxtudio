@@ -12,6 +12,6 @@ inline const std::array<juce::Colour, 7> colors {
 };
 
 inline constexpr std::array<const char*, 7> names {
-    "Vermelho", "Laranja", "Amarelo", "Verde", "Azul", "Roxo", "Cinza"
+    "Red", "Orange", "Yellow", "Green", "Blue", "Purple", "Gray"
 };
 }

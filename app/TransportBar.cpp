@@ -7,11 +7,11 @@ void IconButton::setIcon (icons::Icon i)
         return;
 
     icon = i;
-    const auto name = icon == icons::Icon::Pause ? "Pausar" : "Reproduzir";
+    const auto name = icon == icons::Icon::Pause ? "Pause" : "Play";
     setName (name);
     setTooltip (icon == icons::Icon::Pause
-        ? "Pausar a reproducao na posicao atual"
-        : "Reproduzir a partir da posicao atual");
+        ? "Pause playback at the current position"
+        : "Play from the current position");
     repaint();
 }
 
@@ -72,18 +72,18 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     metronomeButton.setMouseClickGrabsKeyboardFocus (false);
     projectButton.setMouseClickGrabsKeyboardFocus (false);
     optionsButton.setMouseClickGrabsKeyboardFocus (false);
-    projectButton.setTooltip ("Projeto: abrir, criar, salvar ou exportar a sessao");
+    projectButton.setTooltip ("Project: open, create, save, or export the session");
     projectButton.onClick = [this] { if (onProjectMenu) onProjectMenu(); };
-    optionsButton.setTooltip ("Preferencias: audio, plugins, temas e outros ajustes (Ctrl+,)");
+    optionsButton.setTooltip ("Preferences: audio, plugins, themes, and other settings (Ctrl+,)");
     optionsButton.onClick = [this] { if (onOptionsMenu) onOptionsMenu(); };
-    metronomeButton.setTooltip ("Metronomo: ativar, desativar e ajustar o volume de clique");
+    metronomeButton.setTooltip ("Metronome: toggle and adjust click volume");
     metronomeButton.setClickingTogglesState (true);
     metronomeButton.setToggleState (graph.isMetronomeEnabled(), juce::dontSendNotification);
     metronomeButton.setColour (juce::TextButton::buttonOnColourId, theme::accent());
     metronomeButton.setColour (juce::TextButton::textColourOnId, theme::text());
     metronomeButton.onClick = [this] { graph.setMetronomeEnabled (metronomeButton.getToggleState()); };
-    metronomeVolumeSlider.setName ("Volume do metronomo");
-    metronomeVolumeSlider.setTooltip ("Volume do metronomo");
+    metronomeVolumeSlider.setName ("Metronome Volume");
+    metronomeVolumeSlider.setTooltip ("Metronome Volume");
     metronomeVolumeSlider.setSliderStyle (juce::Slider::LinearHorizontal);
     metronomeVolumeSlider.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
     metronomeVolumeSlider.setRange (0.0, 1.0, 0.01);
@@ -94,7 +94,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     {
         graph.setMetronomeGain (static_cast<float> (metronomeVolumeSlider.getValue()));
     };
-    cpuTooltipArea.setTooltip ("Uso medio da CPU: processo de audio do projeto");
+    cpuTooltipArea.setTooltip ("Average CPU usage: project audio process");
     addAndMakeVisible (cpuTooltipArea);
     loopButton.setMouseClickGrabsKeyboardFocus (false);
     browserButton.setMouseClickGrabsKeyboardFocus (false);
@@ -102,9 +102,9 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     favoritesButton.setMouseClickGrabsKeyboardFocus (false);
     pianoRollButton.setMouseClickGrabsKeyboardFocus (false);
     computerKeyboardButton.setMouseClickGrabsKeyboardFocus (false);
-    startButton.setTooltip ("Voltar ao inicio da timeline");
+    startButton.setTooltip ("Return to the start of the timeline");
     startButton.onClick = [this] { if (onGoToStart) onGoToStart(); };
-    endButton.setTooltip ("Ir para o fim da timeline");
+    endButton.setTooltip ("Go to the end of the timeline");
     endButton.onClick = [this] { if (onGoToEnd) onGoToEnd(); };
     addAndMakeVisible (loopButton);
     addAndMakeVisible (browserButton);
@@ -118,13 +118,13 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 
     playButton.onClick = [this] { togglePlay(); };
     stopButton.onClick = [this] { stop(); };
-    loopButton.setTooltip ("Loop: alternar a repeticao da regiao marcada");
+    loopButton.setTooltip ("Loop: toggle repeat for the marked region");
 
     loopButton.setClickingTogglesState (true);
     loopButton.setToggleState (graph.isLoop(), juce::dontSendNotification);
     loopButton.onClick = [this] { setLoopEnabled (loopButton.getToggleState()); };
 
-    browserButton.setTooltip ("VSTs e instrumentos: mostrar ou ocultar o navegador de plugins (Ctrl+B)");
+    browserButton.setTooltip ("VSTs and instruments: show or hide the plugin browser (Ctrl+B)");
     browserButton.setClickingTogglesState (true);
     browserButton.setToggleState (true, juce::dontSendNotification);
     browserButton.onClick = [this]
@@ -133,7 +133,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
             onBrowserToggled (browserButton.getToggleState());
     };
 
-    fileBrowserButton.setTooltip ("Arquivos de audio: buscar, pre-ouvir e arrastar samples");
+    fileBrowserButton.setTooltip ("Audio Files: search, preview, and drag samples");
     fileBrowserButton.setClickingTogglesState (true);
     fileBrowserButton.setToggleState (false, juce::dontSendNotification);
     fileBrowserButton.onClick = [this]
@@ -142,7 +142,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
             onFileBrowserToggled (fileBrowserButton.getToggleState());
     };
 
-    favoritesButton.setTooltip ("Favoritos: colecoes por cor de plugins e arquivos");
+    favoritesButton.setTooltip ("Favorites: color-coded collections of plugins and files");
     favoritesButton.setClickingTogglesState (true);
     favoritesButton.setToggleState (false, juce::dontSendNotification);
     favoritesButton.onClick = [this]
@@ -151,7 +151,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
             onFavoritesToggled (favoritesButton.getToggleState());
     };
 
-    pianoRollButton.setTooltip ("Piano Roll e dispositivos: mostrar ou ocultar o painel inferior");
+    pianoRollButton.setTooltip ("Piano Roll and devices: show or hide the bottom panel");
     pianoRollButton.setClickingTogglesState (true);
     pianoRollButton.setToggleState (true, juce::dontSendNotification);
     pianoRollButton.onClick = [this]
@@ -160,7 +160,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
             onPianoRollToggled (pianoRollButton.getToggleState());
     };
 
-    computerKeyboardButton.setTooltip ("Teclado MIDI: tocar notas pelo computador (M; Z/X mudam a oitava)");
+    computerKeyboardButton.setTooltip ("Computer MIDI Keyboard: play notes using the computer (M; Z/X change octave)");
     computerKeyboardButton.setClickingTogglesState (true);
     computerKeyboardButton.onClick = [this]
     {

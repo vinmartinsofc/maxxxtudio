@@ -78,7 +78,7 @@ bool PluginScanner::supportsPluginFormat (const juce::String& formatName) const
 juce::Result PluginScanner::addCustomSearchPath (const juce::String& formatName, const juce::File& directory)
 {
     if (! supportsPluginFormat (formatName) || ! directory.isDirectory())
-        return juce::Result::fail ("Formato indisponivel ou pasta invalida.");
+        return juce::Result::fail ("Unsupported format or invalid folder.");
 
     const auto fullPath = directory.getFullPathName();
     const auto format = formatName.toStdString();
@@ -87,7 +87,7 @@ juce::Result PluginScanner::addCustomSearchPath (const juce::String& formatName,
         auto& paths = customPathsByFormat[format];
         if (std::any_of (paths.begin(), paths.end(), [&fullPath] (const auto& path)
             { return juce::String (path).equalsIgnoreCase (fullPath); }))
-            return juce::Result::fail ("Esta pasta ja esta cadastrada.");
+            return juce::Result::fail ("This folder is already registered.");
         paths.push_back (fullPath.toStdString());
     }
     if (saveSearchPaths())
@@ -100,7 +100,7 @@ juce::Result PluginScanner::addCustomSearchPath (const juce::String& formatName,
         if (paths.empty())
             customPathsByFormat.erase (format);
     }
-    return juce::Result::fail ("Nao foi possivel salvar as pastas de plugins.");
+    return juce::Result::fail ("Could not save plugin folders.");
 }
 
 juce::Result PluginScanner::removeCustomSearchPath (const juce::String& formatName, const juce::File& directory)
@@ -112,13 +112,13 @@ juce::Result PluginScanner::removeCustomSearchPath (const juce::String& formatNa
         const juce::ScopedLock lock (customPathsLock);
         auto it = customPathsByFormat.find (format);
         if (it == customPathsByFormat.end())
-            return juce::Result::fail ("A pasta customizada nao foi encontrada.");
+            return juce::Result::fail ("The custom folder was not found.");
 
         auto& paths = it->second;
         const auto path = std::find_if (paths.begin(), paths.end(), [&fullPath] (const auto& item)
             { return juce::String (item).equalsIgnoreCase (fullPath); });
         if (path == paths.end())
-            return juce::Result::fail ("A pasta customizada nao foi encontrada.");
+            return juce::Result::fail ("The custom folder was not found.");
 
         removedIndex = static_cast<std::size_t> (std::distance (paths.begin(), path));
         paths.erase (path);
@@ -135,7 +135,7 @@ juce::Result PluginScanner::removeCustomSearchPath (const juce::String& formatNa
                           std::min (removedIndex, paths.size())),
                       fullPath.toStdString());
     }
-    return juce::Result::fail ("Nao foi possivel salvar as pastas de plugins.");
+    return juce::Result::fail ("Could not save plugin folders.");
 }
 
 void PluginScanner::loadSearchPaths()
@@ -211,9 +211,9 @@ void PluginScanner::startScan()
 
     activeScan = std::make_shared<ScanState>();
     const std::weak_ptr<ScanState> weakScan = activeScan;
-    // O escopo compartilhado permanece vivo ate o callback de conclusao, inclusive em cancelamentos.
+    // Shared state remains alive until the completion callback, including on cancellation.
     auto task = std::make_shared<TaskScope> (
-        taskRegistry, "Escaneando plugins", "global", 0.0, true,
+        taskRegistry, "Scanning plugins", "global", 0.0, true,
         [weakScan]
         {
             if (const auto scan = weakScan.lock())
@@ -254,7 +254,7 @@ void PluginScanner::stopScan()
 
     rescanPending = false;
     cancelScan();
-    // Aguarda o worker antes que o scanner ou o TaskRegistry sejam destruidos.
+    // Wait for the worker before destroying the scanner or TaskRegistry.
     scanPool.removeAllJobs (true, -1);
     activeScan.reset();
 }
@@ -344,7 +344,7 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
                                 onProgress (lastPluginName);
                         }))
                             juce::Logger::writeToLog (
-                                "PluginScanner: nao foi possivel publicar o progresso na message thread.");
+                                "PluginScanner: Could not publish progress to the message thread.");
                     }
                 }
             }
@@ -363,12 +363,12 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
         }
         else
         {
-            juce::Logger::writeToLog ("PluginScanner: nao foi possivel iniciar o scanner isolado.");
+            juce::Logger::writeToLog ("PluginScanner: Could not start the isolated scanner.");
         }
     }
     else
     {
-        juce::Logger::writeToLog ("PluginScanner: arquivo de configuracao ou executavel do scanner indisponivel.");
+        juce::Logger::writeToLog ("PluginScanner: Scanner configuration file or executable is unavailable.");
     }
 
     inputFile.deleteFile();
@@ -376,7 +376,7 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
     progressFile.deleteFile();
     const bool cancelled = shouldCancel();
     if (! success && ! cancelled)
-        juce::Logger::writeToLog ("PluginScanner: o processo isolado nao concluiu o escaneamento.");
+        juce::Logger::writeToLog ("PluginScanner: The isolated process did not complete the scan.");
 
     if (! juce::MessageManager::callAsync ([this, flag, scan, task, cancelled, success, resultXml]
     {
@@ -391,7 +391,7 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
         }
         else if (! cancelled)
         {
-            juce::Logger::writeToLog ("PluginScanner: o processo de escaneamento terminou sem resultados validos.");
+            juce::Logger::writeToLog ("PluginScanner: The scan process finished without valid results.");
         }
         task->end();
         if (activeScan == scan)
@@ -405,6 +405,6 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
         }
     }))
     {
-        juce::Logger::writeToLog ("PluginScanner: nao foi possivel publicar o fim do escaneamento.");
+        juce::Logger::writeToLog ("PluginScanner: Could not publish scan completion.");
     }
 }

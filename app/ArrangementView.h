@@ -10,7 +10,7 @@
 
 struct AudioFileData;
 
-// Vista de arranjo: cabecalhos de trilha, regua com o loop, e os clips na linha do tempo.
+// Arrangement view: track headers, loop ruler, and clips on the timeline.
 class ArrangementView : public juce::Component, private juce::ChangeListener, private juce::Timer
 {
 public:
@@ -130,7 +130,7 @@ private:
     static juce::Colour colourFor (const roll::Track&);
 
     ProjectModel& project;
-    double pixelsPerBeat = 22.0;          // pixels por beat
+    double pixelsPerBeat = 22.0;          // Pixels per beat.
     double playhead = 0.0;
     double bpm = 120.0;
     bool loopEnabled = true;

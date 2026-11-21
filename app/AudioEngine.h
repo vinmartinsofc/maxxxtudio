@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-// Dados do bloco atual, escritos pelo grafo e lidos pelas trilhas (mesmo thread de audio).
+// Current block data, written by the graph and read by tracks (same audio thread).
 struct BlockShared
 {
     roll::BlockPlan plan;
@@ -20,7 +20,7 @@ struct BlockShared
     bool flush = false;       // soltar todas as notas neste bloco (pausa, stop, seek)
 };
 
-// Fonte MIDI de UMA trilha: toca as notas dela e mistura o MIDI de pre-escuta.
+// MIDI source for one track: plays its notes and merges in preview MIDI.
 class TrackSource : public juce::AudioProcessor
 {
 public:
@@ -62,7 +62,7 @@ private:
     std::atomic<std::uint64_t> maskLo { 0 }, maskHi { 0 };
 };
 
-// Volume / pan / mute da trilha (estereo).
+// Track volume / pan / mute (stereo).
 class TrackMixer : public juce::AudioProcessor
 {
 public:
@@ -109,7 +109,7 @@ private:
     float currentGain = 1.0f;
 };
 
-// Grafo principal: dono do relogio do transporte.
+// Main graph: owns the transport clock.
 class SequencerGraph : public juce::AudioProcessorGraph
 {
 public:
@@ -311,6 +311,14 @@ public:
     static constexpr const char* drumRackPluginIdentifier = "MaXXXtudio.DrumRack";
     static constexpr const char* utilityPluginIdentifier = "MaXXXtudio.Utility";
     static constexpr const char* autoPanPluginIdentifier = "MaXXXtudio.AutoPan";
+    static constexpr const char* compMasterPluginIdentifier = "MaXXXtudio.CompMaster";
+    static constexpr const char* eqMasterPluginIdentifier = "MaXXXtudio.EqMaster";
+    static bool isNativeEffectIdentifier (const juce::String& identifier)
+    {
+        return identifier == utilityPluginIdentifier
+            || identifier == compMasterPluginIdentifier
+            || identifier == eqMasterPluginIdentifier;
+    }
 
     AudioEngine();
     ~AudioEngine();
@@ -342,12 +350,13 @@ public:
     float masterPeak() const;
     std::pair<float, float> masterPeakStereo() const;
 
-    // dispositivos (plugins) da trilha: o instrumento vem sempre primeiro, efeitos em seguida
+    // Track devices (plugins): the instrument always comes first, followed by effects.
     void addDevice (int trackId, const juce::PluginDescription&,
                     std::function<void (const juce::String& error, int deviceId)> onDone,
                     int insertionIndex = -1);
     int addDrumRack (int trackId);
     int addUtility (int trackId);
+    int addNativeEffect (int trackId, const juce::String& identifier, int insertionIndex = -1);
     void addPadEffect (int trackId, int rackDeviceId, int pad,
                        const juce::PluginDescription&, std::function<void (const juce::String&)> onDone);
     std::unique_ptr<juce::AudioProcessorEditor> createPadEffectEditor (int trackId, int rackDeviceId,
@@ -386,6 +395,9 @@ public:
     bool groupDevices (int trackId, const std::vector<int>& deviceIds);
     bool ungroupDevices (int trackId, const std::vector<int>& deviceIds);
     void setDeviceBypassed (int trackId, int deviceId, bool bypassed);
+    bool canUseCompMasterSidechainSource (int trackId, int sourceTrackId) const;
+    void setCompMasterSidechainSources (int trackId, int deviceId,
+                                        std::vector<std::pair<int, juce::String>> sources);
     std::vector<DeviceInfo> devices (int trackId) const;
     juce::String pluginParameterValueText (int trackId, const roll::AutomationTarget&,
                                            double normalizedValue) const;
@@ -433,6 +445,8 @@ private:
     bool beginOfflineRenderInternal (juce::String& error, int captureTrackId);
     void rewire (TrackNodes&);
     void rewireMaster();
+    void rewireSidechains();
+    bool setCompMasterSidechainSource (int trackId, int deviceId, int sourceTrackId);
     void clearConnectionsOf (juce::AudioProcessorGraph::NodeID);
     void clearOutputConnectionsOf (juce::AudioProcessorGraph::NodeID);
 

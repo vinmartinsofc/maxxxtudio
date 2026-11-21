@@ -8,9 +8,8 @@
 #include <set>
 #include <vector>
 
-// Estado compartilhado pelo piano roll (grade, teclas, regua, velocity).
-// Todas as edicoes passam por aqui: assim desfazer/refazer, o engine de audio
-// e as views ficam sempre sincronizados.
+// State shared by the piano roll (grid, keys, ruler, velocity).
+// All edits go through here so undo/redo, the audio engine, and views stay synchronized.
 class RollModel : public juce::ChangeBroadcaster
 {
 public:
@@ -20,32 +19,32 @@ public:
 
     int rowHeight = 16;                         // zoom vertical
 
-    // Clip em edicao (pertence ao arranjo). Sem clip selecionado, o piano roll fica inativo.
+    // Clip being edited (belongs to the arrangement). The piano roll is inactive without a selected clip.
     roll::Clip& clip()              { return *clipPtr; }
     const roll::Clip& clip() const  { return *clipPtr; }
     bool hasClip() const            { return clipPtr != &dummyClip; }
     void setClip (roll::Clip* c);
-    double clipStartBeats = 0.0;                // posicao do clip no arranjo (para o playhead)
+    double clipStartBeats = 0.0;                // Clip position in the arrangement (for the playhead).
     roll::History history;
     roll::Scale   scale { 0, roll::Mode::Major };
 
-    bool   scaleOn   = false;    // "Scale Mode": escolhe raiz/escala do clip
-    bool   highlight = true;     // tecla K: destaca as linhas da escala (vale com scaleOn)
-    bool   fold      = false;    // Fold: so linhas que tem notas
-    bool   foldScale = false;    // botao Scale ao lado do Fold: linhas da escala + linhas com notas
+    bool   scaleOn   = false;    // "Scale Mode": choose the clip's root/scale.
+    bool   highlight = true;     // K key: highlight scale rows (only when scaleOn is enabled).
+    bool   fold      = false;    // Fold: only rows that contain notes.
+    bool   foldScale = false;    // Scale button by Fold: scale rows plus rows containing notes.
     bool   drawMode  = false;
     bool   snap      = true;
-    bool   previewOn = true;     // ouvir as notas ao selecionar/mover
+    bool   previewOn = true;     // Preview notes when selecting/moving them.
     NoteSpelling noteSpelling = NoteSpelling::Auto;
     bool   triplet   = false;
     double baseGrid      = 0.25;   // 1/16
-    double gridBeats     = 0.25;   // grade efetiva (baseGrid, ou 2/3 dela em tripleto)
-    double insertBeat    = 0.0;    // marcador de insercao (onde cola; de onde o play comeca)
+    double gridBeats     = 0.25;   // Effective grid (baseGrid, or 2/3 of it for triplets).
+    double insertBeat    = 0.0;    // Insertion marker (paste position; playback start).
     double pixelsPerBeat = 56.0;
 
     std::set<int> selection;
 
-    // teclas acesas: clique do mouse e notas tocando no playback
+    // Lit keys: mouse clicks and notes playing back.
     int pressedPitch = -1;
     std::uint64_t activeLo = 0, activeHi = 0;
     bool isKeyLit (int p) const
@@ -54,18 +53,18 @@ public:
     }
 
     std::function<void()>          onNotesChanged;   // engine de audio
-    std::function<void()>          onLengthChanged;  // loop do transporte
+    std::function<void()>          onLengthChanged;  // Transport loop.
     std::function<void (int, bool)> onPreview;       // pitch, ligar/desligar
-    std::function<void (double)>   onInsertMarker;   // marcador de insercao mudou
+    std::function<void (double)>   onInsertMarker;   // Insertion marker changed.
     std::function<void()> onEditStarted, onEditFinished;
     std::function<void (bool redo)> onGlobalUndoRedo;
     std::function<bool()> canGlobalUndo, canGlobalRedo;
 
-    // --- layout vertical (linhas visiveis, da mais aguda para a mais grave) ---
+    // --- Vertical layout (visible rows, from highest to lowest) ---
     const std::vector<int>& rows() const { return rowPitches; }
     void rebuildRows();
     int  pitchToRow (int pitch) const;           // -1 se escondida
-    int  rowToPitch (int row) const;             // -1 fora do intervalo
+    int  rowToPitch (int row) const;             // -1 when out of range.
     int  totalHeight() const { return static_cast<int> (rowPitches.size()) * rowHeight; }
     double gridWidthPixels() const { return clip().length() * pixelsPerBeat; }
 
@@ -73,10 +72,10 @@ public:
     double minLength() const           { return snap ? gridBeats : 1.0 / 16.0; }
     juce::String gridLabel() const;
 
-    // --- edicao (cada uma registra desfazer e notifica engine + views) ---
-    void beginEdit();                         // snapshot para desfazer
+    // --- Editing (each operation records undo and notifies the engine + views) ---
+    void beginEdit();                         // Snapshot for undo.
     void endEdit();
-    void notify (bool rebuildRowLayout);      // publica notas + atualiza views
+    void notify (bool rebuildRowLayout);      // Publishes notes + updates views.
     void undo();
     void redo();
     bool isSelected (int id) const { return selection.count (id) > 0; }

@@ -75,12 +75,12 @@ private:
     void timerCallback() override;
     void mouseDown (const juce::MouseEvent&) override;
 
-    juce::Label title { {}, "Arquivos de audio" };
-    juce::Label status { {}, "Selecione um arquivo de audio para ouvir" };
+    juce::Label title { {}, "Audio Files" };
+    juce::Label status { {}, "Select an audio file to preview" };
     juce::TextButton backButton { "<" }, forwardButton { ">" };
     juce::TextEditor search;
     FileTreeView tree { *this };
-    juce::TextButton previewButton { "Ouvir" }, stopButton { "Parar" };
+    juce::TextButton previewButton { "Ouvir" }, stopButton { "Stop" };
     juce::ToggleButton autoPreviewButton { "Auto" };
     juce::Label previewGainLabel { {}, "Volume" };
     juce::Slider previewGain;

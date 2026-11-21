@@ -1,10 +1,10 @@
 #pragma once
 #include <juce_graphics/juce_graphics.h>
 
-// Grafite e laranja da identidade MaXXXtudio.
+// MaXXXtudio's graphite-and-orange identity palette.
 namespace theme
 {
-// Texto da interface em UTF-8 (acentos corretos em qualquer compilador).
+// Convert interface text from UTF-8 consistently across compilers.
 inline juce::String ui (const char* utf8) { return juce::String::fromUTF8 (utf8); }
 
 enum class Palette
@@ -14,6 +14,8 @@ enum class Palette
     WhiteOrange,
     GraphiteBlue,
     BlackBlue,
+    GraphiteRed,
+    BlackRed,
     MatrixGraphite,
     MatrixBlack
 };
@@ -56,7 +58,7 @@ inline void writePreferences (const juce::XmlElement& xml)
     const auto file = preferencesFile();
     file.getParentDirectory().createDirectory();
     if (! xml.writeTo (file))
-        juce::Logger::writeToLog ("Theme: nao foi possivel salvar as preferencias.");
+        juce::Logger::writeToLog ("Theme: Could not save preferences.");
 }
 
 inline Palette current()
@@ -99,6 +101,10 @@ inline void setCurrent (Palette palette)
         value = "graphite-blue";
     else if (palette == Palette::BlackBlue)
         value = "black-blue";
+    else if (palette == Palette::GraphiteRed)
+        value = "graphite-red";
+    else if (palette == Palette::BlackRed)
+        value = "black-red";
     else if (palette == Palette::MatrixGraphite)
         value = "matrix-1";
     else if (palette == Palette::MatrixBlack)
@@ -125,6 +131,10 @@ inline void load()
         selectedPalette() = Palette::GraphiteBlue;
     else if (value == "black-blue")
         selectedPalette() = Palette::BlackBlue;
+    else if (value == "graphite-red")
+        selectedPalette() = Palette::GraphiteRed;
+    else if (value == "black-red")
+        selectedPalette() = Palette::BlackRed;
     else if (value == "matrix-1")
         selectedPalette() = Palette::MatrixGraphite;
     else if (value == "matrix-2")
@@ -138,6 +148,7 @@ inline juce::Colour background()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xfff2f2f2);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff101112);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff101112);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff101112);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff101112);
     return juce::Colour (0xff343638);
 }
@@ -146,6 +157,7 @@ inline juce::Colour panel()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffffffff);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff191b1d);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff191b1d);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff191b1d);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff191b1d);
     return juce::Colour (0xff292b2d);
 }
@@ -154,6 +166,7 @@ inline juce::Colour panelLight()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xfffafafa);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff202224);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff202224);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff202224);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff202224);
     return juce::Colour (0xff303234);
 }
@@ -162,6 +175,7 @@ inline juce::Colour control()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffebebeb);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff090a0b);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff090a0b);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff090a0b);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff090a0b);
     return juce::Colour (0xff242628);
 }
@@ -170,6 +184,7 @@ inline juce::Colour hover()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffdedede);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff252729);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff252729);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff252729);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff252729);
     return juce::Colour (0xff2c2e31);
 }
@@ -178,6 +193,7 @@ inline juce::Colour pressed()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffd2d2d2);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff050606);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff050606);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff050606);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff050606);
     return juce::Colour (0xff1d1f21);
 }
@@ -186,6 +202,7 @@ inline juce::Colour border()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffb8b8b8);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff34373a);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff34373a);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff34373a);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff34373a);
     return juce::Colour (0xff45484a);
 }
@@ -200,6 +217,7 @@ inline juce::Colour textDim()
     if (current() == Palette::WhiteOrange) return juce::Colour (0xff56585b);
     if (current() == Palette::BlackOrange) return juce::Colour (0xffb8bbbe);
     if (current() == Palette::BlackBlue) return juce::Colour (0xffb8bbbe);
+    if (current() == Palette::BlackRed) return juce::Colour (0xffb8bbbe);
     if (current() == Palette::MatrixBlack) return juce::Colour (0xffb8bbbe);
     return juce::Colour (0xffa5a7a8);
 }
@@ -207,6 +225,8 @@ inline juce::Colour accent()
 {
     if (current() == Palette::GraphiteBlue || current() == Palette::BlackBlue)
         return juce::Colour (0xff1685ff);
+    if (current() == Palette::GraphiteRed || current() == Palette::BlackRed)
+        return juce::Colour (0xffe53935);
     if (current() == Palette::MatrixGraphite || current() == Palette::MatrixBlack)
         return juce::Colour (0xff27c96b);
     return juce::Colour (0xffff6b00);
@@ -215,6 +235,8 @@ inline juce::Colour accentHover()
 {
     if (current() == Palette::GraphiteBlue || current() == Palette::BlackBlue)
         return juce::Colour (0xff3d9cff);
+    if (current() == Palette::GraphiteRed || current() == Palette::BlackRed)
+        return juce::Colour (0xffff625c);
     if (current() == Palette::MatrixGraphite || current() == Palette::MatrixBlack)
         return juce::Colour (0xff4adf88);
     return juce::Colour (0xffff8524);
@@ -230,6 +252,7 @@ inline juce::Colour rowInScale()
 {
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffe6e6e6);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff202224);
+    if (current() == Palette::BlackRed) return juce::Colour (0xff202224);
     return juce::Colour (0xff303234);
 }
 inline juce::Colour playhead()     { return text(); }

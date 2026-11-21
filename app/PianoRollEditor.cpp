@@ -11,7 +11,7 @@ bool isBlackKey (int pitch)
     return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
 }
 
-// Convencao MIDI: nota 60 = C3.
+// MIDI convention: note 60 = C3.
 juce::String pitchName (int pitch, RollModel::NoteSpelling spelling, int root, bool scaleOn)
 {
     static const char* sharps[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
@@ -70,28 +70,28 @@ void NoteGrid::showContextMenu (juce::Point<int> screenPosition)
     const bool hasSelection = ! model.selection.empty();
     const bool canSelectNotes = ! model.clip().notes().empty();
     juce::PopupMenu editMenu, noteMenu, gridMenu, viewMenu, spellingMenu, menu;
-    editMenu.addItem (1, "Desfazer", model.canGlobalUndo ? model.canGlobalUndo() : model.history.canUndo());
-    editMenu.addItem (2, "Refazer", model.canGlobalRedo ? model.canGlobalRedo() : model.history.canRedo());
+    editMenu.addItem (1, "Undo", model.canGlobalUndo ? model.canGlobalUndo() : model.history.canUndo());
+    editMenu.addItem (2, "Redo", model.canGlobalRedo ? model.canGlobalRedo() : model.history.canRedo());
     editMenu.addSeparator();
     editMenu.addItem (3, "Recortar", hasSelection);
-    editMenu.addItem (4, "Copiar", hasSelection);
-    editMenu.addItem (5, "Colar", model.hasClipboardContents());
-    editMenu.addItem (6, "Duplicar", hasSelection);
-    editMenu.addItem (7, "Apagar", hasSelection);
+    editMenu.addItem (4, "Copy", hasSelection);
+    editMenu.addItem (5, "Paste", model.hasClipboardContents());
+    editMenu.addItem (6, "Duplicate", hasSelection);
+    editMenu.addItem (7, "Delete", hasSelection);
     editMenu.addItem (8, "Quantizar", hasSelection);
-    editMenu.addItem (9, "Selecionar todas as notas", canSelectNotes);
+    editMenu.addItem (9, "Select All Notes", canSelectNotes);
 
-    noteMenu.addItem (20, "Silenciar / reativar", hasSelection);
+    noteMenu.addItem (20, "Mute / Unmute", hasSelection);
     noteMenu.addSeparator();
-    noteMenu.addItem (21, "Mover para a esquerda", hasSelection);
-    noteMenu.addItem (22, "Mover para a direita", hasSelection);
-    noteMenu.addItem (23, "Subir um semitom", hasSelection);
-    noteMenu.addItem (24, "Descer um semitom", hasSelection);
-    noteMenu.addItem (25, "Subir uma oitava", hasSelection);
-    noteMenu.addItem (26, "Descer uma oitava", hasSelection);
+    noteMenu.addItem (21, "Move Left", hasSelection);
+    noteMenu.addItem (22, "Move Right", hasSelection);
+    noteMenu.addItem (23, "Raise by one semitone", hasSelection);
+    noteMenu.addItem (24, "Lower by one semitone", hasSelection);
+    noteMenu.addItem (25, "Raise by one octave", hasSelection);
+    noteMenu.addItem (26, "Lower by one octave", hasSelection);
     noteMenu.addSeparator();
-    noteMenu.addItem (27, "Aumentar duracao", hasSelection);
-    noteMenu.addItem (28, "Reduzir duracao", hasSelection);
+    noteMenu.addItem (27, "Increase Duration", hasSelection);
+    noteMenu.addItem (28, "Decrease Duration", hasSelection);
 
     const auto addGridChoice = [&gridMenu, this] (int id, const juce::String& label, double beats, bool triplet)
     {
@@ -112,26 +112,26 @@ void NoteGrid::showContextMenu (juce::Point<int> screenPosition)
     addGridChoice (111, "1/32T", 0.125, true);
     addGridChoice (112, "1/64T", 0.0625, true);
 
-    viewMenu.addItem (30, "Modo de desenho", true, model.drawMode);
-    viewMenu.addItem (31, "Destacar escala", true, model.highlight);
-    viewMenu.addItem (32, "Modo de escala", true, model.scaleOn);
+    viewMenu.addItem (30, "Draw Mode", true, model.drawMode);
+    viewMenu.addItem (31, "Highlight Scale", true, model.highlight);
+    viewMenu.addItem (32, "Scale Mode", true, model.scaleOn);
     viewMenu.addItem (33, "Fold", true, model.fold);
-    viewMenu.addItem (34, "Fold da escala", true, model.foldScale);
-    viewMenu.addItem (35, "Pre-escuta de notas", true, model.previewOn);
+    viewMenu.addItem (34, "Scale Fold", true, model.foldScale);
+    viewMenu.addItem (35, "Note Preview", true, model.previewOn);
     viewMenu.addSeparator();
-    viewMenu.addItem (36, "Snap a grade", true, model.snap);
+    viewMenu.addItem (36, "Snap to Grid", true, model.snap);
 
-    spellingMenu.addItem (201, "Automatica", true, model.noteSpelling == RollModel::NoteSpelling::Auto);
+    spellingMenu.addItem (201, "Automatic", true, model.noteSpelling == RollModel::NoteSpelling::Auto);
     spellingMenu.addItem (202, "Sustenidos", true, model.noteSpelling == RollModel::NoteSpelling::Sharps);
     spellingMenu.addItem (203, "Bemois", true, model.noteSpelling == RollModel::NoteSpelling::Flats);
     spellingMenu.addItem (204, "Sustenidos e bemois", true, model.noteSpelling == RollModel::NoteSpelling::Both);
 
-    menu.addSubMenu ("Editar notas", editMenu);
-    menu.addSubMenu ("Acoes das notas", noteMenu);
-    menu.addSubMenu ("Grade", gridMenu);
-    menu.addItem (10, "Grade tercinada", true, model.triplet);
+    menu.addSubMenu ("Edit Notes", editMenu);
+    menu.addSubMenu ("Note Actions", noteMenu);
+    menu.addSubMenu ("Grid", gridMenu);
+    menu.addItem (10, "Triplet Grid", true, model.triplet);
     menu.addSubMenu ("Visualizacao", viewMenu);
-    menu.addSubMenu ("Grafia das notas", spellingMenu);
+    menu.addSubMenu ("Note Spelling", spellingMenu);
 
     juce::Component::SafePointer<NoteGrid> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
@@ -203,7 +203,7 @@ void NoteGrid::paint (juce::Graphics& g)
         g.fillAll (theme::rowBlack());
         g.setColour (theme::textDim());
         g.setFont (juce::FontOptions (14.5f));
-        g.drawFittedText (theme::ui ("Selecione um clip no arranjo\n(duplo clique em uma trilha cria um clip)"),
+        g.drawFittedText (theme::ui ("Select a clip in the arrangement\n(double-click a track to create a clip)"),
                           getLocalBounds().reduced (10), juce::Justification::centred, 3);
         return;
     }
@@ -218,7 +218,7 @@ void NoteGrid::paint (juce::Graphics& g)
         if (showScale && ! model.foldScale && model.scale.contains (pitch))
             bg = theme::rowInScale().withMultipliedBrightness (isBlackKey (pitch) ? 0.85f : 1.0f);
         if (showScale && pitch % 12 == model.scale.root())
-            bg = bg.brighter (0.12f);                       // tonica em destaque
+            bg = bg.brighter (0.12f);                       // Highlight the tonic.
         g.setColour (bg);
         g.fillRect (clipBox.getX(), r * model.rowHeight, clipBox.getWidth(), model.rowHeight);
 
@@ -226,7 +226,7 @@ void NoteGrid::paint (juce::Graphics& g)
         g.drawHorizontalLine ((r + 1) * model.rowHeight - 1, static_cast<float> (clipBox.getX()), static_cast<float> (clipBox.getRight()));
     }
 
-    // linhas verticais: grade, beat, compasso
+    // Vertical lines: grid, beat, bar.
     const double firstBeat = std::floor (xToBeats (static_cast<float> (clipBox.getX())) / model.gridBeats) * model.gridBeats;
     for (double b = std::max (0.0, firstBeat); b <= model.clip().length() + 1e-9; b += model.gridBeats)
     {
@@ -268,7 +268,7 @@ void NoteGrid::paint (juce::Graphics& g)
         if (const auto* note = model.clip().find (primaryId))
         {
             const auto noteBounds = noteRect (*note);
-            const juce::String message = "Nota: " + juce::String (note->lengthBeats, 2) + " tempos";
+            const juce::String message = "Note: " + juce::String (note->lengthBeats, 2) + " beats";
             const int x = std::clamp (static_cast<int> (noteBounds.getRight()) + 8, 4, std::max (4, getWidth() - 150));
             const int y = std::clamp (static_cast<int> (noteBounds.getY()), 4, std::max (4, getHeight() - 26));
             const auto hint = juce::Rectangle<int> (x, y, 146, 22);
@@ -281,7 +281,7 @@ void NoteGrid::paint (juce::Graphics& g)
             g.drawText (message, hint.reduced (6, 0), juce::Justification::centredLeft, true);
         }
 
-    g.setColour (theme::accent().withAlpha (0.9f));                      // marcador de insercao
+    g.setColour (theme::accent().withAlpha (0.9f));                      // Insertion marker.
     g.drawVerticalLine (static_cast<int> (beatsToX (model.insertBeat)), 0.0f, static_cast<float> (getHeight()));
 
     g.setColour (theme::playhead());
@@ -386,7 +386,7 @@ void NoteGrid::mouseDown (const juce::MouseEvent& e)
     }
 
     if (! e.mods.isShiftDown())
-        model.setInsertMarker (model.snapBeats (downBeat));       // clique no fundo = marcador de insercao
+        model.setInsertMarker (model.snapBeats (downBeat));       // Click the background to set the insertion marker.
 
     baseSelection = e.mods.isShiftDown() ? model.selection : std::set<int>{};
     model.selection = baseSelection;
@@ -487,7 +487,7 @@ void NoteGrid::mouseDrag (const juce::MouseEvent& e)
 
     if (drag == Drag::Move)
     {
-        if (e.mods.isCtrlDown() && ! copied)                       // Ctrl+arrastar: deixa copias no lugar
+        if (e.mods.isCtrlDown() && ! copied)                       // Ctrl+drag: leave copies in place.
         {
             for (const auto& [id, o] : original)
             {
@@ -567,7 +567,7 @@ void NoteGrid::mouseDoubleClick (const juce::MouseEvent& e)
     const auto p = e.position;
     const int id = hitNote (p);
 
-    if (id >= 0)                                   // duplo clique em nota: apaga
+    if (id >= 0)                                   // Double-click a note to delete it.
     {
         model.beginEdit();
         model.clip().removeNote (id);
@@ -597,19 +597,19 @@ void NoteGrid::mouseDoubleClick (const juce::MouseEvent& e)
 
 void NoteGrid::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w)
 {
-    if (e.mods.isCtrlDown())                       // Ctrl + roda: zoom horizontal
+    if (e.mods.isCtrlDown())                       // Ctrl + wheel: horizontal zoom.
     {
         const double factor = w.deltaY > 0 ? 1.15 : 1.0 / 1.15;
         if (onZoomHorizontal) onZoomHorizontal (factor);
         return;
     }
-    if (e.mods.isAltDown())                        // Alt + roda: zoom vertical
+    if (e.mods.isAltDown())                        // Alt + wheel: vertical zoom.
     {
         model.rowHeight = std::clamp (model.rowHeight + (w.deltaY > 0 ? 2 : -2), 8, 32);
         model.sendChangeMessage();
         return;
     }
-    Component::mouseWheelMove (e, w);              // repassa ao viewport (rolagem)
+    Component::mouseWheelMove (e, w);              // Pass through to the viewport.
 }
 
 bool NoteGrid::keyPressed (const juce::KeyPress& k)
@@ -657,7 +657,7 @@ bool NoteGrid::keyPressed (const juce::KeyPress& k)
     if (k.isKeyCode (juce::KeyPress::homeKey))   { model.setInsertMarker (0.0);                return true; }
     if (k.isKeyCode (juce::KeyPress::endKey))    { model.setInsertMarker (model.clip().length()); return true; }
 
-    // zoom horizontal com + e -
+    // Horizontal zoom with + and -.
     if (! ctrl)
     {
         const auto ch = k.getTextCharacter();
@@ -665,7 +665,7 @@ bool NoteGrid::keyPressed (const juce::KeyPress& k)
         if (ch == '-' || ch == '_') { if (onZoomHorizontal) onZoomHorizontal (1.0 / 1.25); return true; }
     }
 
-    // Page Up/Down: rola na vertical; Ctrl+Page Up/Down: na horizontal
+    // Page Up/Down scrolls vertically; Ctrl+Page Up/Down scrolls horizontally.
     if (k.isKeyCode (juce::KeyPress::pageUpKey) || k.isKeyCode (juce::KeyPress::pageDownKey))
     {
         if (auto* vp = findParentComponentOfClass<juce::Viewport>())
@@ -693,7 +693,7 @@ bool NoteGrid::keyPressed (const juce::KeyPress& k)
         if (k.isKeyCode (juce::KeyPress::leftKey))  { shift ? model.resizeSelected (-model.gridBeats) : model.nudgeSelected (-model.gridBeats, 0); return true; }
         if (k.isKeyCode (juce::KeyPress::rightKey)) { shift ? model.resizeSelected ( model.gridBeats) : model.nudgeSelected ( model.gridBeats, 0); return true; }
     }
-    return false;                                  // Espaco etc: sobe para a janela principal
+    return false;                                  // Space, etc.: pass through to the main window.
 }
 
 // ============================================================ KeyColumn
@@ -832,7 +832,7 @@ void RulerBar::paint (juce::Graphics& g)
     const int totalBeats = static_cast<int> (std::ceil (model.clip().length()));
 
     g.setColour (theme::accent().withAlpha (0.22f));
-    g.fillRect (0.0f, 0.0f, static_cast<float> (model.gridWidthPixels()), 4.0f);   // faixa do clip/loop
+    g.fillRect (0.0f, 0.0f, static_cast<float> (model.gridWidthPixels()), 4.0f);   // Clip/loop range.
 
     g.setFont (juce::FontOptions (12.5f));
     for (int b = 0; b <= totalBeats; ++b)
@@ -1000,7 +1000,7 @@ void RulerBar::mouseDrag (const juce::MouseEvent& e)
     if (! dragging && e.getDistanceFromDragStart() < 4) return;
     if (! dragging) last = e.getEventRelativeTo (getParentComponent()).position;
     dragging = true;
-    const auto now = e.getEventRelativeTo (getParentComponent()).position;     // posicao estavel durante o rolar
+    const auto now = e.getEventRelativeTo (getParentComponent()).position;     // Stable position while scrolling.
     const float dx = now.x - last.x, dy = now.y - last.y;
     last = now;
     if (resizing)
@@ -1025,7 +1025,7 @@ void RulerBar::mouseUp (const juce::MouseEvent& e)
         if (locatorId >= 0)
         {
             juce::PopupMenu menu;
-            menu.addItem (1, "Apagar locator");
+            menu.addItem (1, "Delete Locator");
             juce::Component::SafePointer<RulerBar> safeThis (this);
             const auto screen = localPointToGlobal (e.position.toInt());
             menu.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (
@@ -1440,7 +1440,7 @@ PianoRollEditor::~PianoRollEditor()
 void PianoRollEditor::paint (juce::Graphics& g)
 {
     g.fillAll (theme::panel());
-    if (grid.hasKeyboardFocus (false))               // anel de foco (navegacao por teclado)
+    if (grid.hasKeyboardFocus (false))               // Focus ring (keyboard navigation).
     {
         g.setColour (theme::accent());
         g.drawRect (getLocalBounds(), 2);
@@ -1557,7 +1557,7 @@ void PianoRollEditor::changeListenerCallback (juce::ChangeBroadcaster*)
     const int keepPitch = lastCenterPitch;
     const int oldHeight = grid.getHeight();
     grid.updateSize();
-    if (grid.getHeight() != oldHeight)                     // fold/escala mudou as linhas
+    if (grid.getHeight() != oldHeight)                     // Fold/scale changed the rows.
     {
         int best = -1, bestDist = 1000;
         for (int r = 0; r < static_cast<int> (model.rows().size()); ++r)
