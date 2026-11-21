@@ -1,5 +1,6 @@
 #include "ArrangementView.h"
 #include "AppModalDialog.h"
+#include "AudioEngine.h"
 #include "Icons.h"
 #include "ThemeKnobSlider.h"
 #include "WaveformDisplay.h"
@@ -26,6 +27,84 @@ constexpr std::array<const char*, trackColours.size()> trackColourNames {
     "Vermelho", "Laranja", "Amarelo", "Verde", "Ciano",
     "Azul", "Indigo", "Roxo", "Cinza"
 };
+
+juce::Colour spectrumWaveformColour (float frequency, float flatness)
+{
+    constexpr std::array<float, 7> frequencies {
+        40.0f, 100.0f, 220.0f, 600.0f, 1500.0f, 5000.0f, 16000.0f
+    };
+    constexpr std::array<std::uint32_t, 7> colours {
+        0xffff3030, 0xffff8618, 0xfff4e900, 0xff16d34b,
+        0xff00d9e8, 0xff416dff, 0xffb23cff
+    };
+    if (frequency <= 0.0f)
+        return juce::Colour (0xffff3030);
+
+    frequency = juce::jlimit (frequencies.front(), frequencies.back(), frequency);
+    juce::Colour colour (colours.back());
+    for (std::size_t i = 1; i < frequencies.size(); ++i)
+        if (frequency <= frequencies[i])
+        {
+            const float proportion = std::log (frequency / frequencies[i - 1])
+                / std::log (frequencies[i] / frequencies[i - 1]);
+            colour = juce::Colour (colours[i - 1]).interpolatedWith (
+                juce::Colour (colours[i]), proportion);
+            break;
+        }
+
+    const auto noiseTint = juce::Colour (0xffddd4ed);
+    return colour.interpolatedWith (noiseTint, juce::jlimit (0.0f, 0.9f, flatness * 0.9f));
+}
+
+void drawSpectrumWaveform (juce::Graphics& g, juce::Rectangle<float> area,
+                           const roll::AudioPlacement& clip,
+                           const std::vector<WaveformColumn>& spectrum,
+                           double sourceDurationSeconds, float halfHeight)
+{
+    if (clip.waveform.empty() || spectrum.empty() || sourceDurationSeconds <= 0.0
+        || area.getWidth() < 1.0f || area.getHeight() < 1.0f)
+        return;
+
+    constexpr int columnStep = 2;
+    constexpr float barWidth = 1.5f;
+    const int columns = std::max (1, static_cast<int> (std::ceil (area.getWidth() / columnStep)));
+    const float centre = area.getCentreY();
+
+    for (int column = 0; column < columns; ++column)
+    {
+        const double proportion = (static_cast<double> (column) + 0.5) / columns;
+        const double beat = proportion * clip.lengthBeats;
+        double sourceSeconds = roll::audioSourceSecondsAtBeat (clip, beat);
+        if (clip.reverse)
+            sourceSeconds = clip.sourceOffsetSeconds + clip.durationSeconds
+                          - (sourceSeconds - clip.sourceOffsetSeconds);
+        const auto spectrumIndex = static_cast<std::size_t> (std::clamp (
+            sourceSeconds / sourceDurationSeconds * spectrum.size(), 0.0,
+            static_cast<double> (spectrum.size() - 1)));
+        const auto& analysis = spectrum[spectrumIndex];
+
+        const double firstProportion = static_cast<double> (column) / columns;
+        const auto first = std::min (clip.waveform.size() - 1,
+            static_cast<std::size_t> (firstProportion * clip.waveform.size()));
+        const auto last = std::max (first + 1, std::min (clip.waveform.size(),
+            static_cast<std::size_t> ((static_cast<double> (column + 1) / columns)
+                                      * clip.waveform.size())));
+        float peak = 0.0f;
+        for (auto bin = first; bin < last; ++bin)
+            peak = std::max (peak, std::max (std::abs (clip.waveform[bin].minimum),
+                                             std::abs (clip.waveform[bin].maximum)));
+
+        const float amplitude = std::pow (std::clamp (peak, 0.0f, 1.0f), 0.72f);
+        const float x = area.getX() + static_cast<float> (column * columnStep);
+        const float width = std::min (barWidth, area.getRight() - x);
+        const float height = std::max (0.75f, amplitude * halfHeight);
+        const auto colour = amplitude < 0.004f || analysis.centroid < 40.0f
+            ? juce::Colour (0xffff3030)
+            : spectrumWaveformColour (analysis.centroid, analysis.flatness);
+        g.setColour (colour);
+        g.fillRect (x, centre - height, width, height * 2.0f);
+    }
+}
 
 juce::String formatTimelineTime (double seconds)
 {
@@ -504,7 +583,23 @@ public:
                     g.setColour (juce::Colours::white.withAlpha (0.24f));
                     g.drawHorizontalLine (static_cast<int> (waveformArea.getCentreY()),
                                           waveformArea.getX(), waveformArea.getRight());
-                    drawWaveformEnvelope (g, waveformArea, clip->waveform, base.brighter (0.7f), halfHeight);
+                    const auto style = theme::waveformStyle();
+                    if (style == theme::WaveformStyle::Ultraviolet)
+                        drawReferenceWaveform (g, waveformArea, clip->waveform, halfHeight);
+                    else if (style == theme::WaveformStyle::Spectrum && owner.audioDataProvider)
+                    {
+                        const auto* audioData = owner.audioDataProvider (clip->filePath);
+                        if (audioData != nullptr && ! audioData->waveformColumns.empty())
+                            drawSpectrumWaveform (g, waveformArea, *clip,
+                                                  audioData->waveformColumns,
+                                                  audioData->durationSeconds, halfHeight);
+                        else
+                            drawWaveformEnvelope (g, waveformArea, clip->waveform,
+                                                  base.brighter (0.7f), halfHeight);
+                    }
+                    else
+                        drawWaveformEnvelope (g, waveformArea, clip->waveform,
+                                              base.brighter (0.7f), halfHeight);
                     if (clip->sourceOffsetSeconds > 1.0e-6)
                     {
                         g.setColour (theme::accent().withAlpha (0.95f));
@@ -6063,6 +6158,19 @@ void ArrangementView::refresh()
     }
     updateSizes();
     resized();
+}
+
+void ArrangementView::refreshWaveformAppearance()
+{
+    if (lanes != nullptr)
+        lanes->repaint();
+}
+
+void ArrangementView::setAudioDataProvider (
+    std::function<const AudioFileData* (const std::string&)> provider)
+{
+    audioDataProvider = std::move (provider);
+    refreshWaveformAppearance();
 }
 
 void ArrangementView::refreshMidiMappingInfo()

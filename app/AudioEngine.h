@@ -352,7 +352,10 @@ public:
                        const juce::PluginDescription&, std::function<void (const juce::String&)> onDone);
     std::unique_ptr<juce::AudioProcessorEditor> createPadEffectEditor (int trackId, int rackDeviceId,
                                                                        int pad, int effectIndex);
-    void loadAudioFileAsync (const juce::File&, std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)>);
+    void loadAudioFileAsync (
+        const juce::File&,
+        std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)>,
+        bool includeWaveformAnalysis = false);
     void analyzeAudioFileAsync (const juce::File&, std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)>);
     void previewAudio (std::shared_ptr<const AudioFileData> source,
                        double startPositionSeconds = 0.0);

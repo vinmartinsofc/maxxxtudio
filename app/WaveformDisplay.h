@@ -62,3 +62,41 @@ inline void drawWaveformEnvelope (juce::Graphics& g, juce::Rectangle<float> area
     g.setColour (colour.withAlpha (0.95f));
     g.strokePath (envelope, juce::PathStrokeType (0.8f));
 }
+
+inline void drawReferenceWaveform (juce::Graphics& g, juce::Rectangle<float> area,
+                                   const std::vector<roll::WaveformRange>& waveform,
+                                   float halfHeight)
+{
+    if (waveform.empty() || area.getWidth() < 1.0f || area.getHeight() < 1.0f)
+        return;
+
+    constexpr int columnStep = 2;
+    constexpr float barWidth = 1.5f;
+    const int columns = std::max (1, static_cast<int> (std::ceil (
+        area.getWidth() / columnStep)));
+    const float centre = area.getCentreY();
+    g.setColour (juce::Colours::white.withAlpha (0.24f));
+    g.drawHorizontalLine (juce::roundToInt (centre), area.getX(), area.getRight());
+
+    for (int column = 0; column < columns; ++column)
+    {
+        const auto first = std::min (waveform.size() - 1,
+            static_cast<std::size_t> (static_cast<double> (column) / columns * waveform.size()));
+        const auto last = std::max (first + 1, std::min (waveform.size(),
+            static_cast<std::size_t> (static_cast<double> (column + 1) / columns
+                                      * waveform.size())));
+        float peak = 0.0f;
+        for (auto bin = first; bin < last; ++bin)
+            peak = std::max (peak, std::max (std::abs (waveform[bin].minimum),
+                                             std::abs (waveform[bin].maximum)));
+
+        const float amplitude = std::pow (std::clamp (peak, 0.0f, 1.0f), 0.72f);
+        const float x = area.getX() + static_cast<float> (column * columnStep);
+        const float width = std::min (barWidth, area.getRight() - x);
+        const float hue = juce::jmap (amplitude, 0.76f, 0.54f);
+        const float lightness = juce::jmap (amplitude, 0.38f, 0.66f);
+        g.setColour (juce::Colour::fromHSL (hue, 0.9f, lightness, 1.0f));
+        const float height = std::max (0.75f, amplitude * halfHeight);
+        g.fillRect (x, centre - height, width, height * 2.0f);
+    }
+}

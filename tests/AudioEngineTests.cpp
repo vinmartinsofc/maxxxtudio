@@ -953,7 +953,8 @@ TEST_CASE ("Reference analysis is isolated from previews and produces a spectrum
         std::shared_ptr<const AudioFileData> data;
     };
 
-    const auto load = [&] (const juce::File& file, bool analyzeReference)
+    const auto load = [&] (const juce::File& file, bool analyzeReference,
+                           bool analyzeWaveform = false)
     {
         auto result = std::make_shared<AsyncResult>();
         const auto callback = [result] (const juce::String& error,
@@ -966,7 +967,7 @@ TEST_CASE ("Reference analysis is isolated from previews and produces a spectrum
         if (analyzeReference)
             engine.analyzeAudioFileAsync (file, callback);
         else
-            engine.loadAudioFileAsync (file, callback);
+            engine.loadAudioFileAsync (file, callback, analyzeWaveform);
 
         const auto startTime = juce::Time::getMillisecondCounter();
         while (! result->complete
@@ -986,6 +987,11 @@ TEST_CASE ("Reference analysis is isolated from previews and produces a spectrum
     CHECK (preview->estimatedKey.isEmpty());
     CHECK (preview->spectrum.empty());
     CHECK (preview->waveformColumns.empty());
+
+    const auto arrangementAudio = load (audioFile.file, false, true);
+    CHECK (arrangementAudio->estimatedKey.isEmpty());
+    CHECK (arrangementAudio->spectrum.empty());
+    CHECK_FALSE (arrangementAudio->waveformColumns.empty());
 
     const auto analysis = load (audioFile.file, true);
     CHECK (analysis->estimatedKey.isNotEmpty());

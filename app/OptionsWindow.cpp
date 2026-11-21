@@ -282,13 +282,66 @@ private:
     juce::Label title, description;
     juce::ComboBox themeBox;
 };
+
+class WaveformPreferencesPage final : public juce::Component
+{
+public:
+    WaveformPreferencesPage (theme::WaveformStyle currentStyle,
+                             std::function<void (theme::WaveformStyle)> onChanged)
+        : changed (std::move (onChanged))
+    {
+        title.setText ("Estilo da waveform", juce::dontSendNotification);
+        title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        title.setColour (juce::Label::textColourId, theme::text());
+        addAndMakeVisible (title);
+
+        description.setText (
+            "Escolha como as formas de onda dos clips aparecem no Arrangement.",
+            juce::dontSendNotification);
+        description.setColour (juce::Label::textColourId, theme::textDim());
+        description.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (description);
+
+        styleBox.addItem ("Classic (padrao)", 1);
+        styleBox.addItem ("Ultraviolet", 2);
+        styleBox.addItem ("Spectrum", 3);
+        styleBox.setSelectedId (currentStyle == theme::WaveformStyle::Ultraviolet ? 2
+                               : currentStyle == theme::WaveformStyle::Spectrum ? 3 : 1,
+                               juce::dontSendNotification);
+        styleBox.onChange = [this]
+        {
+            const auto style = styleBox.getSelectedId() == 2 ? theme::WaveformStyle::Ultraviolet
+                              : styleBox.getSelectedId() == 3 ? theme::WaveformStyle::Spectrum
+                                                              : theme::WaveformStyle::Classic;
+            if (changed)
+                changed (style);
+        };
+        addAndMakeVisible (styleBox);
+    }
+
+    void resized() override
+    {
+        auto area = getLocalBounds().reduced (18);
+        title.setBounds (area.removeFromTop (28));
+        description.setBounds (area.removeFromTop (42));
+        area.removeFromTop (12);
+        styleBox.setBounds (area.removeFromTop (34).withWidth (260));
+    }
+
+private:
+    std::function<void (theme::WaveformStyle)> changed;
+    juce::Label title, description;
+    juce::ComboBox styleBox;
+};
 }
 
 OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
                               PluginScanner& scanner,
                               bool createEdgeFades,
                               std::function<void (bool)> onCreateEdgeFadesChanged,
-                              std::function<void (theme::Palette)> onThemeChanged)
+                              std::function<void (theme::Palette)> onThemeChanged,
+                              theme::WaveformStyle waveformStyle,
+                              std::function<void (theme::WaveformStyle)> onWaveformStyleChanged)
     : juce::DocumentWindow (theme::ui ("Preferencias"), theme::panel(),
                             juce::DocumentWindow::closeButton)
 {
@@ -299,6 +352,9 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
                   new FadePreferencesPage (createEdgeFades, std::move (onCreateEdgeFadesChanged)), true);
     tabs->addTab (theme::ui ("Aparencia"), theme::panel(),
                   new AppearancePreferencesPage (std::move (onThemeChanged)), true);
+    tabs->addTab (theme::ui ("Waveform"), theme::panel(),
+                  new WaveformPreferencesPage (waveformStyle,
+                                               std::move (onWaveformStyleChanged)), true);
 
     setUsingNativeTitleBar (true);
     setResizable (true, true);

@@ -18,15 +18,65 @@ enum class Palette
     MatrixBlack
 };
 
+enum class WaveformStyle
+{
+    Classic,
+    Ultraviolet,
+    Spectrum
+};
+
 inline Palette& selectedPalette()
 {
     static Palette palette = Palette::BlackOrange;
     return palette;
 }
 
+inline WaveformStyle& selectedWaveformStyle()
+{
+    static WaveformStyle selected = WaveformStyle::Classic;
+    return selected;
+}
+
+inline juce::File preferencesFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+        .getChildFile ("MaXXXtudio/preferences.xml");
+}
+
+inline std::unique_ptr<juce::XmlElement> readPreferences()
+{
+    auto xml = juce::XmlDocument::parse (preferencesFile());
+    if (xml == nullptr || ! xml->hasTagName ("MAXXXTUDIO_PREFERENCES"))
+        return std::make_unique<juce::XmlElement> ("MAXXXTUDIO_PREFERENCES");
+    return xml;
+}
+
+inline void writePreferences (const juce::XmlElement& xml)
+{
+    const auto file = preferencesFile();
+    file.getParentDirectory().createDirectory();
+    if (! xml.writeTo (file))
+        juce::Logger::writeToLog ("Theme: nao foi possivel salvar as preferencias.");
+}
+
 inline Palette current()
 {
     return selectedPalette();
+}
+
+inline WaveformStyle waveformStyle()
+{
+    return selectedWaveformStyle();
+}
+
+inline void setWaveformStyle (WaveformStyle style)
+{
+    selectedWaveformStyle() = style;
+    auto xml = readPreferences();
+    const char* value = style == WaveformStyle::Ultraviolet ? "ultraviolet"
+                      : style == WaveformStyle::Spectrum ? "spectrum" : "classic";
+    xml->setAttribute ("arrangementWaveform", value);
+    writePreferences (*xml);
 }
 
 inline bool isLight()
@@ -38,13 +88,7 @@ inline void setCurrent (Palette palette)
 {
     selectedPalette() = palette;
 
-    const auto xmlFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("MaXXXtudio/preferences.xml");
-    xmlFile.getParentDirectory().createDirectory();
-
-    auto xml = juce::XmlDocument::parse (xmlFile);
-    if (xml == nullptr || ! xml->hasTagName ("MAXXXTUDIO_PREFERENCES"))
-        xml = std::make_unique<juce::XmlElement> ("MAXXXTUDIO_PREFERENCES");
+    auto xml = readPreferences();
 
     const char* value = "graphite-orange";
     if (palette == Palette::BlackOrange)
@@ -61,20 +105,16 @@ inline void setCurrent (Palette palette)
         value = "matrix-2";
 
     xml->setAttribute ("theme", value);
-    if (! xml->writeTo (xmlFile))
-        juce::Logger::writeToLog ("Theme: nao foi possivel salvar a preferencia de tema.");
+    writePreferences (*xml);
 }
 
 inline void load()
 {
-    const auto xmlFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                             .getChildFile ("MaXXXtudio/preferences.xml");
-    const auto xml = juce::XmlDocument::parse (xmlFile);
-    if (xml == nullptr || ! xml->hasTagName ("MAXXXTUDIO_PREFERENCES"))
-    {
-        selectedPalette() = Palette::BlackOrange;
-        return;
-    }
+    const auto xml = readPreferences();
+    const auto waveformStyle = xml->getStringAttribute ("arrangementWaveform", "classic");
+    selectedWaveformStyle() = waveformStyle == "ultraviolet" || waveformStyle == "reference"
+        ? WaveformStyle::Ultraviolet
+        : waveformStyle == "spectrum" ? WaveformStyle::Spectrum : WaveformStyle::Classic;
 
     const auto value = xml->getStringAttribute ("theme", "black-orange").toLowerCase();
     if (value == "graphite-orange")

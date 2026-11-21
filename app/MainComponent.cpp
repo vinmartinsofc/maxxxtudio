@@ -867,6 +867,11 @@ MainComponent::MainComponent()
     audioBrowser.setVisible (false);
     addAndMakeVisible (arrangement);
     arrangement.setBpm (engine.graph().getBpm());
+    arrangement.setAudioDataProvider ([this] (const std::string& path) -> const AudioFileData*
+    {
+        const auto asset = audioAssets.find (path);
+        return asset == audioAssets.end() ? nullptr : asset->second.get();
+    });
     addAndMakeVisible (editor);
     addAndMakeVisible (audioClipEditor);
     audioClipEditor.setVisible (false);
@@ -2691,7 +2696,7 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
         }
 
         audioBrowser.setStatus (file.getFileName() + " adicionado");
-    });
+    }, true);
 }
 
 void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int firstTrack, int lastTrack)
@@ -3724,6 +3729,12 @@ void MainComponent::showOptionsWindow()
 
                 if (optionsWindow != nullptr)
                     refreshThemeColours (*optionsWindow, oldColours, newColours);
+            },
+            theme::waveformStyle(),
+            [this] (theme::WaveformStyle style)
+            {
+                theme::setWaveformStyle (style);
+                arrangement.refreshWaveformAppearance();
             });
     }
 
@@ -4450,7 +4461,7 @@ void MainComponent::loadProjectAudio (const ProjectFileData& data)
             project.sendChangeMessage();
             ++projectLoadWorkDone;
             advanceProjectLoadTask();
-        });
+        }, true);
     }
 }
 

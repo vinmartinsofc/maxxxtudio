@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+struct AudioFileData;
+
 // Vista de arranjo: cabecalhos de trilha, regua com o loop, e os clips na linha do tempo.
 class ArrangementView : public juce::Component, private juce::ChangeListener, private juce::Timer
 {
@@ -67,6 +69,7 @@ public:
     bool getAutomationMode() const noexcept { return automationMode; }
     void duplicateSelection();
     void refresh();                       // recria os cabecalhos
+    void refreshWaveformAppearance();
     void refreshMidiMappingInfo();
     void grabFocus();
     void toggleAutomationMode();
@@ -78,6 +81,7 @@ public:
     double gridBeats() const { return gridBeat; }
     double snapBeat (double beat) const;
     void setAdaptiveGrid (bool enabled);
+    void setAudioDataProvider (std::function<const AudioFileData* (const std::string&)> provider);
     void navigateLocator (bool forward);
     void addLocatorAtPlayhead();
     void deleteSelectedLocator();
@@ -133,6 +137,7 @@ private:
     double gridBeat = 0.25;
     double lastGridBeat = 0.25;
     bool adaptiveGridEnabled = false;
+    std::function<const AudioFileData* (const std::string&)> audioDataProvider;
 
     std::unique_ptr<Lanes> lanes;
     std::unique_ptr<Ruler> ruler;

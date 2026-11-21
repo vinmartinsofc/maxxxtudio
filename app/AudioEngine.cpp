@@ -504,7 +504,7 @@ public:
 };
 
 void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
-                      bool includeReferenceAnalysis,
+                      bool includeReferenceAnalysis, bool includeWaveformAnalysis,
                       std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback)
 {
     std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
@@ -552,8 +552,9 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
         data->estimatedKey = estimateReferenceKey (*data->samples, data->sampleRate);
         buildReferenceSpectrum (*data->samples, data->sampleRate,
                                 data->spectrum, data->spectrumColumns, data->spectrumRows);
-        data->waveformColumns = WaveformAnalyzer::analyze (*data->samples, data->sampleRate);
     }
+    if (includeWaveformAnalysis)
+        data->waveformColumns = WaveformAnalyzer::analyze (*data->samples, data->sampleRate);
 
     constexpr int maxWaveformResolution = 16384;
     const int waveformResolution = std::min (numSamples, maxWaveformResolution);
@@ -2030,11 +2031,12 @@ void AudioEngine::resetPeak (int trackId)
 
 void AudioEngine::loadAudioFileAsync (
     const juce::File& file,
-    std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback)
+    std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback,
+    bool includeWaveformAnalysis)
 {
-    audioLoadPool.addJob ([this, file, callback = std::move (callback)]
+    audioLoadPool.addJob ([this, file, includeWaveformAnalysis, callback = std::move (callback)]
     {
-        decodeAudioFile (audioFormatManager, file, false, callback);
+        decodeAudioFile (audioFormatManager, file, false, includeWaveformAnalysis, callback);
     });
 }
 
@@ -2044,7 +2046,7 @@ void AudioEngine::analyzeAudioFileAsync (
 {
     audioLoadPool.addJob ([this, file, callback = std::move (callback)]
     {
-        decodeAudioFile (audioFormatManager, file, true, callback);
+        decodeAudioFile (audioFormatManager, file, true, true, callback);
     });
 }
 
