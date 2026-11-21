@@ -258,7 +258,10 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
       drumRackCard ("Drum Rack", "Arraste para o canal MIDI desejado",
                     "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier)),
       utilityCard ("Volume Master", theme::ui ("Volume, estereo, mono, fase e modulacao"),
-                   "plugin:" + juce::String ("MaXXXtudio.Utility"))
+                   "plugin:" + juce::String ("MaXXXtudio.Utility")),
+      referenceCard ("Reference Master",
+                     "Deck de referencia: BPM, KEY, waveform e espectro",
+                     "tool:reference-master")
 {
     juce::PropertiesFile::Options options;
     options.applicationName = "MaXXXtudioPluginFavorites";
@@ -342,8 +345,14 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
         if (onAddUtilityRequested)
             setStatus (onAddUtilityRequested());
     };
+    referenceCard.onClick = [this]
+    {
+        if (onOpenReferenceRequested)
+            setStatus (onOpenReferenceRequested());
+    };
     addAndMakeVisible (drumRackCard);
     addAndMakeVisible (utilityCard);
+    addAndMakeVisible (referenceCard);
     setMaXXXtudioTab (false);
 
     scanner.list().addChangeListener (this);
@@ -400,6 +409,7 @@ void BrowserPanel::setMaXXXtudioTab (bool showTools)
     maXXXtudioDescription.setVisible (showTools);
     drumRackCard.setVisible (showTools);
     utilityCard.setVisible (showTools);
+    referenceCard.setVisible (showTools);
     resized();
 }
 
@@ -904,6 +914,8 @@ void BrowserPanel::resized()
         drumRackCard.setBounds (area.removeFromTop (78));
         area.removeFromTop (8);
         utilityCard.setBounds (area.removeFromTop (78));
+        area.removeFromTop (8);
+        referenceCard.setBounds (area.removeFromTop (78));
     }
     else
     {

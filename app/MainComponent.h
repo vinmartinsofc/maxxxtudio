@@ -11,6 +11,7 @@
 #include "PluginScanner.h"
 #include "ProjectFile.h"
 #include "ProjectModel.h"
+#include "ReferenceMasterWindow.h"
 #include "RollModel.h"
 #include "TaskRegistry.h"
 #include "TaskStatusBar.h"
@@ -191,6 +192,7 @@ private:
     std::unique_ptr<juce::FileChooser> audioExportChooser;
     std::unique_ptr<class OptionsWindow> optionsWindow;
     std::unique_ptr<GrooveBrowserWindow> grooveBrowserWindow;
+    std::unique_ptr<ReferenceMasterWindow> referenceMasterWindow;
     juce::File currentProjectFile;
     double nextRecoverySaveTime = 0.0;
     std::shared_ptr<TaskScope> projectLoadTask;

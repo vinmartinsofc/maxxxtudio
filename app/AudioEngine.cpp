@@ -2,6 +2,7 @@
 #include "DrumRackProcessor.h"
 #include "RemotePluginProcessor.h"
 #include "NativeEffectProcessors.h"
+#include <juce_dsp/juce_dsp.h>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -250,7 +251,141 @@ juce::File audioDeviceSettingsFile()
     return directory.getChildFile ("audio-device-settings.xml");
 }
 
+juce::String estimateReferenceKey (const juce::AudioBuffer<float>& samples,
+                                   double sampleRate)
+{
+    if (samples.getNumSamples() < 4096 || sampleRate <= 0.0)
+        return {};
+
+    constexpr int fftOrder = 12;
+    constexpr int fftSize = 1 << fftOrder;
+    juce::dsp::FFT fft (fftOrder);
+    std::array<float, fftSize * 2> mono {};
+    std::array<double, 12> chroma {};
+
+    const int numFrames = 8;
+    const int step = std::max (fftSize, (samples.getNumSamples() - fftSize)
+                                           / std::max (1, numFrames - 1));
+    for (int frame = 0; frame < numFrames; ++frame)
+    {
+        const int start = std::min (samples.getNumSamples() - fftSize,
+                                    frame * step);
+        mono.fill (0.0f);
+        for (int i = 0; i < fftSize; ++i)
+        {
+            const float window = 0.5f - 0.5f * std::cos (
+                2.0f * juce::MathConstants<float>::pi * i / (fftSize - 1));
+            float value = 0.0f;
+            for (int channel = 0; channel < samples.getNumChannels(); ++channel)
+                value += samples.getSample (channel, start + i);
+            mono[static_cast<std::size_t> (i)] = value / samples.getNumChannels() * window;
+        }
+        fft.performRealOnlyForwardTransform (mono.data(), true);
+
+        for (int bin = 1; bin < fftSize / 2; ++bin)
+        {
+            const double frequency = bin * sampleRate / fftSize;
+            if (frequency < 55.0 || frequency > 1400.0)
+                continue;
+            const double midi = 69.0 + 12.0 * std::log2 (frequency / 440.0);
+            const int pitchClass = ((static_cast<int> (std::lround (midi)) % 12) + 12) % 12;
+            const double magnitude = std::hypot (mono[bin * 2], mono[bin * 2 + 1]);
+            chroma[static_cast<std::size_t> (pitchClass)] += magnitude;
+        }
+    }
+
+    static constexpr std::array<double, 24> profiles {
+         6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88,
+         6.33, 2.68, 3.52, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17, 2.68
+    };
+    static constexpr std::array<const char*, 24> names {
+        "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        "Cm", "C#m", "Dm", "D#m", "Em", "Fm", "F#m", "Gm", "G#m", "Am", "A#m", "Bm"
+    };
+
+    double bestScore = -std::numeric_limits<double>::infinity();
+    int bestIndex = 0;
+    for (int index = 0; index < 24; ++index)
+    {
+        const bool minor = index >= 12;
+        const int tonic = minor ? index - 12 : index;
+        double score = 0.0;
+        for (int pitch = 0; pitch < 12; ++pitch)
+        {
+            const int profilePitch = (pitch - tonic + 12) % 12;
+            score += chroma[static_cast<std::size_t> (pitch)]
+                   * profiles[static_cast<std::size_t> (minor ? 12 + profilePitch : profilePitch)];
+        }
+        if (score > bestScore)
+        {
+            bestScore = score;
+            bestIndex = index;
+        }
+    }
+    return names[static_cast<std::size_t> (bestIndex)];
+}
+
+void buildReferenceSpectrum (const juce::AudioBuffer<float>& samples, double sampleRate,
+                             std::vector<float>& spectrum, int& columns, int& rows)
+{
+    constexpr int fftOrder = 11;
+    constexpr int fftSize = 1 << fftOrder;
+    constexpr int columnCount = 512;
+    constexpr int rowCount = 72;
+    juce::dsp::FFT fft (fftOrder);
+    std::array<float, fftSize * 2> frame {};
+    spectrum.assign (static_cast<std::size_t> (columnCount * rowCount), 0.0f);
+    columns = columnCount;
+    rows = rowCount;
+    if (samples.getNumSamples() < fftSize)
+        return;
+
+    float globalMaximum = 0.0001f;
+    for (int column = 0; column < columnCount; ++column)
+    {
+        const int start = std::min (samples.getNumSamples() - fftSize,
+            static_cast<int> (static_cast<std::int64_t> (column) * samples.getNumSamples() / columnCount));
+        frame.fill (0.0f);
+        for (int i = 0; i < fftSize; ++i)
+        {
+            const float window = 0.5f - 0.5f * std::cos (
+                2.0f * juce::MathConstants<float>::pi * i / (fftSize - 1));
+            float value = 0.0f;
+            for (int channel = 0; channel < samples.getNumChannels(); ++channel)
+                value += samples.getSample (channel, start + i);
+            frame[static_cast<std::size_t> (i)] = value / samples.getNumChannels() * window;
+        }
+        fft.performRealOnlyForwardTransform (frame.data(), true);
+
+        for (int row = 0; row < rowCount; ++row)
+        {
+            const double lowFrequency = 20.0 * std::pow (400.0, static_cast<double> (row) / rowCount);
+            const double highFrequency = 20.0 * std::pow (400.0, static_cast<double> (row + 1) / rowCount);
+            const int lowBin = std::max (1, static_cast<int> (lowFrequency * fftSize / sampleRate));
+            const int highBin = std::min (fftSize / 2 - 1,
+                                          static_cast<int> (highFrequency * fftSize / sampleRate));
+            float magnitude = 0.0f;
+            for (int bin = lowBin; bin <= highBin; ++bin)
+                magnitude = std::max (magnitude,
+                    static_cast<float> (std::hypot (frame[bin * 2], frame[bin * 2 + 1])));
+            spectrum[static_cast<std::size_t> (row * columnCount + column)] = magnitude;
+            globalMaximum = std::max (globalMaximum, magnitude);
+        }
+    }
+    for (float& value : spectrum)
+    {
+        if (value <= 0.0f)
+        {
+            value = 0.0f;
+            continue;
+        }
+        const float decibels = 20.0f * std::log10 (std::max (value / globalMaximum, 0.001f));
+        value = juce::jlimit (0.0f, 1.0f, (decibels + 60.0f) / 60.0f);
+    }
+}
+
 void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
+                      bool includeReferenceAnalysis,
                       std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback)
 {
     std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
@@ -293,10 +428,17 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
     }
     data->estimatedBpm = AudioEngine::estimateAudioBpm (*data->samples, data->sampleRate);
     data->transientSeconds = detectTransientSeconds (*data->samples, data->sampleRate);
+    if (includeReferenceAnalysis)
+    {
+        data->estimatedKey = estimateReferenceKey (*data->samples, data->sampleRate);
+        buildReferenceSpectrum (*data->samples, data->sampleRate,
+                                data->spectrum, data->spectrumColumns, data->spectrumRows);
+    }
 
     constexpr int maxWaveformResolution = 16384;
     const int waveformResolution = std::min (numSamples, maxWaveformResolution);
     data->waveform.resize (static_cast<std::size_t> (waveformResolution));
+    data->waveformRms.resize (static_cast<std::size_t> (waveformResolution));
     for (int bin = 0; bin < waveformResolution; ++bin)
     {
         const int start = static_cast<int> (static_cast<std::int64_t> (bin) * numSamples / waveformResolution);
@@ -304,14 +446,19 @@ void decodeAudioFile (juce::AudioFormatManager& formats, const juce::File& file,
             static_cast<std::int64_t> (bin + 1) * numSamples / waveformResolution));
         float minimum = 1.0f;
         float maximum = -1.0f;
+        double squaredEnergy = 0.0;
         for (int channel = 0; channel < numChannels; ++channel)
             for (int sample = start; sample < std::min (end, numSamples); ++sample)
             {
                 const float value = data->samples->getSample (channel, sample);
                 minimum = std::min (minimum, value);
                 maximum = std::max (maximum, value);
+                squaredEnergy += static_cast<double> (value) * value;
             }
         data->waveform[static_cast<std::size_t> (bin)] = { minimum, maximum };
+        const auto sampleCount = (std::min (end, numSamples) - start) * numChannels;
+        data->waveformRms[static_cast<std::size_t> (bin)] = static_cast<float> (
+            std::sqrt (squaredEnergy / std::max (1, sampleCount)));
     }
 
     juce::MessageManager::callAsync ([callback = std::move (callback), data]
@@ -654,19 +801,48 @@ AudioPreviewSource::AudioPreviewSource()
 {
 }
 
-void AudioPreviewSource::play (std::shared_ptr<const AudioFileData> source)
+void AudioPreviewSource::play (std::shared_ptr<const AudioFileData> source,
+                               double startPositionSeconds)
 {
+    const bool sourceIsValid = source != nullptr && source->samples != nullptr;
     {
         const juce::SpinLock::ScopedLockType lock (sourceLock);
         pendingSource = std::move (source);
         ++pendingVersion;
     }
-    playing.store (true);
+    const double position = std::max (0.0, startPositionSeconds);
+    requestedPositionSeconds.store (position);
+    positionRequestVersion.fetch_add (1);
+    playheadSeconds.store (position);
+    hasSource.store (sourceIsValid);
+    playing.store (sourceIsValid);
+}
+
+void AudioPreviewSource::pause()
+{
+    playing.store (false);
+}
+
+void AudioPreviewSource::resume()
+{
+    if (hasSource.load())
+        playing.store (true);
+}
+
+void AudioPreviewSource::seek (double positionSeconds)
+{
+    const double position = std::max (0.0, positionSeconds);
+    requestedPositionSeconds.store (position);
+    positionRequestVersion.fetch_add (1);
 }
 
 void AudioPreviewSource::stop()
 {
     playing.store (false);
+    hasSource.store (false);
+    requestedPositionSeconds.store (0.0);
+    playheadSeconds.store (0.0);
+    positionRequestVersion.fetch_add (1);
     const juce::SpinLock::ScopedLockType lock (sourceLock);
     pendingSource.reset();
     ++pendingVersion;
@@ -682,14 +858,28 @@ void AudioPreviewSource::processBlock (juce::AudioBuffer<float>& buffer, juce::M
             std::swap (localSource, pendingSource);
             localVersion = pendingVersion;
             positionSamples = 0.0;
+            playheadSeconds.store (0.0);
         }
     }
 
-    if (! playing.load() || localSource == nullptr || localSource->samples == nullptr
+    if (localSource == nullptr || localSource->samples == nullptr
         || localSource->sampleRate <= 0.0 || getSampleRate() <= 0.0)
         return;
 
     const auto& samples = *localSource->samples;
+    const auto requestedVersion = positionRequestVersion.load();
+    if (requestedVersion != localPositionRequestVersion)
+    {
+        const double requestedPosition = requestedPositionSeconds.load();
+        positionSamples = std::clamp (requestedPosition * localSource->sampleRate,
+                                      0.0, static_cast<double> (samples.getNumSamples()));
+        localPositionRequestVersion = requestedVersion;
+        appliedPositionRequestVersion.store (requestedVersion);
+        playheadSeconds.store (requestedPosition);
+    }
+    if (! playing.load())
+        return;
+
     const double sourceStep = localSource->sampleRate / getSampleRate();
     const float gainStep = (targetGain.load() - currentGain) / static_cast<float> (std::max (1, buffer.getNumSamples()));
     for (int i = 0; i < buffer.getNumSamples(); ++i)
@@ -698,6 +888,8 @@ void AudioPreviewSource::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         const int firstIndex = static_cast<int> (positionSamples);
         if (firstIndex >= samples.getNumSamples())
         {
+            positionSamples = samples.getNumSamples();
+            playheadSeconds.store (localSource->durationSeconds);
             playing.store (false);
             break;
         }
@@ -713,6 +905,7 @@ void AudioPreviewSource::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         }
         positionSamples += sourceStep;
     }
+    playheadSeconds.store (positionSamples / localSource->sampleRate);
 }
 
 // ======================================================= TrackMixer
@@ -1721,18 +1914,54 @@ void AudioEngine::loadAudioFileAsync (
 {
     audioLoadPool.addJob ([this, file, callback = std::move (callback)]
     {
-        decodeAudioFile (audioFormatManager, file, callback);
+        decodeAudioFile (audioFormatManager, file, false, callback);
     });
 }
 
-void AudioEngine::previewAudio (std::shared_ptr<const AudioFileData> source)
+void AudioEngine::analyzeAudioFileAsync (
+    const juce::File& file,
+    std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)> callback)
 {
-    previewSourcePtr->play (std::move (source));
+    audioLoadPool.addJob ([this, file, callback = std::move (callback)]
+    {
+        decodeAudioFile (audioFormatManager, file, true, callback);
+    });
+}
+
+void AudioEngine::previewAudio (std::shared_ptr<const AudioFileData> source,
+                                double startPositionSeconds)
+{
+    previewSourcePtr->play (std::move (source), startPositionSeconds);
+}
+
+void AudioEngine::pauseAudioPreview()
+{
+    previewSourcePtr->pause();
+}
+
+void AudioEngine::resumeAudioPreview()
+{
+    previewSourcePtr->resume();
+}
+
+void AudioEngine::seekAudioPreview (double positionSeconds)
+{
+    previewSourcePtr->seek (positionSeconds);
 }
 
 void AudioEngine::stopAudioPreview()
 {
     previewSourcePtr->stop();
+}
+
+double AudioEngine::getAudioPreviewPositionSeconds() const
+{
+    return previewSourcePtr->getPositionSeconds();
+}
+
+bool AudioEngine::isAudioPreviewPlaying() const
+{
+    return previewSourcePtr->isPlaying();
 }
 
 void AudioEngine::setAudioPreviewGain (float gain)

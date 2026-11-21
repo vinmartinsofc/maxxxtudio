@@ -37,6 +37,7 @@ target_sources(MaXXXtudio PRIVATE
     NativeEffectProcessors.cpp
     OptionsWindow.cpp
     AudioClipEditor.cpp
+    ReferenceMasterWindow.cpp
     ThemeKnobSlider.cpp
     AudioFileBrowser.cpp
     PluginScanner.cpp
@@ -69,6 +70,7 @@ target_link_libraries(MaXXXtudio
         juce::juce_audio_utils
         juce::juce_audio_devices
         juce::juce_audio_processors
+        juce::juce_dsp
         juce::juce_gui_basics
     PRIVATE
         juce::juce_recommended_config_flags
@@ -189,6 +191,7 @@ if(ROLL_BUILD_TESTS)
     add_executable(audio_engine_tests
         ../tests/AudioEngineTests.cpp
         AudioEngine.cpp
+        ReferenceMasterWindow.cpp
         RemotePluginProcessor.cpp
         DrumRackProcessor.cpp
         DrumRackEditor.cpp
@@ -209,6 +212,7 @@ if(ROLL_BUILD_TESTS)
             juce::juce_audio_utils
             juce::juce_audio_devices
             juce::juce_audio_processors
+            juce::juce_dsp
             juce::juce_gui_basics
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)

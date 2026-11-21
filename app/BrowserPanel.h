@@ -20,6 +20,7 @@ public:
     std::function<void (const juce::PluginDescription&)> onLoadRequested;
     std::function<juce::String()> onAddDrumRackRequested;
     std::function<juce::String()> onAddUtilityRequested;
+    std::function<juce::String()> onOpenReferenceRequested;
 
     void setStatus (const juce::String& text) { status.setText (text, juce::dontSendNotification); }
     void refresh();
@@ -76,6 +77,7 @@ private:
     juce::TextButton vstTab { "VST" }, maXXXtudioTab { "MaXXXtudio" };
     NativeToolCard drumRackCard;
     NativeToolCard utilityCard;
+    NativeToolCard referenceCard;
     juce::Label maXXXtudioDescription { {}, "Ferramentas do MaXXXtudio" };
     juce::TextButton allButton { "Todos" }, instrumentsButton { "Instrumentos" },
                       effectsButton { "Efeitos" }, favoritesButton { "Favoritos" };

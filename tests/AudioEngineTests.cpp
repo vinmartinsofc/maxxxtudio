@@ -3,6 +3,7 @@
 #include "DrumRackEditor.h"
 #include "DrumRackProcessor.h"
 #include "NativeEffectProcessors.h"
+#include "ReferenceMasterWindow.h"
 #include "RemotePluginProcessor.h"
 #include <algorithm>
 #include <cmath>
@@ -63,6 +64,56 @@ struct TemporarySampleFile
     }
 
     ~TemporarySampleFile() { file.deleteFile(); }
+
+    juce::File file;
+};
+
+struct TemporaryReferenceFile
+{
+    TemporaryReferenceFile()
+        : file (juce::File::getSpecialLocation (juce::File::tempDirectory)
+                    .getNonexistentChildFile ("maxxx_tudio_reference_analysis", ".wav", false))
+    {
+        std::ofstream output (file.getFullPathName().toStdString(), std::ios::binary);
+        const auto write16 = [&output] (std::uint16_t value)
+        {
+            const char bytes[] { static_cast<char> (value & 0xff),
+                                 static_cast<char> ((value >> 8) & 0xff) };
+            output.write (bytes, sizeof (bytes));
+        };
+        const auto write32 = [&output] (std::uint32_t value)
+        {
+            const char bytes[] { static_cast<char> (value & 0xff),
+                                 static_cast<char> ((value >> 8) & 0xff),
+                                 static_cast<char> ((value >> 16) & 0xff),
+                                 static_cast<char> ((value >> 24) & 0xff) };
+            output.write (bytes, sizeof (bytes));
+        };
+        constexpr std::uint32_t sampleRate = 44100;
+        constexpr std::uint32_t sampleCount = sampleRate;
+        constexpr std::uint32_t dataSize = sampleCount * 2;
+        output.write ("RIFF", 4);
+        write32 (36 + dataSize);
+        output.write ("WAVEfmt ", 8);
+        write32 (16);
+        write16 (1);
+        write16 (1);
+        write32 (sampleRate);
+        write32 (sampleRate * 2);
+        write16 (2);
+        write16 (16);
+        output.write ("data", 4);
+        write32 (dataSize);
+        for (std::uint32_t index = 0; index < sampleCount; ++index)
+        {
+            const double phase = 2.0 * juce::MathConstants<double>::pi * 440.0
+                               * index / sampleRate;
+            const auto value = static_cast<std::int16_t> (std::sin (phase) * 16000.0);
+            write16 (static_cast<std::uint16_t> (value));
+        }
+    }
+
+    ~TemporaryReferenceFile() { file.deleteFile(); }
 
     juce::File file;
 };
@@ -880,6 +931,197 @@ TEST_CASE ("Audio loop tempo analysis resists off-beat transients")
 
     const double bpm = AudioEngine::estimateAudioBpm (samples, sampleRate);
     CHECK (std::abs (bpm - 126.0) < 1.0);
+}
+
+TEST_CASE ("Reference analysis is isolated from previews and produces a spectrum")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    TemporaryReferenceFile audioFile;
+    AudioEngine engine;
+    auto* messageManager = juce::MessageManager::getInstance();
+    REQUIRE (messageManager != nullptr);
+
+    struct AsyncResult
+    {
+        bool complete = false;
+        juce::String error;
+        std::shared_ptr<const AudioFileData> data;
+    };
+
+    const auto load = [&] (bool analyzeReference)
+    {
+        auto result = std::make_shared<AsyncResult>();
+        const auto callback = [result] (const juce::String& error,
+                                        std::shared_ptr<const AudioFileData> data)
+        {
+            result->error = error;
+            result->data = std::move (data);
+            result->complete = true;
+        };
+        if (analyzeReference)
+            engine.analyzeAudioFileAsync (audioFile.file, callback);
+        else
+            engine.loadAudioFileAsync (audioFile.file, callback);
+
+        const auto startTime = juce::Time::getMillisecondCounter();
+        while (! result->complete
+               && juce::Time::getMillisecondCounter() - startTime < 10000)
+            messageManager->runDispatchLoopUntil (10);
+
+        if (! result->complete)
+            FAIL ("Audio analysis callback timed out");
+        if (result->error.isNotEmpty())
+            FAIL (result->error.toStdString());
+        if (result->data == nullptr)
+            FAIL ("Audio analysis returned no data");
+        return result->data;
+    };
+
+    const auto preview = load (false);
+    CHECK (preview->estimatedKey.isEmpty());
+    CHECK (preview->spectrum.empty());
+
+    const auto analysis = load (true);
+    CHECK (analysis->estimatedKey.isNotEmpty());
+    CHECK (analysis->spectrumColumns == 512);
+    CHECK (analysis->spectrumRows == 72);
+    CHECK (analysis->spectrum.size() == 512u * 72u);
+    CHECK (analysis->waveformRms.size() == analysis->waveform.size());
+}
+
+TEST_CASE ("Audio preview deck preserves playback position across pause and seek")
+{
+    AudioPreviewSource preview;
+    preview.setRateAndBufferSizeDetails (44100.0, 10);
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (1, 44100);
+    for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+        source->samples->setSample (0, sample,
+                                    static_cast<float> (sample) / source->samples->getNumSamples());
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+    preview.play (source);
+
+    juce::AudioBuffer<float> output (2, 10);
+    juce::MidiBuffer midi;
+    preview.processBlock (output, midi);
+    CHECK (std::abs (preview.getPositionSeconds() - 10.0 / 44100.0) < 1.0e-8);
+
+    preview.seek (0.5);
+    preview.processBlock (output, midi);
+    CHECK (preview.isPlaying());
+    CHECK (std::abs (preview.getPositionSeconds() - (0.5 + 10.0 / 44100.0)) < 1.0e-8);
+    CHECK (std::abs (output.getSample (0, 0) - 0.25f) < 0.001f);
+
+    preview.seek (0.8);
+    preview.seek (0.6);
+    preview.processBlock (output, midi);
+    CHECK (preview.isPlaying());
+    CHECK (std::abs (preview.getPositionSeconds() - (0.6 + 10.0 / 44100.0)) < 1.0e-8);
+    CHECK (std::abs (output.getSample (0, 0) - 0.3f) < 0.001f);
+
+    preview.play (source, 0.4);
+    preview.processBlock (output, midi);
+    CHECK (preview.isPlaying());
+    CHECK (std::abs (preview.getPositionSeconds() - (0.4 + 10.0 / 44100.0)) < 1.0e-8);
+    CHECK (std::abs (output.getSample (0, 0) - 0.2f) < 0.001f);
+
+    preview.pause();
+    const double pausedPosition = preview.getPositionSeconds();
+    preview.processBlock (output, midi);
+    CHECK (std::abs (preview.getPositionSeconds() - pausedPosition) < 1.0e-8);
+    CHECK (output.getMagnitude (0, output.getNumSamples()) == 0.0f);
+
+    preview.seek (0.25);
+    preview.processBlock (output, midi);
+    CHECK (std::abs (preview.getPositionSeconds() - 0.25) < 1.0e-8);
+    preview.resume();
+    preview.processBlock (output, midi);
+    CHECK (std::abs (preview.getPositionSeconds() - (0.25 + 10.0 / 44100.0)) < 1.0e-8);
+    CHECK (output.getMagnitude (0, output.getNumSamples()) > 0.1f);
+
+    preview.stop();
+    CHECK (preview.getPositionSeconds() == 0.0);
+    CHECK_FALSE (preview.isPlaying());
+
+    preview.play (source, 0.75);
+    preview.processBlock (output, midi);
+    CHECK (preview.isPlaying());
+    CHECK (std::abs (preview.getPositionSeconds() - (0.75 + 10.0 / 44100.0)) < 1.0e-8);
+    CHECK (std::abs (output.getSample (0, 0) - 0.375f) < 0.001f);
+}
+
+TEST_CASE ("Reference Master keeps playback active after a waveform click")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    ReferenceMasterWindow window;
+    auto analysis = std::make_shared<AudioFileData>();
+    analysis->samples = std::make_shared<juce::AudioBuffer<float>> (1, 44100);
+    for (int sample = 0; sample < analysis->samples->getNumSamples(); ++sample)
+        analysis->samples->setSample (0, sample,
+            static_cast<float> (sample) / analysis->samples->getNumSamples());
+    analysis->sampleRate = 44100.0;
+    analysis->durationSeconds = 1.0;
+    analysis->waveform.resize (128, { -0.5f, 0.5f });
+
+    AudioPreviewSource preview;
+    preview.setRateAndBufferSizeDetails (44100.0, 10);
+    preview.play (analysis);
+    juce::AudioBuffer<float> output (2, 10);
+    juce::MidiBuffer midi;
+    preview.processBlock (output, midi);
+
+    int playRequests = 0, resumeRequests = 0, seekRequests = 0;
+    double requestedPosition = 0.0;
+    window.onIsPlayingRequested = [&] { return preview.isPlaying(); };
+    window.onPlayheadPositionRequested = [&] { return preview.getPositionSeconds(); };
+    window.onSeekRequested = [&] (double seconds)
+    {
+        ++seekRequests;
+        requestedPosition = seconds;
+        preview.seek (seconds);
+    };
+    window.onResumeRequested = [&] { ++resumeRequests; preview.resume(); };
+    window.onPlayRequested = [&] (std::shared_ptr<const AudioFileData>, double seconds)
+    {
+        ++playRequests;
+        requestedPosition = seconds;
+        preview.play (analysis, seconds);
+    };
+    window.setAnalysis (juce::File ("reference.wav"), analysis);
+
+    auto* content = window.getContentComponent();
+    REQUIRE (content != nullptr);
+    REQUIRE (content->getNumChildComponents() > 0);
+    auto* deck = content->getChildComponent (content->getNumChildComponents() - 1);
+    REQUIRE (deck != nullptr);
+    REQUIRE (deck->getNumChildComponents() == 1);
+    auto* seekOverlay = deck->getChildComponent (0);
+    REQUIRE (seekOverlay != nullptr);
+    REQUIRE (seekOverlay->getWidth() > 0);
+
+    const auto point = juce::Point<float> (seekOverlay->getWidth() * 0.6f,
+                                           seekOverlay->getHeight() * 0.5f);
+    const auto now = juce::Time::getCurrentTime();
+    const juce::MouseEvent click (
+        juce::Desktop::getInstance().getMainMouseSource(), point,
+        juce::ModifierKeys::leftButtonModifier, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+        seekOverlay, seekOverlay, now, point, now, 1, false);
+    seekOverlay->mouseDown (click);
+    seekOverlay->mouseUp (click);
+
+    CHECK (seekRequests >= 1);
+    CHECK (resumeRequests == 1);
+    CHECK (playRequests == 0);
+    CHECK (preview.isPlaying());
+    CHECK (requestedPosition > 0.55);
+    CHECK (requestedPosition < 0.7);
+
+    preview.processBlock (output, midi);
+    CHECK (preview.isPlaying());
+    CHECK (std::abs (preview.getPositionSeconds()
+                     - (requestedPosition + 10.0 / 44100.0)) < 1.0e-8);
+    CHECK (std::abs (output.getSample (0, 0) - 0.3f) < 0.01f);
 }
 
 TEST_CASE ("Offline track rendering captures audio before the master bus")

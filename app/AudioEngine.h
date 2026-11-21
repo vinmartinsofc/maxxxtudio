@@ -182,10 +182,15 @@ struct AudioFileData
     juce::File file;
     std::shared_ptr<juce::AudioBuffer<float>> samples;
     std::vector<roll::WaveformRange> waveform;
+    std::vector<float> waveformRms;
+    std::vector<float> spectrum;
+    int spectrumColumns = 0;
+    int spectrumRows = 0;
     std::vector<double> transientSeconds;
     double sampleRate = 0.0;
     double durationSeconds = 0.0;
     double estimatedBpm = 0.0;
+    juce::String estimatedKey;
 };
 
 struct AudioClipPlayback
@@ -243,8 +248,17 @@ class AudioPreviewSource : public juce::AudioProcessor
 {
 public:
     AudioPreviewSource();
-    void play (std::shared_ptr<const AudioFileData>);
+    void play (std::shared_ptr<const AudioFileData>, double startPositionSeconds = 0.0);
+    void pause();
+    void resume();
+    void seek (double positionSeconds);
     void stop();
+    double getPositionSeconds() const
+    {
+        return positionRequestVersion.load() != appliedPositionRequestVersion.load()
+            ? requestedPositionSeconds.load() : playheadSeconds.load();
+    }
+    bool isPlaying() const { return playing.load(); }
     void setGain (float gain) { targetGain.store (std::clamp (gain, 0.0f, 1.0f)); }
     const juce::String getName() const override { return "Audio Preview"; }
     void prepareToPlay (double, int) override {}
@@ -269,6 +283,10 @@ private:
     std::shared_ptr<const AudioFileData> pendingSource, localSource;
     std::uint64_t pendingVersion = 0, localVersion = 0;
     std::atomic<bool> playing { false };
+    std::atomic<bool> hasSource { false };
+    std::atomic<double> requestedPositionSeconds { 0.0 }, playheadSeconds { 0.0 };
+    std::atomic<std::uint64_t> positionRequestVersion { 0 }, appliedPositionRequestVersion { 0 };
+    std::uint64_t localPositionRequestVersion = 0;
     std::atomic<float> targetGain { 0.5f };
     float currentGain = 0.5f;
     double positionSamples = 0.0;
@@ -327,8 +345,15 @@ public:
     std::unique_ptr<juce::AudioProcessorEditor> createPadEffectEditor (int trackId, int rackDeviceId,
                                                                        int pad, int effectIndex);
     void loadAudioFileAsync (const juce::File&, std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)>);
-    void previewAudio (std::shared_ptr<const AudioFileData> source);
+    void analyzeAudioFileAsync (const juce::File&, std::function<void (const juce::String&, std::shared_ptr<const AudioFileData>)>);
+    void previewAudio (std::shared_ptr<const AudioFileData> source,
+                       double startPositionSeconds = 0.0);
+    void pauseAudioPreview();
+    void resumeAudioPreview();
+    void seekAudioPreview (double positionSeconds);
     void stopAudioPreview();
+    double getAudioPreviewPositionSeconds() const;
+    bool isAudioPreviewPlaying() const;
     void setAudioPreviewGain (float gain);
     bool beginOfflineRender (juce::String& error);
     bool beginOfflineTrackRender (int trackId, juce::String& error);

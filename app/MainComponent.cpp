@@ -1722,6 +1722,56 @@ MainComponent::MainComponent()
     };
 
     browser.onLoadRequested = [this] (const juce::PluginDescription& d) { loadDevice (d); };
+    browser.onOpenReferenceRequested = [this]
+    {
+        if (referenceMasterWindow == nullptr)
+        {
+            referenceMasterWindow = std::make_unique<ReferenceMasterWindow>();
+            referenceMasterWindow->onAnalyzeRequested = [this] (const juce::File& file)
+            {
+                if (referenceMasterWindow == nullptr)
+                    return;
+
+                juce::Component::SafePointer<ReferenceMasterWindow> safeWindow (
+                    referenceMasterWindow.get());
+                engine.analyzeAudioFileAsync (file, [safeWindow, file]
+                    (const juce::String& error, std::shared_ptr<const AudioFileData> data)
+                {
+                    if (safeWindow == nullptr)
+                        return;
+                    if (error.isNotEmpty() || data == nullptr)
+                    {
+                        safeWindow->setAnalysisStatus ("Erro na analise: " + error);
+                        return;
+                    }
+                    safeWindow->setAnalysis (file, std::move (data));
+                });
+            };
+            referenceMasterWindow->onPlayRequested = [this]
+                (std::shared_ptr<const AudioFileData> data, double startPositionSeconds)
+            {
+                engine.previewAudio (std::move (data), startPositionSeconds);
+            };
+            referenceMasterWindow->onPauseRequested = [this] { engine.pauseAudioPreview(); };
+            referenceMasterWindow->onResumeRequested = [this] { engine.resumeAudioPreview(); };
+            referenceMasterWindow->onStopRequested = [this] { engine.stopAudioPreview(); };
+            referenceMasterWindow->onSeekRequested = [this] (double seconds)
+            {
+                engine.seekAudioPreview (seconds);
+            };
+            referenceMasterWindow->onPlayheadPositionRequested = [this]
+            {
+                return engine.getAudioPreviewPositionSeconds();
+            };
+            referenceMasterWindow->onIsPlayingRequested = [this]
+            {
+                return engine.isAudioPreviewPlaying();
+            };
+        }
+        referenceMasterWindow->setVisible (true);
+        referenceMasterWindow->toFront (true);
+        return juce::String ("Reference Master aberto.");
+    };
     browser.onAddDrumRackRequested = [this]
     {
         project.beginExternalEdit();
