@@ -833,7 +833,8 @@ MainComponent::MainComponent()
     tooltipWindow->setColour (juce::TooltipWindow::outlineColourId, theme::border());
 
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
-    engine.onPluginCrashed = [this, token] (int, int, const juce::String& pluginName)
+    engine.onPluginCrashed = [this, token] (
+        int, int, const juce::String& pluginName, const juce::String& failureReason)
     {
         const auto alive = token.lock();
         if (alive != nullptr && alive->load())
@@ -843,7 +844,8 @@ MainComponent::MainComponent()
             AppModalDialog::show (
                 *this, "Plugin Failure",
                 "The plugin " + pluginName
-                    + " failed and was terminated. The track was protected, and MaXXXtudio is still running.",
+                    + " failed and was terminated. The track was protected, and MaXXXtudio is still running.\n\n"
+                    + failureReason,
                 AppModalDialog::Icon::Error,
                 { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
         }
@@ -1339,13 +1341,15 @@ MainComponent::MainComponent()
     arrangement.onTrackDuplicateRequested = [this] (int id) { duplicateSelectedTrack (id); };
     arrangement.canAcceptPluginDrop = [this] (const juce::String& identifier, int trackId)
     {
+        const auto* track = project.track (trackId);
+        if (track == nullptr || track->frozen)
+            return false;
         if (identifier == DrumRackProcessor::pluginIdentifier)
         {
-            const auto* track = project.track (trackId);
-            return track != nullptr && track->type == roll::TrackType::Midi;
+            return track->type == roll::TrackType::Midi;
         }
         if (AudioEngine::isNativeEffectIdentifier (identifier))
-            return project.track (trackId) != nullptr;
+            return true;
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr
             && (trackId != AudioEngine::masterTrackId || engine.canAcceptPlugin (trackId, *description));
@@ -1365,6 +1369,11 @@ MainComponent::MainComponent()
         if (auto description = scanner.list().getTypeForIdentifierString (identifier))
         {
             auto* target = project.track (trackId);
+            if (target != nullptr && target->frozen)
+            {
+                browser.setStatus (theme::ui ("Unfreeze the track before editing devices."));
+                return;
+            }
             if (trackId == AudioEngine::masterTrackId && ! engine.canAcceptPlugin (trackId, *description))
             {
                 browser.setStatus ("The Master track only accepts effects.");
@@ -1707,18 +1716,23 @@ MainComponent::MainComponent()
     };
     deviceView.canAcceptPluginDrop = [this] (int trackId, const juce::String& identifier)
     {
+        const auto* track = project.track (trackId);
+        if (track == nullptr || track->frozen)
+            return false;
         if (identifier == DrumRackProcessor::pluginIdentifier)
-        {
-            const auto* track = project.track (trackId);
-            return track != nullptr && track->type == roll::TrackType::Midi;
-        }
+            return track->type == roll::TrackType::Midi;
         if (AudioEngine::isNativeEffectIdentifier (identifier))
-            return project.track (trackId) != nullptr;
+            return true;
         const auto description = scanner.list().getTypeForIdentifierString (identifier);
         return description != nullptr && engine.canAcceptPlugin (trackId, *description);
     };
     deviceView.onPluginDropped = [this] (int trackId, const juce::String& identifier, int insertionIndex)
     {
+        if (const auto* track = project.track (trackId); track != nullptr && track->frozen)
+        {
+            browser.setStatus (theme::ui ("Unfreeze the track before editing devices."));
+            return;
+        }
         if (identifier == DrumRackProcessor::pluginIdentifier)
         {
             addNativeDrumRackToTrack (trackId);
@@ -1796,6 +1810,9 @@ MainComponent::MainComponent()
     };
     browser.onAddDrumRackRequested = [this]
     {
+        if (const auto* track = project.track (project.selectedTrackId);
+            track != nullptr && track->frozen)
+            return theme::ui ("Unfreeze the track before editing devices.");
         project.beginExternalEdit();
         const auto deviceId = engine.addDrumRack (project.selectedTrackId);
         if (deviceId <= 0)
@@ -2146,8 +2163,14 @@ void MainComponent::copyDevicesToClipboard (int trackId, const std::vector<int>&
 
 void MainComponent::pasteDevicesToTrack (int trackId)
 {
-    if (copiedPluginStates.empty() || project.track (trackId) == nullptr)
+    const auto* targetTrack = project.track (trackId);
+    if (copiedPluginStates.empty() || targetTrack == nullptr)
         return;
+    if (targetTrack->frozen)
+    {
+        setProjectStatus (theme::ui ("Unfreeze the track before editing devices."));
+        return;
+    }
     if (pluginCopyInProgress || pluginHistoryRestoreInProgress)
     {
         setProjectStatus ("Wait for the current plugin operation to finish.");
@@ -3282,6 +3305,7 @@ void MainComponent::flattenTrack (int trackId)
             || envelope.target.type == roll::AutomationParameterType::AudioClipFadeOut;
     });
     const int frozenClipId = track->frozenAudioClip->id;
+    track->frozenAudioClip->name = track->name;
     track->clips.clear();
     track->audioClips.clear();
     track->audioClips.push_back (std::move (track->frozenAudioClip));
@@ -5596,8 +5620,11 @@ void MainComponent::duplicateSelectedTrack (int trackId)
 juce::String MainComponent::addNativeEffectToTrack (
     int trackId, const juce::String& identifier, int insertionIndex)
 {
-    if (project.track (trackId) == nullptr)
+    const auto* track = project.track (trackId);
+    if (track == nullptr)
         return "Track does not exist.";
+    if (track->frozen)
+        return theme::ui ("Unfreeze the track before editing devices.");
 
     const juce::String effectName = identifier == AudioEngine::compMasterPluginIdentifier ? "Comp Master"
         : identifier == AudioEngine::eqMasterPluginIdentifier ? "EQ Master" : "Volume Master";
@@ -5631,6 +5658,11 @@ void MainComponent::addNativeDrumRackToTrack (int trackId)
     if (track == nullptr || track->type != roll::TrackType::Midi)
     {
         browser.setStatus ("The Drum Master can only be added to a MIDI channel.");
+        return;
+    }
+    if (track->frozen)
+    {
+        browser.setStatus (theme::ui ("Unfreeze the track before editing devices."));
         return;
     }
 
@@ -5677,6 +5709,11 @@ void MainComponent::loadDevice (const juce::PluginDescription& desc, int targetT
     auto* t = targetTrackId >= 0 ? project.track (targetTrackId) : project.selectedTrack();
     if (t == nullptr) return;
     const int trackId = t->id;
+    if (t->frozen)
+    {
+        browser.setStatus (theme::ui ("Unfreeze the track before editing devices."));
+        return;
+    }
     if (! engine.canAcceptPlugin (trackId, desc))
     {
         browser.setStatus (trackId == 0 ? theme::ui ("The Master track only accepts effects.")

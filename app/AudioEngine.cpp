@@ -1721,6 +1721,20 @@ const AudioEngine::TrackNodes* AudioEngine::find (int trackId) const
     return it == tracks.end() ? nullptr : &it->second;
 }
 
+juce::String AudioEngine::failedPluginName() const
+{
+    for (const auto& [trackId, track] : tracks)
+    {
+        juce::ignoreUnused (trackId);
+        for (const auto& device : track.devices)
+            if (const auto* plugin = dynamic_cast<const RemotePluginProcessor*> (
+                    device.node->getProcessor());
+                plugin != nullptr && plugin->hasFailed())
+                return plugin->getName();
+    }
+    return {};
+}
+
 void AudioEngine::addTrack (int trackId, roll::TrackType type)
 {
     if (find (trackId) != nullptr) return;
@@ -2505,6 +2519,13 @@ juce::Result AudioEngine::renderMasterToWav (const juce::File& file,
         buffer.clear();
         midi.clear();
         seqGraph.processBlock (buffer, midi);
+        if (const auto failedPlugin = failedPluginName(); failedPlugin.isNotEmpty())
+        {
+            writer.reset();
+            outputStream.reset();
+            file.deleteFile();
+            return juce::Result::fail ("Plugin failed during offline rendering: " + failedPlugin);
+        }
 
         const int framesToWrite = static_cast<int> (std::min<std::uint64_t> (
             static_cast<std::uint64_t> (offlineRenderBlockSize), totalFrames - renderedFrames));
@@ -2568,6 +2589,12 @@ juce::Result AudioEngine::renderTrackRange (double startBeat,
         graphBuffer.clear();
         midi.clear();
         seqGraph.processBlock (graphBuffer, midi);
+        if (const auto failedPlugin = failedPluginName(); failedPlugin.isNotEmpty())
+        {
+            seqGraph.setPlaying (false);
+            capture->setDestination (nullptr);
+            return juce::Result::fail ("Plugin failed during offline rendering: " + failedPlugin);
+        }
 
         const auto framesThisBlock = std::min<std::uint64_t> (
             static_cast<std::uint64_t> (offlineRenderBlockSize), totalFrames - renderedFrames);
@@ -2607,7 +2634,7 @@ void AudioEngine::finishOfflineRender()
 bool AudioEngine::canAcceptPlugin (int trackId, const juce::PluginDescription& description) const
 {
     const auto* t = find (trackId);
-    if (t == nullptr) return false;
+    if (t == nullptr || t->frozen) return false;
     if (t->isMaster) return ! description.isInstrument;
     return ! t->audioTrack || ! description.isInstrument;
 }
@@ -2667,10 +2694,11 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
             d.instrument = (*instance)->isInstrument();
             const auto failureCallback = onPluginCrashed;
             (*instance)->setFailureCallback ([failureCallback, trackId, deviceId = d.id]
-                                             (const juce::String& name)
+                                             (const juce::String& name,
+                                              const juce::String& failureReason)
             {
                 if (failureCallback)
-                    failureCallback (trackId, deviceId, name);
+                    failureCallback (trackId, deviceId, name, failureReason);
             });
             d.node = seqGraph.addNode (std::move (*instance));
             if (d.node == nullptr)
@@ -2849,10 +2877,11 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
 
             const auto failureCallback = onPluginCrashed;
             (*instance)->setFailureCallback ([failureCallback, trackId, rackDeviceId]
-                                             (const juce::String& name)
+                                             (const juce::String& name,
+                                              const juce::String& failureReason)
             {
                 if (failureCallback)
-                    failureCallback (trackId, rackDeviceId, name);
+                    failureCallback (trackId, rackDeviceId, name, failureReason);
             });
             juce::String addError;
             if (! targetRack->addPadEffect (pad, description, std::move (*instance), addError))

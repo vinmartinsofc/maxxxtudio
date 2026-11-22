@@ -29,7 +29,8 @@ public:
     static std::vector<juce::Rectangle<int>> pluginEditorWindowBounds();
     static void movePluginEditorWindows (int deltaX);
     bool showEditor (int x = -1, int y = -1);
-    void setFailureCallback (std::function<void (const juce::String&)> callback)
+    void setFailureCallback (
+        std::function<void (const juce::String&, const juce::String&)> callback)
     {
         onFailure = std::move (callback);
     }
@@ -60,7 +61,7 @@ private:
     RemotePluginProcessor (const juce::PluginDescription&, double, int);
     bool startWorker (const juce::PluginDescription&, juce::String& error);
     bool sendCommand (pluginworker::Command, int timeoutMs, int editorX = -1, int editorY = -1);
-    void failWorker();
+    void failWorker (const juce::String& reason);
     void updateParameter (int index, float value) noexcept;
     float readParameter (int index) const noexcept;
 
@@ -75,7 +76,7 @@ private:
     juce::CriticalSection requestLock;
     juce::CriticalSection stateLock;
     juce::MemoryBlock cachedState;
-    std::function<void (const juce::String&)> onFailure;
+    std::function<void (const juce::String&, const juce::String&)> onFailure;
     bool processRequestPending = false;
     std::uint32_t processRequestStartTime = 0;
     HANDLE mapping = nullptr, requestEvent = nullptr, responseEvent = nullptr;

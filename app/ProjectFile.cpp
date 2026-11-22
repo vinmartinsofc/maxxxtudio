@@ -160,7 +160,7 @@ void storeXmlInBlock (const juce::XmlElement& xml, juce::MemoryBlock& block)
 {
     juce::MemoryOutputStream output;
     xml.writeTo (output);
-    block.replaceWith (output.getData(), output.getDataSize());
+    block.replaceAll (output.getData(), output.getDataSize());
 }
 
 void writeTrack (juce::XmlElement& parent, const roll::Track& track,

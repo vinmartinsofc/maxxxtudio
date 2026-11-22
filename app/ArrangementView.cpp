@@ -430,6 +430,7 @@ public:
     {
         selectedClips.clear();
         selectionAnchor = {};
+        selectedFrozenTrackId = -1;
         hasRangeSelection = false;
         shiftRangeAnchorBeat = -1.0;
         shiftRangeAnchorTrack = -1;
@@ -549,10 +550,11 @@ public:
                     static_cast<float> (rowHeight - (t.collapsed ? 6 : 9)));
                 if (r.toNearestInt().intersects (cb))
                 {
-                    g.setColour (base.darker (0.25f));
+                    const bool selected = selectedFrozenTrackId == t.id;
+                    g.setColour (selected ? base.brighter (0.25f) : base.darker (0.25f));
                     g.fillRoundedRectangle (r, 4.0f);
-                    g.setColour (theme::accent().withAlpha (0.9f));
-                    g.drawRoundedRectangle (r, 4.0f, 1.5f);
+                    g.setColour (selected ? juce::Colours::white : theme::accent().withAlpha (0.9f));
+                    g.drawRoundedRectangle (r, 4.0f, selected ? 1.6f : 1.5f);
                     if (r.getWidth() > 10.0f)
                     {
                         const auto waveformArea = r.reduced (3.0f, 4.0f);
@@ -1119,6 +1121,7 @@ public:
         int trackIndex = -1;
         roll::Placement* clip = nullptr;
         roll::AudioPlacement* audioClip = nullptr;
+        roll::AudioPlacement* frozenClip = nullptr;
     };
 
     Hit hit (juce::Point<float> p) const
@@ -1129,7 +1132,12 @@ public:
         const auto* track = project.tracks[static_cast<size_t> (h.trackIndex)].get();
         const double beat = p.x / owner.pixelsPerBeat;
         if (track->frozen)
+        {
+            if (track->frozenAudioClip != nullptr && beat >= track->frozenAudioClip->start
+                && beat < track->frozenAudioClip->end())
+                h.frozenClip = track->frozenAudioClip.get();
             return h;
+        }
         if (track->type == roll::TrackType::Audio)
         {
             for (const auto& clip : track->audioClips)
@@ -1154,6 +1162,7 @@ public:
         multiDragSources.clear();
         multiMovePreviewItems.clear();
         multiDragAnchorTrackIndex = -1;
+        selectedFrozenTrackId = -1;
 
         const int row = owner.rowAt (juce::roundToInt (e.position.y));
         if (owner.automationMode && e.mods.isLeftButtonDown()
@@ -1199,6 +1208,17 @@ public:
 
             showContextMenu (h, trackId);
             notifyAction ("Clip Menu", icons::Icon::Pointer, false, 700);
+            return;
+        }
+
+        if (h.frozenClip != nullptr)
+        {
+            selectedFrozenTrackId = trackId;
+            project.selectClip (trackId, -1);
+            if (owner.onSeek)
+                owner.onSeek (h.frozenClip->start);
+            notifyAction ("Clip selected", icons::Icon::Pointer, false, 650);
+            repaint();
             return;
         }
 
@@ -1623,37 +1643,37 @@ public:
                         project.sendChangeMessage();
                     }
                 }
-                else if (mode == Mode::ResizeLeft)
-                {
-                    const double beat = e.position.x / owner.pixelsPerBeat;
-                    const double requestedStart = noSnap ? beat : owner.snapBeat (beat);
-                    if (curAudioClipId >= 0)
+        }
+        else if (mode == Mode::ResizeLeft)
+        {
+            const double beat = e.position.x / owner.pixelsPerBeat;
+            const double requestedStart = noSnap ? beat : owner.snapBeat (beat);
+            if (curAudioClipId >= 0)
+            {
+                if (auto* track = project.track (curTrack))
+                    if (auto* clip = track->findAudioClip (curAudioClipId))
                     {
-                    if (auto* track = project.track (curTrack))
-                        if (auto* clip = track->findAudioClip (curAudioClipId))
-                        {
-                            const double minimumLength = owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0;
-                            const double endBeat = clip->end();
-                            const double newStart = std::clamp (
-                                requestedStart, 0.0, endBeat - minimumLength);
-                            const double newLength = endBeat - newStart;
-                            project.resizeAudioClipStart (curTrack, curAudioClipId, newStart, newLength);
-                        }
+                        const double minimumLength = owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0;
+                        const double endBeat = clip->end();
+                        const double newStart = std::clamp (
+                            requestedStart, 0.0, endBeat - minimumLength);
+                        const double newLength = endBeat - newStart;
+                        project.resizeAudioClipStart (curTrack, curAudioClipId, newStart, newLength);
                     }
-                    else if (curClip >= 0)
+            }
+            else if (curClip >= 0)
+            {
+                if (auto* track = project.track (curTrack))
+                    if (auto* clip = track->find (curClip))
                     {
-                    if (auto* track = project.track (curTrack))
-                        if (auto* clip = track->find (curClip))
-                        {
-                            const double minimumLength = owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0;
-                            const double endBeat = clip->end();
-                            const double newStart = std::clamp (
-                                requestedStart, 0.0, endBeat - minimumLength);
-                            const double newLength = endBeat - newStart;
-                            project.resizeClipStart (curTrack, curClip, newStart, newLength);
-                        }
+                        const double minimumLength = owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0;
+                        const double endBeat = clip->end();
+                        const double newStart = std::clamp (
+                            requestedStart, 0.0, endBeat - minimumLength);
+                        const double newLength = endBeat - newStart;
+                        project.resizeClipStart (curTrack, curClip, newStart, newLength);
                     }
-                }
+            }
         }
         else if (mode == Mode::FadeIn || mode == Mode::FadeOut)
         {
@@ -1961,6 +1981,8 @@ public:
             return;
 
         const auto h = hit (e.position);
+        if (h.frozenClip != nullptr)
+            return;
         if (h.audioClip != nullptr)
         {
             const int trackId = project.tracks[static_cast<size_t> (h.trackIndex)]->id;
@@ -3482,6 +3504,11 @@ private:
         }
 
         const auto h = hit (position);
+        if (h.frozenClip != nullptr)
+        {
+            setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+            return;
+        }
         if (fadeModeAt (h, position) != Mode::None)
         {
             setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
@@ -3737,6 +3764,7 @@ private:
     bool hasRangeSelection = false;
     double rangeStartBeat = 0.0, rangeEndBeat = 0.0;
     int rangeStartTrack = 0, rangeEndTrack = 0;
+    int selectedFrozenTrackId = -1;
     double shiftRangeAnchorBeat = -1.0;
     int shiftRangeAnchorTrack = -1;
     int multiDragAnchorTrackIndex = -1;
@@ -4612,8 +4640,6 @@ public:
     void setPeak (float p) { if (std::abs (p - peak) > 0.004f) { peak = p; repaint (getWidth() - 16, 0, 16, getHeight()); } }
     void refreshText()
     {
-        updateRoutingButton();
-        updateFoldButton();
         refreshMidiMappingInfo();
         if (const auto* tr = project.track (trackId))
         {
@@ -4625,6 +4651,7 @@ public:
             pan.setValue (tr->pan, juce::dontSendNotification);
             updatePanText (tr->pan);
         }
+        resized();
         repaint();
     }
 

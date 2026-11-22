@@ -305,7 +305,8 @@ class AudioEngine : private juce::ChangeListener
 public:
     enum class IsolatedEditorResult { notIsolated, opened, noEditor, failed };
     static double estimateAudioBpm (const juce::AudioBuffer<float>&, double sampleRate);
-    std::function<void (int trackId, int deviceId, const juce::String& pluginName)> onPluginCrashed;
+    std::function<void (int trackId, int deviceId, const juce::String& pluginName,
+                        const juce::String& failureReason)> onPluginCrashed;
 
     static constexpr int masterTrackId = 0;
     static constexpr const char* drumRackPluginIdentifier = "MaXXXtudio.DrumRack";
@@ -448,6 +449,7 @@ private:
 
     TrackNodes* find (int trackId);
     const TrackNodes* find (int trackId) const;
+    juce::String failedPluginName() const;
     bool beginOfflineRenderInternal (juce::String& error, int captureTrackId);
     void rewire (TrackNodes&);
     void rewireMaster();

@@ -205,7 +205,7 @@ TEST_CASE ("Project files collect Drum Master samples and restore their paths")
     plugin.trackId = 1;
     plugin.order = 0;
     plugin.identifier = DrumRackProcessor::pluginIdentifier;
-    plugin.state.replaceWith (stateStream.getData(), stateStream.getDataSize());
+    plugin.state.replaceAll (stateStream.getData(), stateStream.getDataSize());
     data.plugins.push_back (std::move (plugin));
 
     const auto file = temporary.folder.getChildFile ("drum_rack_test.std");

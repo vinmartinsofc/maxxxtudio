@@ -1722,6 +1722,20 @@ TEST_CASE ("Offline rendering rejects MIDI tracks without an instrument")
     CHECK (error.contains ("no instrument"));
 }
 
+TEST_CASE ("Frozen tracks reject plugin insertion until unfrozen")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Midi);
+    juce::PluginDescription instrument;
+    instrument.isInstrument = true;
+
+    CHECK (engine.canAcceptPlugin (1, instrument));
+    engine.setTrackFrozen (1, true);
+    CHECK_FALSE (engine.canAcceptPlugin (1, instrument));
+    engine.setTrackFrozen (1, false);
+    CHECK (engine.canAcceptPlugin (1, instrument));
+}
+
 TEST_CASE ("Audio clips receive a short safety fade at their start")
 {
     AudioEngine engine;

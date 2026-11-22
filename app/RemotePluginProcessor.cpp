@@ -15,6 +15,7 @@
 namespace
 {
 constexpr std::uint32_t stalledProcessTimeoutMs = 5000;
+constexpr DWORD offlineProcessTimeoutMs = 30000;
 
 juce::CriticalSection workerProcessIdsLock;
 std::set<DWORD> workerProcessIds;
@@ -446,7 +447,7 @@ bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int time
     const juce::ScopedLock lock (requestLock);
     if (WaitForSingleObject (workerProcess, 0) != WAIT_TIMEOUT)
     {
-        failWorker();
+        failWorker ("The plugin worker exited before completing a command.");
         return false;
     }
 
@@ -455,7 +456,7 @@ bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int time
         if (WaitForSingleObject (responseEvent, static_cast<DWORD> (timeoutMs)) != WAIT_OBJECT_0
             || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
         {
-            failWorker();
+            failWorker ("The plugin worker timed out while finishing an audio block.");
             return false;
         }
         processRequestPending = false;
@@ -476,7 +477,7 @@ bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int time
     if (result != WAIT_OBJECT_0
         || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
     {
-        failWorker();
+        failWorker ("The plugin worker timed out or failed while handling a host command.");
         return false;
     }
     return true;
@@ -486,19 +487,29 @@ bool RemotePluginProcessor::sendCommand (pluginworker::Command command, int time
 #endif
 }
 
-void RemotePluginProcessor::failWorker()
+void RemotePluginProcessor::failWorker (const juce::String& reason)
 {
     if (failed.exchange (true, std::memory_order_acq_rel))
         return;
+    auto failureReason = reason;
 #if defined(_WIN32)
-    if (workerProcess != nullptr && WaitForSingleObject (workerProcess, 0) == WAIT_TIMEOUT)
-        TerminateProcess (workerProcess, 1);
+    if (workerProcess != nullptr)
+    {
+        DWORD exitCode = STILL_ACTIVE;
+        if (WaitForSingleObject (workerProcess, 0) == WAIT_OBJECT_0
+            && GetExitCodeProcess (workerProcess, &exitCode))
+            failureReason += " Worker process exit code: "
+                           + juce::String::toHexString (static_cast<int> (exitCode)) + ".";
+        else
+            TerminateProcess (workerProcess, 1);
+    }
 #endif
     if (onFailure)
     {
         const auto callback = onFailure;
         const auto name = pluginName;
-        if (! juce::MessageManager::callAsync ([callback, name] { callback (name); }))
+        if (! juce::MessageManager::callAsync (
+                [callback, name, failureReason] { callback (name, failureReason); }))
             juce::Logger::writeToLog ("RemotePluginProcessor: Could not report the plugin failure.");
     }
 }
@@ -532,6 +543,7 @@ float RemotePluginProcessor::readParameter (int index) const noexcept
 void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
 #if defined(_WIN32)
+    const bool offline = isNonRealtime();
     if (hasFailed())
     {
         if (instrument)
@@ -543,7 +555,7 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     if (shared == nullptr || workerProcess == nullptr
         || WaitForSingleObject (workerProcess, 0) != WAIT_TIMEOUT)
     {
-        failWorker();
+        failWorker ("The plugin worker process is unavailable or has exited.");
         if (instrument)
             buffer.clear();
         return;
@@ -551,12 +563,18 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     if (processRequestPending)
     {
-        const auto pendingResult = WaitForSingleObject (responseEvent, 0);
+        auto pendingResult = WaitForSingleObject (responseEvent, 0);
+        if (pendingResult == WAIT_TIMEOUT && offline)
+        {
+            HANDLE handles[] { responseEvent, workerProcess };
+            pendingResult = WaitForMultipleObjects (2, handles, FALSE, offlineProcessTimeoutMs);
+        }
         if (pendingResult == WAIT_TIMEOUT)
         {
-            if (juce::Time::getMillisecondCounter() - processRequestStartTime
-                >= stalledProcessTimeoutMs)
-                failWorker();
+            if (offline || juce::Time::getMillisecondCounter() - processRequestStartTime
+                               >= stalledProcessTimeoutMs)
+                failWorker (offline ? "Offline plugin processing exceeded 30 seconds."
+                                    : "Plugin processing was unresponsive for 5 seconds.");
             if (instrument)
                 buffer.clear();
             return;
@@ -564,7 +582,7 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         if (pendingResult != WAIT_OBJECT_0
             || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
         {
-            failWorker();
+            failWorker ("The plugin worker returned an unsuccessful audio block.");
             if (instrument)
                 buffer.clear();
             return;
@@ -608,17 +626,24 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     const double blockDurationMs = sampleRate > 0.0
         ? 1000.0 * samples / sampleRate : 20.0;
-    const int timeoutMs = std::clamp (static_cast<int> (std::ceil (blockDurationMs)), 1, 50);
+    // Offline rendering must not advance until the worker has produced this block.
+    const DWORD timeoutMs = offline ? offlineProcessTimeoutMs
+        : static_cast<DWORD> (std::clamp (static_cast<int> (std::ceil (blockDurationMs)), 1, 50));
     ResetEvent (responseEvent);
     InterlockedExchange (&shared->command, static_cast<LONG> (pluginworker::Command::process));
     SetEvent (requestEvent);
     HANDLE handles[] { responseEvent, workerProcess };
     const auto processResult = WaitForMultipleObjects (
-        2, handles, FALSE, static_cast<DWORD> (timeoutMs));
+        2, handles, FALSE, timeoutMs);
     if (processResult == WAIT_TIMEOUT)
     {
-        processRequestPending = true;
-        processRequestStartTime = juce::Time::getMillisecondCounter();
+        if (offline)
+            failWorker ("Offline plugin processing exceeded 30 seconds.");
+        else
+        {
+            processRequestPending = true;
+            processRequestStartTime = juce::Time::getMillisecondCounter();
+        }
         if (instrument)
             buffer.clear();
         return;
@@ -626,7 +651,7 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     if (processResult != WAIT_OBJECT_0
         || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
     {
-        failWorker();
+        failWorker ("The plugin worker exited or returned an unsuccessful audio block.");
         if (instrument)
             buffer.clear();
         return;
