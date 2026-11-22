@@ -5,6 +5,28 @@
 
 namespace
 {
+class SelectAllSliderLabel final : public juce::Label
+{
+public:
+    SelectAllSliderLabel() : juce::Label ({}, {}) {}
+
+protected:
+    void editorShown (juce::TextEditor* textEditor) override
+    {
+        if (textEditor != nullptr)
+        {
+            textEditor->setSelectAllWhenFocused (true);
+            textEditor->selectAll();
+            juce::Component::SafePointer<juce::TextEditor> safeEditor (textEditor);
+            juce::MessageManager::callAsync ([safeEditor]
+            {
+                if (safeEditor != nullptr)
+                    safeEditor->selectAll();
+            });
+        }
+    }
+};
+
 void drawThemeKnob (juce::Graphics& g, juce::Rectangle<float> bounds,
                     double minimum, double maximum, double value,
                     double centreValue, bool bipolar, bool enabled, bool highlighted)
@@ -67,6 +89,33 @@ void drawThemeKnob (juce::Graphics& g, juce::Rectangle<float> bounds,
     g.fillEllipse (point.x - pointRadius, point.y - pointRadius,
                    pointRadius * 2.0f, pointRadius * 2.0f);
 }
+}
+
+juce::Label* ThemeKnobLookAndFeel::createSliderTextBox (juce::Slider& slider)
+{
+    auto* label = new SelectAllSliderLabel();
+    label->setJustificationType (juce::Justification::centred);
+    label->setKeyboardType (juce::TextInputTarget::decimalKeyboard);
+
+    const bool isLinearBar = slider.getSliderStyle() == juce::Slider::LinearBar
+                          || slider.getSliderStyle() == juce::Slider::LinearBarVertical;
+    label->setColour (juce::Label::textColourId,
+                      slider.findColour (juce::Slider::textBoxTextColourId));
+    label->setColour (juce::Label::backgroundColourId,
+                      isLinearBar ? juce::Colours::transparentBlack
+                                  : slider.findColour (juce::Slider::textBoxBackgroundColourId));
+    label->setColour (juce::Label::outlineColourId,
+                      slider.findColour (juce::Slider::textBoxOutlineColourId));
+    label->setColour (juce::TextEditor::textColourId,
+                      slider.findColour (juce::Slider::textBoxTextColourId));
+    label->setColour (juce::TextEditor::backgroundColourId,
+                      slider.findColour (juce::Slider::textBoxBackgroundColourId)
+                          .withAlpha (isLinearBar ? 0.7f : 1.0f));
+    label->setColour (juce::TextEditor::outlineColourId,
+                      slider.findColour (juce::Slider::textBoxOutlineColourId));
+    label->setColour (juce::TextEditor::highlightColourId,
+                      slider.findColour (juce::Slider::textBoxHighlightColourId));
+    return label;
 }
 
 void ThemeKnobLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y,

@@ -13,6 +13,7 @@ public:
 class ThemeKnobLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    juce::Label* createSliderTextBox (juce::Slider&) override;
     void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height,
                            float sliderPosition, float rotaryStartAngle,
                            float rotaryEndAngle, juce::Slider&) override;

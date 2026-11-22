@@ -8,7 +8,8 @@
   A digital audio workstation for creating, organizing, processing, and mixing music.
 </p>
 
-MaXXXtudio is an open-source DAW for Windows and Linux, built with C++20 and JUCE.
+MaXXXtudio is an open-source DAW for Windows, built with C++20 and JUCE.
+Linux is not supported at this time; a port may be considered in the future.
 The project is evolving and brings essential production tools, instruments, effects,
 and music editing together in a custom interface.
 
@@ -22,37 +23,66 @@ and music editing together in a custom interface.
 - **Automation:** global envelopes for volume, pan, mute, and plugin parameters; automatic parameter selection when adjusting a control.
 - **VST3 Plugins:** vendor scanning, favorites, custom folders, isolated execution, and project-saved state.
 - **Browsers:** audio files, color-coded favorites, search, preview, history, and File Explorer location.
-- **Drum Rack:** 16 pads, sample loading, One-Shot and Classic modes, pitch, volume, start, end, reverse, loop, and per-pad effects.
+- **Drum Master:** 15 pads, sample loading, One-Shot and Classic modes, pitch, volume, start, end, reverse, loop, and per-pad effects.
 - **MIDI Learn:** map MIDI controls to volume, pan, mute, and solo.
 - **Computer MIDI Keyboard:** play from the computer keyboard with octave and velocity controls.
 - **Projects:** save and open `.std` files, undo/redo history, recovery, and Master WAV export.
 - **Themes:** graphite/black with orange, blue, or red; white with orange; Matrix 1 and Matrix 2 with green.
 - **Interface:** accessible tooltips, vector icons, active and hover states, and theme-aware readable text.
 
+## Native Tools tab
+
+The plugin browser's **MaXXXtudio** tab groups the built-in instruments and effects in one place.
+
+<p align="center">
+  <img src="app/assets/readme/native-tools.png" alt="MaXXXtudio native tools tab" width="420">
+</p>
+
 ## Native Plugins
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="app/assets/readme/drum-rack.svg" alt="Drum Rack preview" width="300"><br>
-      <strong>Drum Rack</strong><br>
-      A 16-pad instrument for playing samples over MIDI. Includes audio loading, volume, pitch,
+      <img src="app/assets/readme/drum-master.png" alt="Drum Master interface screenshot" width="400"><br>
+      <strong>Drum Master</strong><br>
+      A 15-pad instrument for playing samples over MIDI. Includes audio loading, volume, pitch,
       start/end positions, reverse, loop, One-Shot mode, and independent effect chains per pad.
     </td>
     <td align="center" width="50%">
-      <img src="app/assets/readme/volume-master.svg" alt="Master Volume preview" width="300"><br>
+      <img src="app/assets/readme/volume-master.png" alt="Volume Master interface screenshot" width="400"><br>
       <strong>Volume Master</strong><br>
       A utility for gain, stereo width, balance, mono/left/right/swap input, phase inversion,
-      bass mono, mute, DC filtering, and configurable auto-pan.
+      and configurable auto-pan.
     </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="app/assets/readme/comp-master.png" alt="Comp Master interface screenshot" width="400"><br>
+      <strong>Comp Master</strong><br>
+      A compressor with sidechain routing, live waveform and gain-reduction display,
+      stereo input/output meters, and threshold, ratio, timing, and mix controls.
+    </td>
+    <td align="center" width="50%">
+      <img src="app/assets/readme/eq-master.png" alt="EQ Master interface screenshot" width="400"><br>
+      <strong>EQ Master</strong><br>
+      An eight-band parametric equalizer with a live spectrum analyzer, selectable filter
+      shapes, and Stereo, Mid, and Side processing modes.
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="app/assets/readme/reference-master.png" alt="Reference Master interface screenshot" width="400"><br>
+      <strong>Reference Master</strong><br>
+      A reference-track deck with waveform and spectrum analysis, BPM/key estimates,
+      playback, seeking, and zoom controls.
+    </td>
+    <td width="50%"></td>
   </tr>
 </table>
 
 ## Build
 
-Requirements: CMake 3.22+ and a C++20 compiler.
-
-**Windows** — Visual Studio with the “Desktop development with C++” workload:
+Requirements: Windows, CMake 3.22+, and Visual Studio with the “Desktop development with C++” workload.
 
 ```powershell
 cmake -S . -B build
@@ -61,18 +91,9 @@ cmake --build build --config Release
 
 Executable: `build\app\MaXXXtudio_artefacts\Release\MaXXXtudio.exe`
 
-**Linux (Ubuntu/Debian):**
-
-```sh
-sudo apt install build-essential cmake ninja-build pkg-config libasound2-dev libfreetype-dev \
-  libfontconfig1-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxext-dev libgl1-mesa-dev
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j2
-```
-
 Run the tests with:
 
-```sh
+```powershell
 ctest --test-dir build -C Release --output-on-failure
 ```
 

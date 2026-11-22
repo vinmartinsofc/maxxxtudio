@@ -195,6 +195,7 @@ if(ROLL_BUILD_TESTS)
         RemotePluginProcessor.cpp
         DrumRackProcessor.cpp
         DrumRackEditor.cpp
+        ThemeKnobSlider.cpp
         AppModalDialog.cpp
         NativeEffectProcessors.cpp)
     target_include_directories(audio_engine_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

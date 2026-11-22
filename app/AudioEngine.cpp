@@ -2635,7 +2635,7 @@ int AudioEngine::addDrumRack (int trackId)
 
     Device device;
     device.id = nextDeviceId++;
-    device.name = "Drum Rack";
+    device.name = "Drum Master";
     device.pluginIdentifier = drumRackPluginIdentifier;
     device.instrument = true;
     device.node = seqGraph.addNode (std::make_unique<DrumRackProcessor>());
@@ -2675,7 +2675,7 @@ int AudioEngine::addNativeEffect (int trackId, const juce::String& identifier, i
     device.instrument = false;
     if (identifier == utilityPluginIdentifier)
     {
-        device.name = "Master Volume";
+        device.name = "Volume Master";
         device.node = seqGraph.addNode (std::make_unique<UtilityProcessor>());
     }
     else if (identifier == compMasterPluginIdentifier)
@@ -2725,7 +2725,7 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
         : nullptr;
     if (rack == nullptr || pad < 0 || pad >= DrumRackProcessor::numPads || description.isInstrument)
     {
-        onDone ("Select a valid effect and a Drum Rack pad.");
+        onDone ("Select a valid effect and a Drum Master pad.");
         return;
     }
 
@@ -2755,7 +2755,7 @@ void AudioEngine::addPadEffect (int trackId, int rackDeviceId, int pad,
 
             if (*instance == nullptr || targetRack == nullptr)
             {
-                onDone (loadError->isNotEmpty() ? *loadError : "The Drum Rack is no longer available.");
+                onDone (loadError->isNotEmpty() ? *loadError : "The Drum Master is no longer available.");
                 return;
             }
 

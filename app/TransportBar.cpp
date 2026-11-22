@@ -172,6 +172,20 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     bpmLabel.setJustificationType (juce::Justification::centred);
     bpmLabel.setColour (juce::Label::backgroundColourId, theme::control());
     bpmLabel.setColour (juce::Label::textColourId, theme::text());
+    bpmLabel.onEditorShow = [this]
+    {
+        if (auto* editor = bpmLabel.getCurrentTextEditor())
+        {
+            editor->setSelectAllWhenFocused (true);
+            editor->selectAll();
+            juce::Component::SafePointer<juce::TextEditor> safeEditor (editor);
+            juce::MessageManager::callAsync ([safeEditor]
+            {
+                if (safeEditor != nullptr)
+                    safeEditor->selectAll();
+            });
+        }
+    };
     bpmLabel.setText (juce::String (graph.getBpm(), 2), juce::dontSendNotification);
     bpmLabel.onTextChange = [this]
     {

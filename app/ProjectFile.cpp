@@ -632,7 +632,7 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
             {
                 auto stateXml = juce::XmlDocument::parse (xmlStringFromBlock (pluginState));
                 if (stateXml == nullptr || ! stateXml->hasTagName ("DrumRack"))
-                    throw std::runtime_error ("The Drum Rack state is invalid.");
+                    throw std::runtime_error ("The Drum Master state is invalid.");
                 for (auto* pad = stateXml->getFirstChildElement(); pad != nullptr; pad = pad->getNextElement())
                 {
                     if (! pad->hasTagName ("Pad"))
@@ -897,17 +897,17 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
             {
                 auto stateXml = juce::XmlDocument::parse (xmlStringFromBlock (plugin.state));
                 if (stateXml == nullptr || ! stateXml->hasTagName ("DrumRack"))
-                    return juce::Result::fail ("The Drum Rack state is invalid.");
+                    return juce::Result::fail ("The Drum Master state is invalid.");
                 for (auto* pad = stateXml->getFirstChildElement(); pad != nullptr; pad = pad->getNextElement())
                 {
                     if (! pad->hasTagName ("Pad"))
                         continue;
                     const auto relativePath = pad->getStringAttribute ("file");
                     if (relativePath.isEmpty() || juce::File::isAbsolutePath (relativePath))
-                        return juce::Result::fail ("A Drum Rack sample path is invalid.");
+                        return juce::Result::fail ("A Drum Master sample path is invalid.");
                     const auto sample = file.getParentDirectory().getChildFile (relativePath);
                     if (! sample.isAChildOf (file.getParentDirectory()))
-                        return juce::Result::fail ("A Drum Rack sample path escapes the project folder.");
+                        return juce::Result::fail ("A Drum Master sample path escapes the project folder.");
                     pad->setAttribute ("file", sample.getFullPathName());
                 }
                 storeXmlInBlock (*stateXml, plugin.state);

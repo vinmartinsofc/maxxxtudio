@@ -139,7 +139,7 @@ TEST_CASE ("Project files preserve mixer MIDI mappings")
     CHECK (loaded.project.midiMappings[2].target == MidiMappingTarget::MasterPan);
 }
 
-TEST_CASE ("Project files collect Drum Rack samples and restore their paths")
+TEST_CASE ("Project files collect Drum Master samples and restore their paths")
 {
     TemporaryProjectFolder temporary;
     const auto sample = temporary.folder.getChildFile ("kick.wav");

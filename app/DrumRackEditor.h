@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DrumRackProcessor.h"
+#include "ThemeKnobSlider.h"
 
 class DrumRackEditor final : public juce::AudioProcessorEditor,
                              public juce::DragAndDropTarget,
@@ -57,13 +58,13 @@ private:
     juce::TextButton undoButton { "Undo" }, redoButton { "Redo" };
     juce::TextButton loadButton { "Load Sample" }, clearSelectedButton { "Remove Sample" };
     juce::TextButton editEffectButton { "Open" }, removeEffectButton { "Remove" },
-                     bypassEffectButton { "Bypass" }, moveEffectUpButton { "Subir" },
-                     moveEffectDownButton { "Descer" };
+                     bypassEffectButton { "Bypass" }, moveEffectUpButton { "Move Up" },
+                     moveEffectDownButton { "Move Down" };
     juce::Label modeLabel { {}, "Playback Mode" };
     juce::Label effectsLabel { {}, "Pad Effects" };
     juce::Label gainLabel { {}, "Volume" }, pitchLabel { {}, "Transpose (st)" };
     juce::Label startLabel { {}, "Start (%)" }, endLabel { {}, "End (%)" };
-    juce::Slider gainSlider, pitchSlider, startSlider, endSlider;
+    ThemeKnobSlider gainSlider, pitchSlider, startSlider, endSlider;
     juce::ToggleButton reverseButton { "Reverse" }, loopButton { "Loop" };
     juce::ComboBox modeBox;
     juce::ComboBox effectBox;

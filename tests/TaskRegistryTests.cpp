@@ -79,9 +79,9 @@ TEST_CASE ("Task targets match hierarchical prefixes and cancellation is deliver
     TaskRegistry registry;
     bool cancelled = false;
 
-    const auto pluginTask = registry.begin ("Carregando plugin", "track:3:plugin:2", 0.4,
+    const auto pluginTask = registry.begin ("Loading plugin", "track:3:plugin:2", 0.4,
                                            true, [&] { cancelled = true; });
-    const auto otherTask = registry.begin ("Outra faixa", "track:30:plugin:2");
+    const auto otherTask = registry.begin ("Another track", "track:30:plugin:2");
 
     const auto matching = registry.tasksForTarget ("track:3");
     REQUIRE (matching.size() == 1);

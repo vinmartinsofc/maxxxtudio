@@ -50,7 +50,11 @@ public:
     {
         switch (kind)
         {
-            case Kind::Decibels: return juce::String (decibelsFromNormalized (normalized), 1) + " dB";
+            case Kind::Decibels:
+            {
+                const auto decibels = decibelsFromNormalized (normalized);
+                return juce::String (std::abs (decibels) < 0.05f ? 0.0f : decibels, 1) + " dB";
+            }
             case Kind::Width: return juce::String (normalized * 200.0f, 0) + "%";
             case Kind::Balance: return juce::String (normalized * 200.0f - 100.0f, 0);
             case Kind::Percent: return juce::String (normalized * 100.0f, 0) + "%";
@@ -217,13 +221,20 @@ class NativeEffectEditor final : public juce::AudioProcessorEditor,
 {
 public:
     explicit NativeEffectEditor (UtilityProcessor& processor)
-        : juce::AudioProcessorEditor (processor), title ("Master Volume"), utility (processor)
+        : juce::AudioProcessorEditor (processor), title ("Volume Master"), utility (processor)
     {
         setSize (700, 400);
         setResizable (false, false);
         for (auto* parameter : processor.getParameters())
             if (parameter != nullptr)
             {
+                const auto* identified = dynamic_cast<const juce::AudioProcessorParameterWithID*> (parameter);
+                if (identified != nullptr
+                    && (identified->paramID == "bass_mono"
+                        || identified->paramID == "mute"
+                        || identified->paramID == "dc"))
+                    continue;
+
                 auto control = std::make_unique<Control>();
                 control->parameter = parameter;
                 control->definition = dynamic_cast<EffectParameter*> (parameter);
@@ -296,7 +307,7 @@ public:
                     auto& slider = *control->slider;
                     slider.setName (parameter->getName (64));
                     slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-                    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 76, 24);
+                    slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 76, 24);
                     slider.setRange (0.0, 1.0, 0.001);
                     slider.setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
                     slider.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border());
@@ -915,7 +926,7 @@ public:
         addAndMakeVisible (label);
 
         slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, false, 78, 22);
+        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 78, 22);
         slider.setRange (0.0, 1.0, 0.001);
         slider.setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
         slider.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border());

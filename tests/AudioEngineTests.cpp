@@ -6,6 +6,7 @@
 #include "ReferenceMasterWindow.h"
 #include "RemotePluginProcessor.h"
 #include "Theme.h"
+#include "ThemeKnobSlider.h"
 #include "WaveformDisplay.h"
 #include <algorithm>
 #include <cmath>
@@ -191,6 +192,20 @@ public:
     void getStateInformation (juce::MemoryBlock&) override {}
     void setStateInformation (const void*, int) override {}
 };
+
+bool hasEditableKnobEntry (const juce::Component& component)
+{
+    if (const auto* slider = dynamic_cast<const juce::Slider*> (&component);
+        slider != nullptr
+        && slider->getSliderStyle() == juce::Slider::RotaryHorizontalVerticalDrag
+        && slider->isTextBoxEditable())
+        return true;
+
+    for (int index = 0; index < component.getNumChildComponents(); ++index)
+        if (hasEditableKnobEntry (*component.getChildComponent (index)))
+            return true;
+    return false;
+}
 }
 
 TEST_CASE ("Red themes use red accents on their selected dark backgrounds")
@@ -244,7 +259,7 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     UtilityProcessor utility;
-    REQUIRE (utility.getName() == "Master Volume");
+    REQUIRE (utility.getName() == "Volume Master");
     REQUIRE (utility.getParameters().size() == 13);
     REQUIRE (std::any_of (utility.getParameters().begin(), utility.getParameters().end(),
         [] (const auto* parameter)
@@ -259,7 +274,7 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     REQUIRE (engine.addUtility (1) > 0);
     const auto utilityDevices = engine.devices (1);
     REQUIRE (utilityDevices.size() == 1);
-    REQUIRE (utilityDevices.front().name == "Master Volume");
+    REQUIRE (utilityDevices.front().name == "Volume Master");
     REQUIRE (utilityDevices.front().automatableParameters.size() == 13);
     const auto findParameter = [&utility] (const juce::String& id)
     {
@@ -273,6 +288,7 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     REQUIRE (gain != nullptr);
     REQUIRE (gain->getText (0.0f, 16) == "-60.0 dB");
     REQUIRE (gain->getText (5.0f / 7.0f, 16) == "0.0 dB");
+    REQUIRE (gain->getText (std::nextafter (5.0f / 7.0f, 0.0f), 16) == "0.0 dB");
     REQUIRE (gain->getText (1.0f, 16) == "24.0 dB");
     REQUIRE (gain->getValueForText ("-60 dB") == 0.0f);
     REQUIRE (std::abs (gain->getValueForText ("0 dB") - 5.0f / 7.0f) < 0.00001f);
@@ -297,7 +313,16 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     REQUIRE (utilityEditor->getWidth() == 700);
     REQUIRE (utilityEditor->getHeight() == 400);
     REQUIRE_FALSE (utilityEditor->isResizable());
-    REQUIRE (utilityEditor->getNumChildComponents() == 26);
+    REQUIRE (utilityEditor->getNumChildComponents() == 20);
+    CHECK_FALSE (hasEditableKnobEntry (*utilityEditor));
+    for (int index = 0; index < utilityEditor->getNumChildComponents(); ++index)
+        if (const auto* label = dynamic_cast<const juce::Label*> (
+                utilityEditor->getChildComponent (index)))
+        {
+            CHECK (label->getText() != "DC");
+            CHECK (label->getText() != "Mute");
+            CHECK (label->getText() != "Bass Mono");
+        }
     for (int index = 0; index < utilityEditor->getNumChildComponents(); ++index)
     {
         const auto* child = utilityEditor->getChildComponent (index);
@@ -380,6 +405,24 @@ TEST_CASE ("Volume Master exposes unified stereo and modulation controls")
     REQUIRE (std::abs (findParameterValue (priorRangeUtility, "gain") - 3.0f / 14.0f) < 0.00001f);
 }
 
+TEST_CASE ("Slider value entry selects the current value for replacement")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    ThemeKnobLookAndFeel lookAndFeel;
+    juce::Slider slider;
+    std::unique_ptr<juce::Label> textBox (lookAndFeel.createSliderTextBox (slider));
+    textBox->setText ("12.5", juce::dontSendNotification);
+    textBox->setEditable (false, true, false);
+    textBox->showEditor();
+
+    auto* editor = textBox->getCurrentTextEditor();
+    REQUIRE (editor != nullptr);
+    REQUIRE (editor->getHighlightedRegion() == juce::Range<int> (0, 4));
+    editor->setCaretPosition (2);
+    juce::MessageManager::getInstance()->runDispatchLoopUntil (10);
+    REQUIRE (editor->getHighlightedRegion() == juce::Range<int> (0, 4));
+}
+
 TEST_CASE ("Volume Master Rate reaches the high-frequency range")
 {
     UtilityProcessor processor;
@@ -420,6 +463,7 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     REQUIRE (editor != nullptr);
     REQUIRE (editor->getWidth() == 780);
     REQUIRE (editor->getHeight() == 520);
+    CHECK_FALSE (hasEditableKnobEntry (*editor));
     juce::Image editorImage (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
     juce::Graphics editorGraphics (editorImage);
     editor->paintEntireComponent (editorGraphics, true);
@@ -538,6 +582,7 @@ TEST_CASE ("EQ Master applies its eight parametric bands and restores their stat
     REQUIRE (editor != nullptr);
     REQUIRE (editor->getWidth() == 760);
     REQUIRE (editor->getHeight() == 480);
+    CHECK_FALSE (hasEditableKnobEntry (*editor));
     juce::Image editorImage (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
     juce::Graphics editorGraphics (editorImage);
     editor->paintEntireComponent (editorGraphics, true);
@@ -816,10 +861,11 @@ TEST_CASE ("Volume Master applies stereo width, shared phase inversion, and pan 
     REQUIRE (std::abs (buffer.getSample (1, 1)) < 0.0001f);
 }
 
-TEST_CASE ("Drum Rack exposes stable automatable parameters for every pad")
+TEST_CASE ("Drum Master exposes stable automatable parameters for every pad")
 {
     TemporarySampleFile sample;
     DrumRackProcessor processor;
+    REQUIRE (processor.getName() == "Drum Master");
     REQUIRE (processor.getParameters().size()
              == DrumRackProcessor::numPads * DrumRackProcessor::automatablePadParameterCount);
 
@@ -887,6 +933,56 @@ TEST_CASE ("Drum Rack editor initializes its pad controls before resizing")
     REQUIRE (DrumRackProcessor::visiblePadCount == 15);
     REQUIRE (editor->getWidth() == 900);
     REQUIRE (editor->getHeight() == 560);
+    CHECK_FALSE (hasEditableKnobEntry (*editor));
+}
+
+TEST_CASE ("Drum Master knob double-click restores each pad default")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    TemporarySampleFile sample;
+    DrumRackProcessor processor;
+    juce::String error;
+    REQUIRE (processor.loadPadFromFile (0, sample.file, error));
+    std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
+    REQUIRE (editor != nullptr);
+
+    std::array<juce::Slider*, 4> knobs {};
+    int knobCount = 0;
+    for (int index = 0; index < editor->getNumChildComponents(); ++index)
+        if (auto* slider = dynamic_cast<juce::Slider*> (editor->getChildComponent (index));
+            slider != nullptr
+            && slider->getSliderStyle() == juce::Slider::RotaryHorizontalVerticalDrag)
+        {
+            REQUIRE (knobCount < static_cast<int> (knobs.size()));
+            knobs[static_cast<std::size_t> (knobCount++)] = slider;
+        }
+    REQUIRE (knobCount == static_cast<int> (knobs.size()));
+    REQUIRE (knobs[0]->isDoubleClickReturnEnabled());
+    REQUIRE (knobs[1]->isDoubleClickReturnEnabled());
+    REQUIRE (knobs[2]->isDoubleClickReturnEnabled());
+    REQUIRE (knobs[3]->isDoubleClickReturnEnabled());
+
+    knobs[0]->setValue (2.0, juce::sendNotificationSync);
+    knobs[1]->setValue (12.0, juce::sendNotificationSync);
+    knobs[2]->setValue (200.0, juce::sendNotificationSync);
+    knobs[3]->setValue (800.0, juce::sendNotificationSync);
+    const auto now = juce::Time::getCurrentTime();
+    for (auto* slider : knobs)
+    {
+        const auto point = slider->getLocalBounds().getCentre().toFloat();
+        const juce::MouseEvent doubleClick (
+            juce::Desktop::getInstance().getMainMouseSource(), point,
+            juce::ModifierKeys::leftButtonModifier, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+            slider, slider, now, point, now, 2, false);
+        slider->mouseDoubleClick (doubleClick);
+        CHECK (slider->getValue() == slider->getDoubleClickReturnValue());
+    }
+
+    const auto settings = processor.padSettings (0);
+    CHECK (settings.gain == 1.0f);
+    CHECK (settings.pitchSemitones == 0);
+    CHECK (settings.startSample == 0);
+    CHECK (settings.endSample == processor.padSampleLength (0));
 }
 
 TEST_CASE ("Drum Rack effects process only their assigned pad")
@@ -1492,6 +1588,7 @@ TEST_CASE ("Reference Master keeps playback active after a waveform click")
         else
             visualizerShield = child;
     }
+
     REQUIRE (seekOverlay != nullptr);
     REQUIRE (seekOverlay->getWidth() > 0);
     REQUIRE (visualizerShield != nullptr);
@@ -1902,4 +1999,5 @@ TEST_CASE ("Plugin scanning runs in the isolated worker", "[integration][plugin-
     REQUIRE (outputXml->hasTagName ("KNOWNPLUGINS"));
 
 }
+
 #endif

@@ -1784,11 +1784,11 @@ MainComponent::MainComponent()
         if (deviceId <= 0)
         {
             project.cancelEdit();
-            return juce::String ("Drum Rack can only be added to a MIDI track.");
+            return juce::String ("Drum Master can only be added to a MIDI track.");
         }
         project.endEdit();
         showDetail (true);
-        return juce::String ("Drum Rack added to the selected track.");
+        return juce::String ("Drum Master added to the selected track.");
     };
     browser.onAddUtilityRequested = [this]
     {
@@ -3442,7 +3442,7 @@ void MainComponent::requestMidiLearn (int trackId, MidiMappingTarget target)
                            : target == MidiMappingTarget::TrackPan ? "Pan"
                            : target == MidiMappingTarget::TrackMute ? "Mute"
                            : target == MidiMappingTarget::TrackSolo ? "Solo"
-                           : target == MidiMappingTarget::MasterVolume ? "Master Volume"
+                           : target == MidiMappingTarget::MasterVolume ? "Volume Master"
                            : "Pan Master";
     setProjectStatus (juce::String ("MIDI Learn: move a control to ") + controlName
                       + " (CC; Mute/Solo also accept notes; Esc cancels).");
@@ -4340,7 +4340,7 @@ void MainComponent::restoreNextProjectPlugin()
             if (deviceId <= 0)
             {
                 ++missingProjectPlugins;
-                setProjectStatus ("Could not load the Drum Rack.");
+                setProjectStatus ("Could not load the Drum Master.");
             }
             else
             {
@@ -5233,7 +5233,7 @@ juce::String MainComponent::addNativeEffectToTrack (
         return "Track does not exist.";
 
     const juce::String effectName = identifier == AudioEngine::compMasterPluginIdentifier ? "Comp Master"
-        : identifier == AudioEngine::eqMasterPluginIdentifier ? "EQ Master" : "Master Volume";
+        : identifier == AudioEngine::eqMasterPluginIdentifier ? "EQ Master" : "Volume Master";
     const auto existing = engine.devices (trackId);
     if (std::any_of (existing.begin(), existing.end(), [&identifier] (const DeviceInfo& device)
         {
@@ -5263,7 +5263,7 @@ void MainComponent::addNativeDrumRackToTrack (int trackId)
     const auto* track = project.track (trackId);
     if (track == nullptr || track->type != roll::TrackType::Midi)
     {
-        browser.setStatus ("The Drum Rack can only be added to a MIDI channel.");
+        browser.setStatus ("The Drum Master can only be added to a MIDI channel.");
         return;
     }
 
@@ -5293,7 +5293,7 @@ void MainComponent::addNativeDrumRackToTrack (int trackId)
     if (deviceId <= 0)
     {
         project.cancelEdit();
-        browser.setStatus ("Could not add the Drum Rack to this channel.");
+        browser.setStatus ("Could not add the Drum Master to this channel.");
         return;
     }
 

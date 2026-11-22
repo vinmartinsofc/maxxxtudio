@@ -34,7 +34,7 @@ public:
         return normalizedFromRate (oldRate);
     }
     double modulationPhase() const { return currentLfoPhase.load (std::memory_order_relaxed); }
-    const juce::String getName() const override { return "Master Volume"; }
+    const juce::String getName() const override { return "Volume Master"; }
     void prepareToPlay (double, int) override;
     void releaseResources() override {}
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;

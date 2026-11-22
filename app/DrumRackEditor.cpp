@@ -32,7 +32,7 @@ bool isSharpPad (int pad)
 DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
     : juce::AudioProcessorEditor (owner), processor (owner)
 {
-    title.setText ("Drum Rack - 15 MIDI Keys", juce::dontSendNotification);
+    title.setText ("Drum Master - 15 MIDI Keys", juce::dontSendNotification);
     title.setJustificationType (juce::Justification::centredLeft);
     title.setColour (juce::Label::textColourId, theme::text());
     selectedPadLabel.setColour (juce::Label::textColourId, theme::text());
@@ -72,10 +72,14 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
     pitchSlider.setRange (-48.0, 48.0, 1.0);
     startSlider.setRange (0.0, 1000.0, 1.0);
     endSlider.setRange (0.0, 1000.0, 1.0);
+    gainSlider.setDoubleClickReturnValue (true, 1.0);
+    pitchSlider.setDoubleClickReturnValue (true, 0.0);
+    startSlider.setDoubleClickReturnValue (true, 0.0);
+    endSlider.setDoubleClickReturnValue (true, 1000.0);
     for (auto* slider : { &gainSlider, &pitchSlider, &startSlider, &endSlider })
     {
-        slider->setSliderStyle (juce::Slider::LinearHorizontal);
-        slider->setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 22);
+        slider->setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
+        slider->setTextBoxStyle (juce::Slider::TextBoxBelow, true, 70, 20);
     }
     bypassEffectButton.setClickingTogglesState (true);
     moveEffectUpButton.setTooltip ("Move the selected effect up one position in the chain.");
@@ -270,17 +274,23 @@ void DrumRackEditor::resized()
     moveEffectDownButton.setBounds (effectButtons.removeFromLeft (62));
     controls.removeFromTop (5);
 
-    const auto setSliderRow = [&controls] (juce::Label& label, juce::Slider& slider)
+    const auto setKnobCell = [] (juce::Rectangle<int> cell,
+                                 juce::Label& label, ThemeKnobSlider& slider)
     {
-        auto row = controls.removeFromTop (44);
-        label.setBounds (row.removeFromTop (16));
-        slider.setBounds (row);
-        controls.removeFromTop (3);
+        label.setBounds (cell.removeFromTop (18));
+        slider.setBounds (cell.reduced (4, 0));
     };
-    setSliderRow (gainLabel, gainSlider);
-    setSliderRow (pitchLabel, pitchSlider);
-    setSliderRow (startLabel, startSlider);
-    setSliderRow (endLabel, endSlider);
+    auto firstKnobRow = controls.removeFromTop (96);
+    setKnobCell (firstKnobRow.removeFromLeft (firstKnobRow.getWidth() / 2 - 2),
+                 gainLabel, gainSlider);
+    firstKnobRow.removeFromLeft (4);
+    setKnobCell (firstKnobRow, pitchLabel, pitchSlider);
+    controls.removeFromTop (4);
+    auto secondKnobRow = controls.removeFromTop (96);
+    setKnobCell (secondKnobRow.removeFromLeft (secondKnobRow.getWidth() / 2 - 2),
+                 startLabel, startSlider);
+    secondKnobRow.removeFromLeft (4);
+    setKnobCell (secondKnobRow, endLabel, endSlider);
     auto toggles = controls.removeFromTop (28);
     reverseButton.setBounds (toggles.removeFromLeft (112));
     loopButton.setBounds (toggles.removeFromLeft (100));
@@ -375,7 +385,7 @@ void DrumRackEditor::chooseSample()
             if (! safeThis->processor.loadPadFromFile (safeThis->selectedPad, file, error))
             {
                 AppModalDialog::show (
-                    *safeThis.getComponent(), "Drum Rack", error, AppModalDialog::Icon::Warning,
+                    *safeThis.getComponent(), "Drum Master", error, AppModalDialog::Icon::Warning,
                     { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
                 return;
             }
@@ -501,7 +511,7 @@ bool DrumRackEditor::loadSampleIntoPad (int pad, const juce::File& file)
     if (! processor.loadPadFromFile (pad, file, error))
     {
         AppModalDialog::show (
-            *this, "Drum Rack", error, AppModalDialog::Icon::Warning,
+            *this, "Drum Master", error, AppModalDialog::Icon::Warning,
             { { "OK", 1, AppModalDialog::ButtonStyle::Primary } });
         refreshPadLabels();
         return false;

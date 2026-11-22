@@ -59,7 +59,7 @@ public:
     bool restoreStateXml (const juce::XmlElement& xml);
     bool stateRestoreSucceeded() const { return stateRestoreSucceededFlag; }
 
-    const juce::String getName() const override { return "Drum Rack"; }
+    const juce::String getName() const override { return "Drum Master"; }
     void prepareToPlay (double, int) override;
     void releaseResources() override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;

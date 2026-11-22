@@ -103,7 +103,7 @@ public:
         removeButton.setEnabled (false);
         addAndMakeVisible (removeButton);
 
-        rescanButton.setButtonText ("Reescanear");
+        rescanButton.setButtonText ("Rescan");
         rescanButton.onClick = [this] { rescanAnalysis(); };
         rescanButton.setEnabled (false);
         addAndMakeVisible (rescanButton);
@@ -1192,7 +1192,7 @@ private:
         timeReadout.setText (formatTime (displayedPosition) + " / "
                                  + formatTime (analysis != nullptr ? analysis->durationSeconds : 0.0),
                              juce::dontSendNotification);
-        playButton.setButtonText (playing ? "Reproduzindo"
+        playButton.setButtonText (playing ? "Playing"
             : (isPaused && analysis != nullptr
                && displayedPosition < analysis->durationSeconds - 0.02 ? "Resume" : "Play"));
         playButton.setEnabled (analysis != nullptr && ! playing);

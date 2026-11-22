@@ -255,9 +255,9 @@ void BrowserPanel::NativeToolCard::paintButton (juce::Graphics& graphics,
 
 BrowserPanel::BrowserPanel (PluginScanner& s)
     : scanner (s), tree (std::make_unique<PluginTree> (*this)),
-      drumRackCard ("Drum Rack", "Drag to the desired MIDI channel",
+      drumRackCard ("Drum Master", "Drag to the desired MIDI channel",
                     "plugin:" + juce::String (DrumRackProcessor::pluginIdentifier)),
-      utilityCard ("Master Volume", theme::ui ("Volume, stereo, mono, phase, and modulation"),
+      utilityCard ("Volume Master", theme::ui ("Volume, stereo, mono, phase, and modulation"),
                    "plugin:" + juce::String ("MaXXXtudio.Utility")),
       compMasterCard ("Comp Master", "Compressor, oscilloscope, and stereo meters",
                       "plugin:MaXXXtudio.CompMaster"),
@@ -947,7 +947,7 @@ void BrowserPanel::resized()
         tabs = area.removeFromTop (24);
         const bool compactFilters = tabs.getWidth() < 360;
         instrumentsButton.setButtonText (compactFilters ? "Inst." : "Instruments");
-        effectsButton.setButtonText (compactFilters ? "Efe." : "Effects");
+        effectsButton.setButtonText (compactFilters ? "FX" : "Effects");
         favoritesButton.setButtonText (compactFilters ? "Fav." : "Favorites");
         const int gap = 3;
         const int buttonWidth = (tabs.getWidth() - gap * 3) / 4;

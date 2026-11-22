@@ -56,7 +56,7 @@ public:
         stopButton.setButtonText ("Stop");
         applyButton.setButtonText ("Apply to Clip");
         clearButton.setButtonText ("Remove Groove");
-        amountLabel.setText ("Intensidade", juce::dontSendNotification);
+        amountLabel.setText ("Intensity", juce::dontSendNotification);
         amountLabel.setColour (juce::Label::textColourId, theme::textDim());
         statusLabel.setColour (juce::Label::textColourId, theme::textDim());
         statusLabel.setJustificationType (juce::Justification::centredLeft);
