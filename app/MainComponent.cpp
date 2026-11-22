@@ -5411,7 +5411,7 @@ void MainComponent::updateActionIndicator()
 
 void MainComponent::openDeviceEditor (int trackId, int deviceId)
 {
-    std::vector<std::pair<int, juce::String>> sidechainSources { { -1, "Internal" } };
+    std::vector<std::pair<int, juce::String>> sidechainSources { { -1, "None" } };
     if (trackId != 0 && engine.canUseCompMasterSidechainSource (trackId, 0))
         sidechainSources.emplace_back (0, "Master");
     for (const auto& track : project.tracks)

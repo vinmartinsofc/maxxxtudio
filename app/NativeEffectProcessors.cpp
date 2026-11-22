@@ -928,11 +928,25 @@ public:
         {
             return target != nullptr ? target->getValueForText (text) : 0.0;
         };
-        slider.onDragStart = [this] { if (target != nullptr) target->beginChangeGesture(); };
-        slider.onDragEnd = [this] { if (target != nullptr) target->endChangeGesture(); };
+        slider.onDragStart = [this]
+        {
+            if (onGestureStarted != nullptr)
+                onGestureStarted();
+            else if (target != nullptr)
+                target->beginChangeGesture();
+        };
+        slider.onDragEnd = [this]
+        {
+            if (onGestureEnded != nullptr)
+                onGestureEnded();
+            else if (target != nullptr)
+                target->endChangeGesture();
+        };
         slider.onValueChange = [this]
         {
-            if (target != nullptr)
+            if (onValueChanged != nullptr)
+                onValueChanged (static_cast<float> (slider.getValue()));
+            else if (target != nullptr)
                 target->setValue (static_cast<float> (slider.getValue()));
         };
         addAndMakeVisible (slider);
@@ -953,6 +967,9 @@ public:
         if (target != nullptr)
             slider.setValue (target->getValue(), juce::dontSendNotification);
     }
+
+    std::function<void (float)> onValueChanged;
+    std::function<void()> onGestureStarted, onGestureEnded;
 
     void resized() override
     {
@@ -1112,7 +1129,7 @@ public:
     explicit CompMasterEditor (CompMasterProcessor& processor)
         : juce::AudioProcessorEditor (processor), compressor (processor)
     {
-        setSize (900, 600);
+        setSize (780, 520);
         setResizable (false, false);
         for (int index = 0; index < 6; ++index)
         {
@@ -1150,28 +1167,22 @@ public:
             button->setColour (juce::TextButton::textColourOffId, theme::text());
             addAndMakeVisible (*button);
         }
-        zoomOut.onClick = [this] { zoomFactor = std::max (1, zoomFactor / 2); repaint(); };
-        zoomIn.onClick = [this] { zoomFactor = std::min (32, zoomFactor * 2); repaint(); };
+        zoomOut.onClick = [this] { zoomFactor = std::max (1.0, zoomFactor / 2.0); repaint(); };
+        zoomIn.onClick = [this] { zoomFactor = std::min (32.0, zoomFactor * 2.0); repaint(); };
 
-        bypass.setButtonText ("Bypass");
-        bypass.setClickingTogglesState (true);
-        bypass.setColour (juce::TextButton::buttonColourId, theme::control());
-        bypass.setColour (juce::TextButton::buttonOnColourId, theme::recording());
-        bypass.setColour (juce::TextButton::textColourOffId, theme::text());
-        bypass.setColour (juce::TextButton::textColourOnId, theme::text());
-        bypass.onClick = [this]
+        bypass.setVisible (false);
+        ab.setVisible (false);
+        resetButton.setButtonText ("Reset");
+        resetButton.setTooltip ("Reset the waveform history and peak hold");
+        resetButton.setColour (juce::TextButton::buttonColourId, theme::control());
+        resetButton.setColour (juce::TextButton::textColourOffId, theme::text());
+        resetButton.onClick = [this]
         {
-            auto* parameter = compressor.getParameters()[8];
-            parameter->beginChangeGesture();
-            parameter->setValue (bypass.getToggleState() ? 1.0f : 0.0f);
-            parameter->endChangeGesture();
+            compressor.resetVisualization();
+            waveform.clear();
         };
-        addAndMakeVisible (bypass);
-        ab.setButtonText ("A");
-        ab.setColour (juce::TextButton::buttonColourId, theme::control());
-        ab.setColour (juce::TextButton::textColourOffId, theme::text());
-        ab.onClick = [this] { compressor.selectABState (1 - compressor.activeABSlot()); };
-        addAndMakeVisible (ab);
+        addAndMakeVisible (resetButton);
+        resized();
         startTimerHz (30);
     }
 
@@ -1192,15 +1203,18 @@ public:
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText ("SIDECHAIN SOURCE", sourceRow.removeFromLeft (126),
                     juce::Justification::centredLeft, true);
-        auto scope = area.removeFromTop (260).toFloat();
+        auto scope = scopeBounds().toFloat();
         g.setColour (juce::Colour (0xff161616));
         g.fillRoundedRectangle (scope, 5.0f);
         g.setColour (theme::border());
         g.drawRoundedRectangle (scope, 5.0f, 1.0f);
         drawScope (g, scope);
-        g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (10.0f));
-        g.drawText ("SIDECHAIN FILTER RANGE", area.removeFromTop (20),
+        auto footer = area.removeFromTop (24);
+        footer.removeFromRight (84);
+        const bool clipping = compressor.outputPeakHold() >= 1.0f;
+        g.setColour (clipping ? theme::recording() : theme::textDim());
+        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.drawText ("MAX OUTPUT  " + peakHoldText() + (clipping ? "   CLIP" : ""), footer,
                     juce::Justification::centredLeft, true);
     }
 
@@ -1208,27 +1222,53 @@ public:
     {
         auto area = getLocalBounds().reduced (16);
         auto header = area.removeFromTop (38);
-        bypass.setBounds (header.removeFromRight (92).reduced (2, 4));
-        ab.setBounds (header.removeFromRight (44).reduced (2, 4));
+        bypass.setVisible (false);
+        ab.setVisible (false);
         auto sourceRow = area.removeFromTop (32);
         sourceRow.removeFromLeft (126);
         sourceBox.setBounds (sourceRow.removeFromLeft (280).reduced (2, 2));
         sourceRow.removeFromLeft (8);
         zoomOut.setBounds (sourceRow.removeFromRight (30).reduced (2, 2));
         zoomIn.setBounds (sourceRow.removeFromRight (30).reduced (2, 2));
-        area.removeFromTop (260);
-        area.removeFromTop (20);
-        const int sidechainWidth = 120;
-        const int controlWidth = (area.getWidth() - sidechainWidth * 2 - 8) / 6;
+        area.removeFromTop (200);
+        auto footer = area.removeFromTop (24);
+        resetButton.setBounds (footer.removeFromRight (80).reduced (1));
+        area.removeFromTop (4);
+        auto controlsRow = area.removeFromTop (130);
+        const int sidechainWidth = 96;
+        const int gap = 8;
+        const int controlWidth = (controlsRow.getWidth() - sidechainWidth * 2 - gap * 7) / 6;
         const int count = static_cast<int> (controls.size());
         for (int index = 0; index < count; ++index)
         {
+            auto cell = controlsRow.removeFromLeft (controlWidth);
             controls[static_cast<std::size_t> (index)]->setBounds (
-                area.removeFromLeft (controlWidth));
+                cell.withSizeKeepingCentre (82, controlsRow.getHeight()));
+            if (index + 1 < count)
+                controlsRow.removeFromLeft (gap);
         }
-        area.removeFromLeft (8);
+        controlsRow.removeFromLeft (gap);
         for (auto& control : sidechainControls)
-            control->setBounds (area.removeFromLeft (sidechainWidth));
+        {
+            auto cell = controlsRow.removeFromLeft (sidechainWidth);
+            control->setBounds (cell.withSizeKeepingCentre (82, controlsRow.getHeight()));
+            if (control != sidechainControls.back())
+                controlsRow.removeFromLeft (gap);
+        }
+    }
+
+    void mouseWheelMove (const juce::MouseEvent& event,
+                         const juce::MouseWheelDetails& wheel) override
+    {
+        if (event.mods.isCtrlDown() && scopeBounds().toFloat().contains (event.position))
+        {
+            zoomFactor = juce::jlimit (1.0, 32.0,
+                zoomFactor * std::pow (1.2, static_cast<double> (wheel.deltaY) * 4.0));
+            repaint();
+            return;
+        }
+
+        juce::AudioProcessorEditor::mouseWheelMove (event, wheel);
     }
 
 private:
@@ -1263,6 +1303,14 @@ private:
         return sources.empty() ? 0 : 1;
     }
 
+    juce::String peakHoldText() const
+    {
+        const float peak = compressor.outputPeakHold();
+        return peak > 0.000001f
+            ? juce::String (juce::Decibels::gainToDecibels (peak), 1) + " dBFS"
+            : "-inf dBFS";
+    }
+
     void drawScope (juce::Graphics& g, juce::Rectangle<float> scope)
     {
         auto content = scope.reduced (9.0f, 8.0f);
@@ -1270,29 +1318,34 @@ private:
         auto graph = content.reduced (30.0f, 0.0f);
         const float centreY = graph.getCentreY();
         const float halfHeight = graph.getHeight() * 0.5f;
-        static constexpr std::array<float, 5> dbMarks { -12.0f, -6.0f, -4.0f, -2.0f, 0.0f };
+        static constexpr std::array<float, 6> dbMarks {
+            0.0f, -3.0f, -6.0f, -12.0f, -18.0f, -60.0f
+        };
         g.setFont (juce::FontOptions (8.5f));
         for (const float db : dbMarks)
         {
             const float amplitude = juce::Decibels::decibelsToGain (db);
             const float offset = amplitude * halfHeight;
-            g.setColour (db == 0.0f ? theme::textDim().withAlpha (0.65f)
-                                     : theme::border().withAlpha (0.45f));
+            g.setColour (db == 0.0f ? theme::textDim().withAlpha (0.72f)
+                                     : theme::border().withAlpha (0.5f));
             g.drawHorizontalLine (juce::roundToInt (centreY - offset), graph.getX(), graph.getRight());
             g.drawHorizontalLine (juce::roundToInt (centreY + offset), graph.getX(), graph.getRight());
             g.setColour (theme::textDim());
-            g.drawText (juce::String (static_cast<int> (db)),
+            const auto label = db <= -60.0f ? "-inf" : juce::String (static_cast<int> (db));
+            g.drawText (label,
                         juce::Rectangle<float> (scope.getX() + 2.0f, centreY - offset - 6.0f,
                                                 25.0f, 12.0f),
                         juce::Justification::centredLeft);
-            g.drawText (juce::String (static_cast<int> (db)),
-                        juce::Rectangle<float> (graph.getRight() + 3.0f, centreY + offset - 6.0f,
-                                                25.0f, 12.0f),
-                        juce::Justification::centredRight);
+            if (db > -60.0f)
+                g.drawText (label,
+                            juce::Rectangle<float> (scope.getX() + 2.0f, centreY + offset - 6.0f,
+                                                    25.0f, 12.0f),
+                            juce::Justification::centredLeft);
         }
 
         const int count = static_cast<int> (waveform.size());
-        const int visibleCount = count > 0 ? std::max (1, count / zoomFactor) : 0;
+        const int visibleCount = count > 0
+            ? std::max (1, juce::roundToInt (static_cast<double> (count) / zoomFactor)) : 0;
         const int start = std::max (0, count - visibleCount);
         juce::Path reductionLine;
         if (visibleCount > 0)
@@ -1313,7 +1366,13 @@ private:
                 const float x = graph.getX() + static_cast<float> (pixel);
                 const float top = centreY - juce::jlimit (0.0f, 1.0f, maximum) * halfHeight;
                 const float bottom = centreY - juce::jlimit (-1.0f, 0.0f, minimum) * halfHeight;
-                g.setColour (theme::accent().withAlpha (0.88f));
+                const float amplitude = juce::jlimit (0.0f, 1.0f,
+                    std::max (std::abs (minimum), std::abs (maximum)));
+                const auto waveformColour = juce::Colour (0xffa45bff)
+                    .brighter (amplitude * 0.25f);
+                g.setColour (waveformColour.withAlpha (0.24f));
+                g.fillRect (x - 0.5f, top - 1.0f, 2.5f, std::max (2.0f, bottom - top + 2.0f));
+                g.setColour (waveformColour);
                 g.fillRect (x, top, 1.5f, std::max (1.0f, bottom - top));
                 const float grY = centreY + juce::jlimit (0.0f, 1.0f, reduction / 12.0f) * halfHeight;
                 if (pixel == 0)
@@ -1347,11 +1406,12 @@ private:
         g.setFont (juce::FontOptions (8.0f));
         g.drawText (juce::String (reduction, 1), grArea.withY (grArea.getBottom() - 14.0f)
                     .withHeight (12.0f), juce::Justification::centred);
-        drawLevelMeter (g, meters, compressor.outputPeak (0), compressor.outputPeak (1));
+        drawLevelMeter (g, meters, compressor.outputPeak (0), compressor.outputPeak (1),
+                        compressor.outputPeakHold());
     }
 
     static void drawLevelMeter (juce::Graphics& g, juce::Rectangle<float> area,
-                                float left, float right)
+                                float left, float right, float peakHold = -1.0f)
     {
         const float top = area.getY() + 5.0f;
         const float height = area.getHeight() - 23.0f;
@@ -1366,7 +1426,22 @@ private:
             const float fill = juce::jlimit (0.0f, 1.0f, (db + 48.0f) / 48.0f) * height;
             g.setColour (db > -6.0f ? theme::warning() : theme::accent());
             g.fillRect (x, top + height - fill, 7.0f, fill);
+            if (peakHold > 0.000001f)
+            {
+                const float heldDb = juce::Decibels::gainToDecibels (peakHold);
+                const float heldY = top + height
+                    - juce::jlimit (0.0f, 1.0f, (heldDb + 48.0f) / 48.0f) * height;
+                g.setColour (heldDb >= 0.0f ? theme::recording() : theme::text());
+                g.drawHorizontalLine (juce::roundToInt (heldY), x - 1.0f, x + 8.0f);
+            }
         }
+    }
+
+    juce::Rectangle<int> scopeBounds() const
+    {
+        auto area = getLocalBounds().reduced (16);
+        area.removeFromTop (38 + 32);
+        return area.removeFromTop (200);
     }
 
     void timerCallback() override
@@ -1377,9 +1452,8 @@ private:
             control->refresh();
         for (auto& control : sidechainControls)
             control->refresh();
-        bypass.setToggleState (compressor.getParameters()[8]->getValue() >= 0.5f,
-                               juce::dontSendNotification);
-        ab.setButtonText (compressor.activeABSlot() == 0 ? "A" : "B");
+        bypass.setVisible (false);
+        ab.setVisible (false);
         sourceBox.setSelectedId (selectedSourceItem(), juce::dontSendNotification);
         waveform.resize (static_cast<std::size_t> (CompMasterProcessor::scopeBufferSize));
         const int count = compressor.copyScopeSnapshot (
@@ -1394,8 +1468,8 @@ private:
     std::vector<CompMasterProcessor::ScopeColumn> waveform;
     std::vector<CompMasterProcessor::SidechainSource> sourceOptionsCache;
     juce::ComboBox sourceBox;
-    juce::TextButton zoomIn, zoomOut, bypass, ab;
-    int zoomFactor = 1;
+    juce::TextButton zoomIn, zoomOut, bypass, ab, resetButton;
+    double zoomFactor = 1.0;
 };
 
 class EqMasterEditor final : public juce::AudioProcessorEditor, private juce::Timer
@@ -1404,8 +1478,9 @@ public:
     explicit EqMasterEditor (EqMasterProcessor& processor)
         : juce::AudioProcessorEditor (processor), equalizer (processor), fft (11)
     {
-        setSize (850, 560);
+        setSize (760, 480);
         setResizable (false, false);
+        selectedBands[0] = true;
 
         for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
         {
@@ -1421,6 +1496,8 @@ public:
             button.onClick = [this, band]
             {
                 selectedBand = band;
+                selectedBands.fill (false);
+                selectedBands[static_cast<std::size_t> (band)] = true;
                 bandButtons[static_cast<std::size_t> (band)].setToggleState (
                     true, juce::dontSendNotification);
                 refreshSelectedBand();
@@ -1438,8 +1515,24 @@ public:
             if (auto* parameter = selectedParameter (0))
             {
                 parameter->beginChangeGesture();
-                parameter->setValue (enabled.getToggleState() ? 1.0f : 0.0f);
+                const bool bandEnabled = enabled.getToggleState();
+                parameter->setValue (bandEnabled ? 1.0f : 0.0f);
                 parameter->endChangeGesture();
+                selectedBands[static_cast<std::size_t> (selectedBand)] = bandEnabled;
+                if (! bandEnabled)
+                {
+                    for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+                        if (selectedBands[static_cast<std::size_t> (band)]
+                            && isBandEnabled (band))
+                        {
+                            selectedBand = band;
+                            break;
+                        }
+                }
+                if (selectedBand < EqMasterProcessor::bandCount)
+                    bandButtons[static_cast<std::size_t> (selectedBand)].setToggleState (
+                        true, juce::dontSendNotification);
+                refreshSelectedBand();
                 repaint();
             }
         };
@@ -1496,28 +1589,20 @@ public:
         analyzerMode.setColour (juce::ComboBox::outlineColourId, theme::border());
         addAndMakeVisible (analyzerMode);
 
-        bypass.setButtonText ("Bypass");
-        bypass.setClickingTogglesState (true);
-        bypass.setColour (juce::TextButton::buttonColourId, theme::control());
-        bypass.setColour (juce::TextButton::buttonOnColourId, theme::recording());
-        bypass.setColour (juce::TextButton::textColourOffId, theme::text());
-        bypass.setColour (juce::TextButton::textColourOnId, theme::text());
-        bypass.onClick = [this]
+        resetAnalyzerButton.setButtonText ("Reset");
+        resetAnalyzerButton.setTooltip ("Reset the spectrum peak hold");
+        resetAnalyzerButton.setColour (juce::TextButton::buttonColourId, theme::control());
+        resetAnalyzerButton.setColour (juce::TextButton::textColourOffId, theme::text());
+        resetAnalyzerButton.onClick = [this]
         {
-            auto* parameter = parameterWithId (equalizer, "bypass");
-            if (parameter != nullptr)
-            {
-                parameter->beginChangeGesture();
-                parameter->setValue (bypass.getToggleState() ? 1.0f : 0.0f);
-                parameter->endChangeGesture();
-            }
+            equalizer.resetAnalyzer();
+            analyzerPeakMagnitudes.fill (0.0f);
+            repaint();
         };
-        addAndMakeVisible (bypass);
-        ab.setButtonText ("A");
-        ab.setColour (juce::TextButton::buttonColourId, theme::control());
-        ab.setColour (juce::TextButton::textColourOffId, theme::text());
-        ab.onClick = [this] { equalizer.selectABState (1 - equalizer.activeABSlot()); };
-        addAndMakeVisible (ab);
+        addAndMakeVisible (resetAnalyzerButton);
+
+        bypass.setVisible (false);
+        ab.setVisible (false);
 
         for (int offset = 1; offset <= 3; ++offset)
         {
@@ -1525,7 +1610,32 @@ public:
             addAndMakeVisible (*control);
             controls.push_back (std::move (control));
         }
+        controls.front()->onGestureStarted = [this]
+        {
+            const bool hasSelection = hasEnabledSelection();
+            for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+                if (isBandEnabled (band)
+                    && (selectedBands[static_cast<std::size_t> (band)]
+                        || (! hasSelection && band == selectedBand)))
+                    if (auto* frequency = bandParameter (band, 1))
+                        frequency->beginChangeGesture();
+        };
+        controls.front()->onGestureEnded = [this]
+        {
+            const bool hasSelection = hasEnabledSelection();
+            for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+                if (isBandEnabled (band)
+                    && (selectedBands[static_cast<std::size_t> (band)]
+                        || (! hasSelection && band == selectedBand)))
+                    if (auto* frequency = bandParameter (band, 1))
+                        frequency->endChangeGesture();
+        };
+        controls.front()->onValueChanged = [this] (float value)
+        {
+            setSelectedFrequenciesFromKnob (value);
+        };
         refreshSelectedBand();
+        resized();
         startTimerHz (30);
     }
 
@@ -1541,21 +1651,20 @@ public:
 
         auto bounds = getLocalBounds().reduced (18);
         bounds.removeFromTop (42);
-        auto graph = bounds.removeFromTop (270).toFloat().reduced (10.0f, 8.0f);
+        auto graph = bounds.removeFromTop (220).toFloat().reduced (10.0f, 8.0f);
         drawResponseGraph (g, graph);
     }
 
     void resized() override
     {
         auto header = getLocalBounds().reduced (18).removeFromTop (36);
-        bypass.setBounds (header.removeFromRight (88).reduced (2, 4));
-        ab.setBounds (header.removeFromRight (44).reduced (2, 4));
         channelMode.setBounds (header.removeFromRight (125).reduced (2, 4));
         analyzerMode.setBounds (header.removeFromRight (145).reduced (2, 4));
+        resetAnalyzerButton.setBounds (header.removeFromRight (76).reduced (2, 4));
 
         auto area = getLocalBounds().reduced (18);
         area.removeFromTop (42);
-        area.removeFromTop (270);
+        area.removeFromTop (220);
         area.removeFromTop (6);
         auto selectors = area.removeFromTop (30);
         const int buttonWidth = selectors.getWidth() / EqMasterProcessor::bandCount;
@@ -1566,17 +1675,18 @@ public:
                 x, selectors.getY(), bandWidth (selectors, band, buttonWidth), selectors.getHeight());
         }
         area.removeFromTop (6);
-        enabled.setBounds (area.removeFromLeft (112).removeFromTop (26));
-        area.removeFromLeft (4);
-        const int controlWidth = 105;
+        auto controlsRow = area.removeFromTop (96);
+        enabled.setBounds (controlsRow.removeFromLeft (112).removeFromTop (26));
+        controlsRow.removeFromLeft (4);
+        const int controlWidth = 78;
         for (auto& control : controls)
         {
-            control->setBounds (area.removeFromLeft (controlWidth));
-            area.removeFromLeft (2);
+            control->setBounds (controlsRow.removeFromLeft (controlWidth));
+            controlsRow.removeFromLeft (2);
         }
-        const int comboWidth = area.getWidth() / 2;
-        type.setBounds (area.removeFromLeft (comboWidth).removeFromTop (28));
-        slope.setBounds (area.removeFromLeft (area.getWidth()).removeFromTop (28));
+        const int comboWidth = std::max (140, controlsRow.getWidth() / 2);
+        type.setBounds (controlsRow.removeFromLeft (comboWidth).removeFromTop (28));
+        slope.setBounds (controlsRow.removeFromLeft (controlsRow.getWidth()).removeFromTop (28));
     }
 
     void mouseDown (const juce::MouseEvent& event) override
@@ -1585,11 +1695,17 @@ public:
         if (! graph.contains (event.position))
             return;
 
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+            if (! isBandEnabled (band))
+                selectedBands[static_cast<std::size_t> (band)] = false;
+
         const auto point = event.position;
         float nearestDistance = 18.0f;
         int nearestBand = -1;
         for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
         {
+            if (! isBandEnabled (band))
+                continue;
             const auto frequency = parameterPhysicalValue (band, 1);
             const auto typeIndex = std::clamp (static_cast<int> (std::round (
                 parameterWithId (equalizer, "band" + juce::String (band + 1)
@@ -1605,38 +1721,134 @@ public:
             }
         }
         if (nearestBand < 0)
+        {
+            marqueeFrom = point;
+            marqueeTo = point;
+            selectingMarquee = true;
+            if (! event.mods.isShiftDown())
+                selectedBands.fill (false);
             return;
+        }
+
+        if (event.mods.isShiftDown())
+        {
+            selectedBands[static_cast<std::size_t> (nearestBand)] =
+                ! selectedBands[static_cast<std::size_t> (nearestBand)];
+        }
+        else if (! selectedBands[static_cast<std::size_t> (nearestBand)])
+        {
+            selectedBands.fill (false);
+            selectedBands[static_cast<std::size_t> (nearestBand)] = true;
+        }
 
         selectedBand = nearestBand;
-        bandButtons[static_cast<std::size_t> (selectedBand)].setToggleState (
-            true, juce::dontSendNotification);
+        int selectedCount = 0;
+        for (const bool selected : selectedBands)
+            if (selected)
+                ++selectedCount;
+        if (selectedCount == 1)
+            bandButtons[static_cast<std::size_t> (selectedBand)].setToggleState (
+                true, juce::dontSendNotification);
         refreshSelectedBand();
         draggingNode = true;
-        if (auto* frequency = selectedParameter (1))
-            frequency->beginChangeGesture();
-        if (auto* gain = selectedParameter (2))
-            gain->beginChangeGesture();
-        updateSelectedNode (point, graph);
+        dragStart = point;
+        dragStartFrequency.fill (0.0f);
+        dragStartGain.fill (0.0f);
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+            if (selectedBands[static_cast<std::size_t> (band)])
+            {
+                if (! isBandEnabled (band))
+                    continue;
+                dragStartFrequency[static_cast<std::size_t> (band)] =
+                    static_cast<float> (parameterPhysicalValue (band, 1));
+                dragStartGain[static_cast<std::size_t> (band)] =
+                    static_cast<float> (parameterPhysicalValue (band, 2));
+                if (auto* frequency = bandParameter (band, 1))
+                    frequency->beginChangeGesture();
+                if (auto* gain = bandParameter (band, 2))
+                    gain->beginChangeGesture();
+            }
+        updateSelectedNodes (point, graph);
     }
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
-        if (draggingNode)
-            updateSelectedNode (event.position, responseGraphBounds());
+        const auto graph = responseGraphBounds();
+        if (selectingMarquee)
+        {
+            marqueeTo = event.position;
+            updateMarqueeSelection (graph);
+            repaint();
+        }
+        else if (draggingNode)
+            updateSelectedNodes (event.position, graph);
     }
 
     void mouseUp (const juce::MouseEvent&) override
     {
-        if (! draggingNode)
-            return;
-        if (auto* frequency = selectedParameter (1))
-            frequency->endChangeGesture();
-        if (auto* gain = selectedParameter (2))
-            gain->endChangeGesture();
+        if (draggingNode)
+        {
+            for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+                if (selectedBands[static_cast<std::size_t> (band)])
+                {
+                    if (! isBandEnabled (band))
+                        continue;
+                    if (auto* frequency = bandParameter (band, 1))
+                        frequency->endChangeGesture();
+                    if (auto* gain = bandParameter (band, 2))
+                        gain->endChangeGesture();
+                }
+        }
         draggingNode = false;
+        selectingMarquee = false;
+        marqueeFrom = {};
+        marqueeTo = {};
+        repaint();
     }
 
 private:
+    juce::Rectangle<float> marqueeRectangle() const
+    {
+        return juce::Rectangle<float>::leftTopRightBottom (
+            std::min (marqueeFrom.x, marqueeTo.x),
+            std::min (marqueeFrom.y, marqueeTo.y),
+            std::max (marqueeFrom.x, marqueeTo.x),
+            std::max (marqueeFrom.y, marqueeTo.y));
+    }
+
+    void updateMarqueeSelection (juce::Rectangle<float> graph)
+    {
+        const auto rectangle = marqueeRectangle();
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        {
+            if (! isBandEnabled (band))
+            {
+                selectedBands[static_cast<std::size_t> (band)] = false;
+                continue;
+            }
+            const auto frequency = parameterPhysicalValue (band, 1);
+            const auto typeIndex = std::clamp (static_cast<int> (std::round (
+                parameterWithId (equalizer, "band" + juce::String (band + 1)
+                                 + "_type")->getValue() * 3.0f)), 0, 3);
+            const auto gain = typeIndex == 0 ? parameterPhysicalValue (band, 2) : 0.0;
+            const juce::Point<float> point (
+                graphXForFrequency (graph, frequency), graphYForGain (graph, gain));
+            selectedBands[static_cast<std::size_t> (band)] = rectangle.contains (point);
+        }
+        int firstSelected = -1;
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+            if (selectedBands[static_cast<std::size_t> (band)])
+            {
+                firstSelected = band;
+                break;
+            }
+        if (firstSelected >= 0)
+        {
+            selectedBand = firstSelected;
+            refreshSelectedBand();
+        }
+    }
+
     static int bandWidth (juce::Rectangle<int> area, int band, int nominalWidth)
     {
         return band + 1 == EqMasterProcessor::bandCount
@@ -1646,6 +1858,20 @@ private:
     juce::AudioProcessorParameter* selectedParameter (int offset) const
     {
         return bandParameter (selectedBand, offset);
+    }
+
+    bool isBandEnabled (int band) const
+    {
+        const auto* parameter = bandParameter (band, 0);
+        return parameter != nullptr && parameter->getValue() >= 0.5f;
+    }
+
+    bool hasEnabledSelection() const
+    {
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+            if (selectedBands[static_cast<std::size_t> (band)] && isBandEnabled (band))
+                return true;
+        return false;
     }
 
     double parameterPhysicalValue (int band, int offset) const
@@ -1680,6 +1906,32 @@ private:
         slope.setSelectedId (static_cast<int> (std::round (
             selectedParameter (5)->getValue() * 2.0f)) + 1, juce::dontSendNotification);
         slope.setEnabled (filterType == 1 || filterType == 2);
+    }
+
+    void setSelectedFrequenciesFromKnob (float normalizedFrequency)
+    {
+        const double targetFrequency = 20.0 * std::pow (1000.0,
+            static_cast<double> (normalizedFrequency));
+        const double currentFrequency = parameterPhysicalValue (selectedBand, 1);
+        if (currentFrequency <= 0.0)
+            return;
+
+        const double ratio = targetFrequency / currentFrequency;
+        const bool hasEnabledBands = hasEnabledSelection();
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        {
+            if (! isBandEnabled (band)
+                || (! selectedBands[static_cast<std::size_t> (band)]
+                    && (hasEnabledBands || band != selectedBand)))
+                continue;
+            const double frequency = juce::jlimit (
+                20.0, 20000.0, parameterPhysicalValue (band, 1) * ratio);
+            if (auto* parameter = bandParameter (band, 1))
+                parameter->setValue (static_cast<float> (
+                    std::log (frequency / 20.0) / std::log (1000.0)));
+        }
+        refreshSelectedBand();
+        repaint();
     }
 
     int currentFilterType() const
@@ -1733,7 +1985,7 @@ private:
     {
         auto bounds = getLocalBounds().reduced (18);
         bounds.removeFromTop (42);
-        return bounds.removeFromTop (270).toFloat().reduced (10.0f, 8.0f);
+        return bounds.removeFromTop (220).toFloat().reduced (10.0f, 8.0f);
     }
 
     static float graphXForFrequency (juce::Rectangle<float> graph, double frequency)
@@ -1757,12 +2009,48 @@ private:
         if (auto* parameter = selectedParameter (1))
             parameter->setValue (static_cast<float> (
                 std::log (frequency / 20.0f) / std::log (1000.0f)));
-        if (currentFilterType() == 0)
+        const int filterType = std::clamp (static_cast<int> (std::round (
+            selectedParameter (4)->getValue() * 3.0f)), 0, 3);
+        if (filterType == 0)
         {
             const float gain = (graph.getCentreY() - y) / (graph.getHeight() * 0.5f) * 18.0f;
             if (auto* parameter = selectedParameter (2))
                 parameter->setValue ((gain + 18.0f) / 36.0f);
         }
+        for (auto& control : controls)
+            control->refresh();
+        repaint();
+    }
+
+    void updateSelectedNodes (juce::Point<float> point, juce::Rectangle<float> graph)
+    {
+        const float deltaX = (point.x - dragStart.x) / graph.getWidth();
+        const float deltaY = (point.y - dragStart.y) / (graph.getHeight() * 0.5f);
+        for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        {
+            if (! selectedBands[static_cast<std::size_t> (band)] || ! isBandEnabled (band))
+                continue;
+
+            const double initialFrequency = juce::jlimit (
+                20.0, 20000.0,
+                static_cast<double> (dragStartFrequency[static_cast<std::size_t> (band)]));
+            const double frequency = juce::jlimit (
+                20.0, 20000.0,
+                initialFrequency * std::pow (1000.0, deltaX));
+            if (auto* frequencyParameter = bandParameter (band, 1))
+                frequencyParameter->setValue (static_cast<float> (
+                    std::log (frequency / 20.0) / std::log (1000.0)));
+
+            if (currentFilterType() == 0)
+            {
+                const float gain = juce::jlimit (
+                    -18.0f, 18.0f,
+                    dragStartGain[static_cast<std::size_t> (band)] - deltaY * 18.0f);
+                if (auto* gainParameter = bandParameter (band, 2))
+                    gainParameter->setValue ((gain + 18.0f) / 36.0f);
+            }
+        }
+        refreshSelectedBand();
         for (auto& control : controls)
             control->refresh();
         repaint();
@@ -1850,6 +2138,8 @@ private:
 
         for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
         {
+            if (! isBandEnabled (band))
+                continue;
             const auto frequency = parameterPhysicalValue (band, 1);
             const auto* filterType = parameterWithId (
                 equalizer, "band" + juce::String (band + 1) + "_type");
@@ -1857,20 +2147,30 @@ private:
                 ? parameterPhysicalValue (band, 2) : 0.0;
             const auto centre = juce::Point<float> (
                 graphXForFrequency (graph, frequency), graphYForGain (graph, gain));
-            const bool enabledBand = parameterWithId (
-                equalizer, "band" + juce::String (band + 1) + "_enabled")->getValue() >= 0.5f;
-            const auto color = enabledBand ? theme::accent() : theme::textDim();
-            g.setColour (color);
-            g.fillEllipse (juce::Rectangle<float> (centre.x - (band == selectedBand ? 6.0f : 4.0f),
-                                                   centre.y - (band == selectedBand ? 6.0f : 4.0f),
-                                                   band == selectedBand ? 12.0f : 8.0f,
-                                                   band == selectedBand ? 12.0f : 8.0f));
+            const bool isSelected = selectedBands[static_cast<std::size_t> (band)];
+            g.setColour (theme::accent());
+            g.fillEllipse (juce::Rectangle<float> (centre.x - (isSelected ? 6.0f : 4.0f),
+                                                   centre.y - (isSelected ? 6.0f : 4.0f),
+                                                   isSelected ? 12.0f : 8.0f,
+                                                   isSelected ? 12.0f : 8.0f));
+            if (isSelected)
+            {
+                g.setColour (theme::text().withAlpha (0.85f));
+                g.drawEllipse (juce::Rectangle<float> (centre.x - 9.0f, centre.y - 9.0f, 18.0f, 18.0f), 1.5f);
+            }
             g.setColour (theme::text());
             g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
             g.drawText (juce::String (band + 1),
                         juce::Rectangle<int> (juce::roundToInt (centre.x + 5.0f),
                                                juce::roundToInt (centre.y - 17.0f), 18, 14),
                         juce::Justification::centred);
+        }
+        if (selectingMarquee)
+        {
+            g.setColour (theme::accent().withAlpha (0.12f));
+            g.fillRect (marqueeRectangle());
+            g.setColour (theme::accent());
+            g.drawRect (marqueeRectangle(), 1.0f);
         }
     }
 
@@ -1883,10 +2183,8 @@ private:
         if (auto* analyzer = parameterWithId (equalizer, "analyzer_mode"))
             analyzerMode.setSelectedId (static_cast<int> (std::round (analyzer->getValue())) + 1,
                                         juce::dontSendNotification);
-        if (auto* parameter = parameterWithId (equalizer, "bypass"))
-            bypass.setToggleState (parameter->getValue() >= 0.5f,
-                                   juce::dontSendNotification);
-        ab.setButtonText (equalizer.activeABSlot() == 0 ? "A" : "B");
+        bypass.setVisible (false);
+        ab.setVisible (false);
         updateAnalyzer();
         repaint();
     }
@@ -1909,14 +2207,29 @@ private:
         }
         fft.performFrequencyOnlyForwardTransform (fftData.data());
         for (int bin = 0; bin <= EqMasterProcessor::analyzerBufferSize / 2; ++bin)
-            analyzerMagnitudes[static_cast<std::size_t> (bin)] =
+        {
+            const auto index = static_cast<std::size_t> (bin);
+            analyzerMagnitudes[index] =
                 fftData[static_cast<std::size_t> (bin)]
                 / static_cast<float> (EqMasterProcessor::analyzerBufferSize / 2);
+            analyzerPeakMagnitudes[index] = std::max (
+                analyzerMagnitudes[index], analyzerPeakMagnitudes[index] * 0.995f);
+        }
     }
 
     void drawAnalyzer (juce::Graphics& g, juce::Rectangle<float> graph)
     {
+        auto* mode = parameterWithId (equalizer, "mode");
+        const int modeIndex = mode != nullptr
+            ? std::clamp (static_cast<int> (std::round (mode->getValue() * 2.0f)), 0, 2)
+            : 0;
+        const juce::Colour analyzerColour = modeIndex == 1
+            ? juce::Colour (0xff45d7ff)
+            : modeIndex == 2
+                ? juce::Colour (0xffff63c7)
+                : theme::accent();
         juce::Path path;
+        juce::Path peakPath;
         constexpr int points = 240;
         const double rate = std::max (equalizer.getSampleRate(), 1.0);
         for (int point = 0; point <= points; ++point)
@@ -1933,18 +2246,32 @@ private:
                           * static_cast<float> (point) / static_cast<float> (points);
             const float y = graph.getBottom() - normalized * graph.getHeight();
             if (point == 0)
+            {
                 path.startNewSubPath (x, y);
+                peakPath.startNewSubPath (x, y);
+            }
             else
+            {
                 path.lineTo (x, y);
+                const int peakBin = std::clamp (juce::roundToInt (
+                    frequency * EqMasterProcessor::analyzerBufferSize / rate),
+                    0, EqMasterProcessor::analyzerBufferSize / 2);
+                const float peakDb = juce::Decibels::gainToDecibels (
+                    analyzerPeakMagnitudes[static_cast<std::size_t> (peakBin)], -90.0f);
+                const float peakNormalized = juce::jlimit (0.0f, 1.0f, (peakDb + 90.0f) / 90.0f);
+                peakPath.lineTo (x, graph.getBottom() - peakNormalized * graph.getHeight());
+            }
         }
-        g.setColour (theme::accent().withAlpha (0.18f));
+        g.setColour (analyzerColour.withAlpha (0.18f));
         auto filled = path;
         filled.lineTo (graph.getRight(), graph.getBottom());
         filled.lineTo (graph.getX(), graph.getBottom());
         filled.closeSubPath();
         g.fillPath (filled);
-        g.setColour (theme::accent().withAlpha (0.6f));
+        g.setColour (analyzerColour.withAlpha (0.75f));
         g.strokePath (path, juce::PathStrokeType (1.0f));
+        g.setColour (theme::warning().withAlpha (0.7f));
+        g.strokePath (peakPath, juce::PathStrokeType (1.0f));
     }
 
     EqMasterProcessor& equalizer;
@@ -1952,14 +2279,20 @@ private:
     juce::ToggleButton enabled;
     ParameterComboBox type, slope;
     juce::ComboBox channelMode, analyzerMode;
-    juce::TextButton bypass, ab;
+    juce::TextButton bypass, ab, resetAnalyzerButton;
     juce::dsp::FFT fft;
     std::array<float, EqMasterProcessor::analyzerBufferSize * 2> fftData {};
     std::array<float, EqMasterProcessor::analyzerBufferSize> analyzerSamples {};
     std::array<float, EqMasterProcessor::analyzerBufferSize / 2 + 1> analyzerMagnitudes {};
+    std::array<float, EqMasterProcessor::analyzerBufferSize / 2 + 1> analyzerPeakMagnitudes {};
     std::vector<std::unique_ptr<ParameterKnob>> controls;
     int selectedBand = 0;
     bool draggingNode = false;
+    bool selectingMarquee = false;
+    juce::Point<float> marqueeFrom, marqueeTo, dragStart;
+    std::array<bool, EqMasterProcessor::bandCount> selectedBands {};
+    std::array<float, EqMasterProcessor::bandCount> dragStartFrequency {};
+    std::array<float, EqMasterProcessor::bandCount> dragStartGain {};
 };
 }
 
@@ -1972,9 +2305,9 @@ CompMasterProcessor::CompMasterProcessor()
     , scopeMaximums (std::make_unique<std::atomic<float>[]> (scopeBufferSize))
     , scopeGainReductions (std::make_unique<std::atomic<float>[]> (scopeBufferSize))
 {
-    addParameter (new EffectParameter ("threshold", "Threshold", 0.7f, 0.7f,
+    addParameter (new EffectParameter ("threshold", "Threshold", 1.0f, 1.0f,
                                        EffectParameter::Kind::Threshold));
-    addParameter (new EffectParameter ("ratio", "Ratio", 3.0f / 19.0f, 3.0f / 19.0f,
+    addParameter (new EffectParameter ("ratio", "Ratio", 1.0f / 19.0f, 1.0f / 19.0f,
                                        EffectParameter::Kind::Ratio));
     addParameter (new EffectParameter ("attack", "Attack",
         std::log (10.0f / 0.1f) / std::log (2000.0f),
@@ -2013,6 +2346,7 @@ void CompMasterProcessor::prepareToPlay (double newSampleRate, int)
     scopeMaximum = std::numeric_limits<float>::lowest();
     scopeGainReduction = 0.0f;
     gainReduction.store (0.0f, std::memory_order_relaxed);
+    outputPeakHoldValue.store (0.0f, std::memory_order_relaxed);
     sidechainFilterStates = {};
     lastSidechainSourceId = sidechainSource.load (std::memory_order_relaxed);
     for (auto& peak : outputPeaks)
@@ -2158,7 +2492,21 @@ void CompMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         outputPeaks[0].load (std::memory_order_relaxed) * 0.92f), std::memory_order_relaxed);
     outputPeaks[1].store (std::max (blockPeakRight,
         outputPeaks[1].load (std::memory_order_relaxed) * 0.92f), std::memory_order_relaxed);
+    const float blockPeak = std::max (blockPeakLeft, blockPeakRight);
+    float peakHold = outputPeakHoldValue.load (std::memory_order_relaxed);
+    while (blockPeak > peakHold
+           && ! outputPeakHoldValue.compare_exchange_weak (
+               peakHold, blockPeak, std::memory_order_relaxed))
+    {
+    }
     gainReduction.store (blockReduction, std::memory_order_relaxed);
+}
+
+void CompMasterProcessor::resetVisualization()
+{
+    scopeAvailable.store (0, std::memory_order_relaxed);
+    scopeWritePosition.store (0, std::memory_order_release);
+    outputPeakHoldValue.store (0.0f, std::memory_order_relaxed);
 }
 
 int CompMasterProcessor::copyScopeSnapshot (ScopeColumn* destination, int capacity) const
@@ -2260,7 +2608,7 @@ EqMasterProcessor::EqMasterProcessor()
         const auto prefix = "band" + juce::String (band + 1) + "_";
         const float normalizedFrequency = std::log (initialFrequencies[static_cast<std::size_t> (band)] / 20.0f)
                                         / std::log (1000.0f);
-        addParameter (new EffectParameter (prefix + "enabled", "Band Enabled", 1.0f, 1.0f,
+        addParameter (new EffectParameter (prefix + "enabled", "Band Enabled", 0.0f, 0.0f,
                                            EffectParameter::Kind::Toggle));
         addParameter (new EffectParameter (prefix + "frequency", "Frequency",
                                            normalizedFrequency, normalizedFrequency,
@@ -2417,6 +2765,15 @@ int EqMasterProcessor::copyAnalyzerSnapshot (bool postEq, float* destination, in
         destination[index] = source[static_cast<std::size_t> (
             (start + index) % analyzerBufferSize)].load (std::memory_order_relaxed);
     return count;
+}
+
+void EqMasterProcessor::resetAnalyzer()
+{
+    analyzerWritePosition.store (0, std::memory_order_release);
+    for (auto& sample : analyzerPre)
+        sample.store (0.0f, std::memory_order_relaxed);
+    for (auto& sample : analyzerPost)
+        sample.store (0.0f, std::memory_order_relaxed);
 }
 
 juce::AudioProcessorEditor* EqMasterProcessor::createEditor()

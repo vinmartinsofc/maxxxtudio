@@ -413,9 +413,12 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     CompMasterProcessor processor;
     REQUIRE (processor.getName() == "Comp Master");
     REQUIRE (processor.getParameters().size() == 9);
+    REQUIRE (std::abs (processor.getParameters()[0]->getValue() - 1.0f) < 0.00001f);
+    REQUIRE (std::abs (processor.getParameters()[1]->getValue() - 1.0f / 19.0f) < 0.00001f);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     REQUIRE (editor != nullptr);
-    REQUIRE (editor->getWidth() == 900);
+    REQUIRE (editor->getWidth() == 780);
+    REQUIRE (editor->getHeight() == 520);
     juce::Image editorImage (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
     juce::Graphics editorGraphics (editorImage);
     editor->paintEntireComponent (editorGraphics, true);
@@ -456,11 +459,26 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     REQUIRE (processor.gainReductionDb() > 10.0f);
     REQUIRE (processor.outputPeak (0) > 0.0f);
     REQUIRE (processor.outputPeak (1) > 0.0f);
+    REQUIRE (processor.outputPeakHold() >= processor.outputPeak (0));
     std::array<CompMasterProcessor::ScopeColumn, 8> scope {};
     REQUIRE (processor.copyScopeSnapshot (scope.data(), static_cast<int> (scope.size())) > 0);
     REQUIRE (std::any_of (scope.begin(), scope.end(),
         [] (const auto& column) { return std::abs (column.maximum) > 0.01f; }));
     REQUIRE (getParameter ("attack")->getText (0.0f, 16).contains ("ms"));
+    processor.resetVisualization();
+    REQUIRE (processor.outputPeakHold() == 0.0f);
+    REQUIRE (processor.copyScopeSnapshot (scope.data(), static_cast<int> (scope.size())) == 0);
+
+    setParameter ("bypass", 1.0f);
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        buffer.setSample (0, sample, 1.2f);
+        buffer.setSample (1, sample, -1.1f);
+    }
+    processor.processBlock (buffer, midi);
+    REQUIRE (processor.outputPeakHold() >= 1.2f);
+    processor.resetVisualization();
+    REQUIRE (processor.outputPeakHold() == 0.0f);
 
     juce::MemoryBlock state;
     processor.getStateInformation (state);
@@ -488,8 +506,8 @@ TEST_CASE ("EQ Master applies its eight parametric bands and restores their stat
     REQUIRE (processor.getParameters().size() == EqMasterProcessor::bandCount * 6 + 3);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     REQUIRE (editor != nullptr);
-    REQUIRE (editor->getWidth() == 850);
-    REQUIRE (editor->getHeight() == 560);
+    REQUIRE (editor->getWidth() == 760);
+    REQUIRE (editor->getHeight() == 480);
     juce::Image editorImage (juce::Image::ARGB, editor->getWidth(), editor->getHeight(), true);
     juce::Graphics editorGraphics (editorImage);
     editor->paintEntireComponent (editorGraphics, true);
@@ -501,10 +519,13 @@ TEST_CASE ("EQ Master applies its eight parametric bands and restores their stat
                 return parameter;
         return static_cast<juce::AudioProcessorParameter*> (nullptr);
     };
+    for (int band = 0; band < EqMasterProcessor::bandCount; ++band)
+        REQUIRE (getParameter ("band" + juce::String (band + 1) + "_enabled")->getValue() == 0.0f);
     auto* frequency = getParameter ("band1_frequency");
     auto* gain = getParameter ("band1_gain");
     REQUIRE (frequency != nullptr);
     REQUIRE (gain != nullptr);
+    getParameter ("band1_enabled")->setValue (1.0f);
     frequency->setValue (frequency->getValueForText ("1000 Hz"));
     gain->setValue (gain->getValueForText ("18 dB"));
     processor.prepareToPlay (48000.0, 4096);
@@ -537,6 +558,10 @@ TEST_CASE ("EQ Master applies its eight parametric bands and restores their stat
         return std::sqrt (sum / samples.size());
     };
     REQUIRE (analyzerRms (postAnalyzer) > analyzerRms (preAnalyzer) * 3.0);
+    processor.resetAnalyzer();
+    REQUIRE (processor.copyAnalyzerSnapshot (true, postAnalyzer.data(),
+                static_cast<int> (postAnalyzer.size())) == EqMasterProcessor::analyzerBufferSize);
+    REQUIRE (analyzerRms (postAnalyzer) == 0.0);
 
     juce::MemoryBlock state;
     processor.getStateInformation (state);
@@ -584,6 +609,7 @@ TEST_CASE ("EQ Master supports filter slopes and global Mid/Side processing")
                 parameter->setValue (parameter->getValueForText (text));
     };
 
+    setParameter (lowPass, "band1_enabled", "On");
     setParameter (lowPass, "band1_type", "Low Pass");
     setParameter (lowPass, "band1_slope", "48 dB/oct");
     setParameter (lowPass, "band1_frequency", "1000 Hz");
@@ -605,6 +631,7 @@ TEST_CASE ("EQ Master supports filter slopes and global Mid/Side processing")
     REQUIRE (filteredRms < 0.01);
 
     EqMasterProcessor sideEq;
+    setParameter (sideEq, "band1_enabled", "On");
     setParameter (sideEq, "band1_frequency", "1000 Hz");
     setParameter (sideEq, "band1_gain", "18 dB");
     setParameter (sideEq, "mode", "Side");

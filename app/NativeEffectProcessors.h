@@ -123,6 +123,8 @@ public:
     int copyScopeSnapshot (ScopeColumn* destination, int capacity) const;
     float inputPeak (int channel) const;
     float outputPeak (int channel) const;
+    float outputPeakHold() const { return outputPeakHoldValue.load (std::memory_order_relaxed); }
+    void resetVisualization();
     float gainReductionDb() const { return gainReduction.load (std::memory_order_relaxed); }
     int sidechainSourceTrackId() const { return sidechainSource.load (std::memory_order_relaxed); }
     void setSidechainSourceTrackId (int trackId, bool notify = true);
@@ -145,6 +147,7 @@ private:
     std::unique_ptr<std::atomic<float>[]> scopeMinimums, scopeMaximums;
     std::unique_ptr<std::atomic<float>[]> scopeGainReductions;
     std::array<std::atomic<float>, 2> inputPeaks {}, outputPeaks {};
+    std::atomic<float> outputPeakHoldValue { 0.0f };
     std::atomic<float> gainReduction { 0.0f };
     std::atomic<int> sidechainSource { -1 };
     int lastSidechainSourceId = -1;
@@ -182,6 +185,7 @@ public:
     void selectABState (int slot);
     int activeABSlot() const { return activeAB; }
     int copyAnalyzerSnapshot (bool postEq, float* destination, int capacity) const;
+    void resetAnalyzer();
 
 private:
     struct BiquadState { double x1 = 0.0, x2 = 0.0, y1 = 0.0, y2 = 0.0; };

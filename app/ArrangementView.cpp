@@ -2026,9 +2026,76 @@ public:
         }
 
         const auto modifiers = k.getModifiers();
+        if (! ctrl && ! modifiers.isAltDown() && ! modifiers.isShiftDown()
+            && key == 'S'
+            && (! owner.computerMidiKeyboardEnabledProvider
+                || ! owner.computerMidiKeyboardEnabledProvider())
+            && t != nullptr)
+        {
+            project.setTrackSolo (t->id, ! t->solo, false);
+            return true;
+        }
+
         if (k.getTextCharacter() == '0' && ! modifiers.isCtrlDown() && ! modifiers.isCommandDown()
             && ! modifiers.isAltDown() && ! modifiers.isShiftDown())
         {
+            if (! selectedClips.empty())
+            {
+                bool hasClip = false;
+                bool shouldEnable = false;
+                for (const auto& selected : selectedClips)
+                {
+                    const auto* track = project.track (selected.trackId);
+                    if (track == nullptr)
+                        continue;
+                    if (selected.audio)
+                    {
+                        const auto* clip = track->findAudioClip (selected.clipId);
+                        if (clip == nullptr)
+                            continue;
+                        hasClip = true;
+                        shouldEnable |= ! clip->enabled;
+                    }
+                    else
+                    {
+                        const auto* clip = track->find (selected.clipId);
+                        if (clip == nullptr)
+                            continue;
+                        hasClip = true;
+                        shouldEnable |= ! clip->enabled;
+                    }
+                }
+
+                if (hasClip)
+                {
+                    project.beginEdit();
+                    for (const auto& selected : selectedClips)
+                        project.setClipEnabled (selected.trackId, selected.clipId,
+                                                selected.audio, shouldEnable);
+                    project.endEdit();
+                    return true;
+                }
+            }
+
+            if (project.selectedTrackIds.size() > 1)
+            {
+                std::vector<roll::Track*> selectedTracks;
+                for (const int trackId : project.selectedTrackIds)
+                    if (auto* selectedTrack = project.track (trackId))
+                        selectedTracks.push_back (selectedTrack);
+                if (! selectedTracks.empty())
+                {
+                    const bool shouldMute = std::any_of (selectedTracks.begin(), selectedTracks.end(),
+                        [] (const auto* selectedTrack) { return ! selectedTrack->mute; });
+                    project.beginEdit();
+                    for (auto* selectedTrack : selectedTracks)
+                        selectedTrack->mute = shouldMute;
+                    project.notifyMixer();
+                    project.endEdit();
+                    return true;
+                }
+            }
+
             if (t != nullptr && project.selectedAudioClipId >= 0)
                 if (auto* clip = t->findAudioClip (project.selectedAudioClipId))
                 {
@@ -2042,6 +2109,14 @@ public:
                     project.setClipEnabled (t->id, clip->id, false, ! clip->enabled);
                     return true;
                 }
+            if (t != nullptr)
+            {
+                project.beginEdit();
+                t->mute = ! t->mute;
+                project.notifyMixer();
+                project.endEdit();
+                return true;
+            }
             return false;
         }
 
