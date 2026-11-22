@@ -153,7 +153,7 @@ private:
     int lastSidechainSourceId = -1;
     std::vector<SidechainSource> sidechainSources;
     std::array<std::array<BiquadState, 2>, 2> sidechainFilterStates {};
-    std::array<std::array<float, 9>, 2> abState {};
+    std::array<std::array<float, 10>, 2> abState {};
     int activeAB = 0;
 };
 

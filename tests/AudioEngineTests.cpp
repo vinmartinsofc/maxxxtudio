@@ -412,9 +412,10 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     CompMasterProcessor processor;
     REQUIRE (processor.getName() == "Comp Master");
-    REQUIRE (processor.getParameters().size() == 9);
+    REQUIRE (processor.getParameters().size() == 10);
     REQUIRE (std::abs (processor.getParameters()[0]->getValue() - 1.0f) < 0.00001f);
     REQUIRE (std::abs (processor.getParameters()[1]->getValue() - 1.0f / 19.0f) < 0.00001f);
+    REQUIRE (std::abs (processor.getParameters()[9]->getValue() - 0.5f) < 0.00001f);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     REQUIRE (editor != nullptr);
     REQUIRE (editor->getWidth() == 780);
@@ -443,6 +444,7 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     setParameter ("attack", 0.0f);
     setParameter ("release", 0.0f);
     setParameter ("knee", 0.0f);
+    setParameter ("mix", 1.0f);
     processor.prepareToPlay (48000.0, 512);
 
     juce::AudioBuffer<float> buffer (4, 512);
@@ -486,6 +488,8 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
     REQUIRE (std::abs (getParameter ("ratio")->getValue()
                        - restored.getParameters()[1]->getValue()) < 0.00001f);
+    REQUIRE (std::abs (getParameter ("mix")->getValue()
+                       - restored.getParameters()[9]->getValue()) < 0.00001f);
     processor.setSidechainSourceTrackId (27, false);
     processor.selectABState (1);
     setParameter ("ratio", 0.0f);
@@ -496,6 +500,32 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     REQUIRE (restored.getParameters()[1]->getValue() == 0.0f);
     restored.selectABState (0);
     REQUIRE (std::abs (restored.getParameters()[1]->getValue() - 1.0f) < 0.00001f);
+}
+
+TEST_CASE ("Comp Master mix blends dry audio to preserve transient weight")
+{
+    CompMasterProcessor processor;
+    processor.getParameters()[0]->setValue (0.6f);
+    processor.getParameters()[1]->setValue (1.0f);
+    processor.getParameters()[2]->setValue (0.0f);
+    processor.getParameters()[3]->setValue (0.0f);
+    processor.getParameters()[4]->setValue (0.0f);
+    processor.getParameters()[9]->setValue (0.5f);
+    processor.prepareToPlay (48000.0, 512);
+
+    juce::AudioBuffer<float> buffer (4, 512);
+    buffer.clear();
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        buffer.setSample (0, sample, 0.8f);
+        buffer.setSample (1, sample, 0.8f);
+    }
+
+    juce::MidiBuffer midi;
+    processor.processBlock (buffer, midi);
+
+    REQUIRE (buffer.getSample (0, 511) > 0.4f);
+    REQUIRE (buffer.getSample (0, 511) < 0.5f);
 }
 
 TEST_CASE ("EQ Master applies its eight parametric bands and restores their state")
@@ -586,7 +616,7 @@ TEST_CASE ("EQ Master applies its eight parametric bands and restores their stat
     const auto devices = engine.devices (1);
     REQUIRE (devices.size() == 2);
     REQUIRE (devices[0].name == "Comp Master");
-    REQUIRE (devices[0].automatableParameters.size() == 9);
+    REQUIRE (devices[0].automatableParameters.size() == 10);
     REQUIRE (devices[1].name == "EQ Master");
     REQUIRE (devices[1].automatableParameters.size() == EqMasterProcessor::bandCount * 6 + 3);
     const auto states = engine.getPluginStates();
@@ -691,6 +721,7 @@ TEST_CASE ("Comp Master sidechain routes reject feedback and restore valid sourc
     auto* ratio = sidechainCompressor.getParameters()[1];
     threshold->setValue (0.7f);
     ratio->setValue (1.0f);
+    sidechainCompressor.getParameters()[9]->setValue (1.0f);
     juce::AudioBuffer<float> detectorSignal (4, 4096);
     for (int sample = 0; sample < detectorSignal.getNumSamples(); ++sample)
     {

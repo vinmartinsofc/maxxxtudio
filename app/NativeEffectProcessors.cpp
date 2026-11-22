@@ -867,9 +867,13 @@ void restoreABState (juce::AudioProcessor& processor, const juce::XmlElement& xm
     active = std::clamp (xml.getIntAttribute ("abActive", 0), 0, 1);
     for (int slot = 0; slot < 2; ++slot)
         for (std::size_t index = 0; index < ParameterCount; ++index)
+        {
+            const auto attribute = "ab" + juce::String (slot) + "_"
+                                 + juce::String (static_cast<int> (index));
             states[static_cast<std::size_t> (slot)][index] = static_cast<float> (
-                xml.getDoubleAttribute ("ab" + juce::String (slot) + "_"
-                                        + juce::String (static_cast<int> (index)), 0.0));
+                xml.getDoubleAttribute (attribute,
+                    states[static_cast<std::size_t> (slot)][index]));
+        }
 
     const auto parameters = processor.getParameters();
     for (std::size_t index = 0; index < ParameterCount && index < parameters.size(); ++index)
@@ -1143,6 +1147,9 @@ public:
             addAndMakeVisible (*control);
             sidechainControls.push_back (std::move (control));
         }
+        auto mixControl = std::make_unique<ParameterKnob> (*processor.getParameters()[9]);
+        addAndMakeVisible (*mixControl);
+        controls.push_back (std::move (mixControl));
         refreshSourceItems();
         sourceBox.setSelectedId (selectedSourceItem(), juce::dontSendNotification);
         sourceBox.onChange = [this]
@@ -1209,13 +1216,13 @@ public:
         g.setColour (theme::border());
         g.drawRoundedRectangle (scope, 5.0f, 1.0f);
         drawScope (g, scope);
-        auto footer = area.removeFromTop (24);
-        footer.removeFromRight (84);
+
         const bool clipping = compressor.outputPeakHold() >= 1.0f;
+        auto peakLabel = scopeBounds().withY (scopeBounds().getBottom())
+                                      .withHeight (24).toFloat();
         g.setColour (clipping ? theme::recording() : theme::textDim());
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
-        g.drawText ("MAX OUTPUT  " + peakHoldText() + (clipping ? "   CLIP" : ""), footer,
-                    juce::Justification::centredLeft, true);
+        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.drawText ("Max DB: " + peakHoldText(), peakLabel, juce::Justification::centred, true);
     }
 
     void resized() override
@@ -1235,15 +1242,16 @@ public:
         resetButton.setBounds (footer.removeFromRight (80).reduced (1));
         area.removeFromTop (4);
         auto controlsRow = area.removeFromTop (130);
-        const int sidechainWidth = 96;
+        const int sidechainWidth = 80;
         const int gap = 8;
-        const int controlWidth = (controlsRow.getWidth() - sidechainWidth * 2 - gap * 7) / 6;
         const int count = static_cast<int> (controls.size());
+        const int controlWidth = (controlsRow.getWidth() - sidechainWidth * 2
+                                  - gap * (count + 1)) / count;
         for (int index = 0; index < count; ++index)
         {
             auto cell = controlsRow.removeFromLeft (controlWidth);
             controls[static_cast<std::size_t> (index)]->setBounds (
-                cell.withSizeKeepingCentre (82, controlsRow.getHeight()));
+                cell.withSizeKeepingCentre (72, controlsRow.getHeight()));
             if (index + 1 < count)
                 controlsRow.removeFromLeft (gap);
         }
@@ -1251,7 +1259,7 @@ public:
         for (auto& control : sidechainControls)
         {
             auto cell = controlsRow.removeFromLeft (sidechainWidth);
-            control->setBounds (cell.withSizeKeepingCentre (82, controlsRow.getHeight()));
+            control->setBounds (cell.withSizeKeepingCentre (72, controlsRow.getHeight()));
             if (control != sidechainControls.back())
                 controlsRow.removeFromLeft (gap);
         }
@@ -1408,6 +1416,7 @@ private:
                     .withHeight (12.0f), juce::Justification::centred);
         drawLevelMeter (g, meters, compressor.outputPeak (0), compressor.outputPeak (1),
                         compressor.outputPeakHold());
+
     }
 
     static void drawLevelMeter (juce::Graphics& g, juce::Rectangle<float> area,
@@ -2325,6 +2334,8 @@ CompMasterProcessor::CompMasterProcessor()
                                        EffectParameter::Kind::Frequency));
     addParameter (new EffectParameter ("bypass", "Bypass", 0.0f, 0.0f,
                                        EffectParameter::Kind::Toggle));
+    addParameter (new EffectParameter ("mix", "Mix", 0.5f, 0.5f,
+                                       EffectParameter::Kind::Percent));
     for (int index = 0; index < scopeBufferSize; ++index)
     {
         scopeMinimums[static_cast<std::size_t> (index)].store (0.0f);
@@ -2373,6 +2384,7 @@ void CompMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float lowCut = 20.0f * std::pow (1000.0f, parameters[6]->getValue());
     const float highCut = 20.0f * std::pow (1000.0f, parameters[7]->getValue());
     const bool bypass = parameters[8]->getValue() >= 0.5f;
+    const float mix = parameters[9]->getValue();
     const int sourceTrackId = sidechainSource.load (std::memory_order_relaxed);
     if (sourceTrackId != lastSidechainSourceId)
     {
@@ -2451,9 +2463,10 @@ void CompMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         blockReduction = std::max (blockReduction, -reductionDb);
         const float gain = bypass ? 1.0f
             : juce::Decibels::decibelsToGain (reductionDb + makeupDb);
-        outputLeft[sample] = dryLeft * gain;
+        const float blendedGain = 1.0f + (gain - 1.0f) * mix;
+        outputLeft[sample] = dryLeft * blendedGain;
         if (output.getNumChannels() > 1)
-            outputRight[sample] = dryRight * gain;
+            outputRight[sample] = dryRight * blendedGain;
 
         blockPeakLeft = std::max (blockPeakLeft, std::abs (outputLeft[sample]));
         blockPeakRight = std::max (blockPeakRight, std::abs (output.getNumChannels() > 1
