@@ -535,7 +535,38 @@ public:
                 continue;
 
             const auto base = colourFor (t);
-            if (t.type == roll::TrackType::Audio)
+            if (t.frozen)
+            {
+                if (t.frozenAudioClip == nullptr)
+                    continue;
+                const auto& clip = *t.frozenAudioClip;
+                const int rowTop = owner.rowTop (static_cast<int> (i));
+                const int rowHeight = owner.rowHeight (static_cast<int> (i));
+                const juce::Rectangle<float> r (
+                    static_cast<float> (clip.start * ppb),
+                    static_cast<float> (rowTop + (t.collapsed ? 3 : 4)),
+                    static_cast<float> (clip.lengthBeats * ppb),
+                    static_cast<float> (rowHeight - (t.collapsed ? 6 : 9)));
+                if (r.toNearestInt().intersects (cb))
+                {
+                    g.setColour (base.darker (0.25f));
+                    g.fillRoundedRectangle (r, 4.0f);
+                    g.setColour (theme::accent().withAlpha (0.9f));
+                    g.drawRoundedRectangle (r, 4.0f, 1.5f);
+                    if (r.getWidth() > 10.0f)
+                    {
+                        const auto waveformArea = r.reduced (3.0f, 4.0f);
+                        g.setColour (base.brighter (0.7f));
+                        drawWaveformEnvelope (g, waveformArea, clip.waveform,
+                                              base.brighter (0.7f), r.getHeight() * 0.4f);
+                        g.setColour (theme::text());
+                        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+                        g.drawText (clip.name, r.toNearestInt().reduced (5, 1),
+                                    juce::Justification::centredLeft, true);
+                    }
+                }
+            }
+            else if (t.type == roll::TrackType::Audio)
             {
                 for (const auto& clip : t.audioClips)
                 {
@@ -1097,6 +1128,8 @@ public:
         if (h.trackIndex < 0 || h.trackIndex >= static_cast<int> (project.tracks.size())) { h.trackIndex = -1; return h; }
         const auto* track = project.tracks[static_cast<size_t> (h.trackIndex)].get();
         const double beat = p.x / owner.pixelsPerBeat;
+        if (track->frozen)
+            return h;
         if (track->type == roll::TrackType::Audio)
         {
             for (const auto& clip : track->audioClips)
@@ -1322,6 +1355,19 @@ public:
             menu.addSeparator();
         }
 
+        const auto* contextTrack = project.track (trackId);
+        if (contextTrack != nullptr && contextTrack->type != roll::TrackType::Group)
+        {
+            if (contextTrack->frozen)
+            {
+                menu.addItem (8, theme::ui ("Unfreeze Track"), contextTrack->freezeReversible);
+                menu.addItem (9, theme::ui ("Flatten Track"), contextTrack->freezeReversible);
+            }
+            else
+                menu.addItem (7, theme::ui ("Freeze Track"));
+            menu.addSeparator();
+        }
+
         static constexpr double gridValues[] { 1.0, 0.5, 0.25, 0.125, 0.0625,
                                                 2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0,
                                                 1.0 / 12.0, 4.0 };
@@ -1364,6 +1410,21 @@ public:
             if (result == 6)
             {
                 safeThis->selectAll();
+                return;
+            }
+            if (result == 7 && safeThis->owner.onFreezeTrackRequested)
+            {
+                safeThis->owner.onFreezeTrackRequested (trackId);
+                return;
+            }
+            if (result == 8 && safeThis->owner.onUnfreezeTrackRequested)
+            {
+                safeThis->owner.onUnfreezeTrackRequested (trackId);
+                return;
+            }
+            if (result == 9 && safeThis->owner.onFlattenTrackRequested)
+            {
+                safeThis->owner.onFlattenTrackRequested (trackId);
                 return;
             }
 
@@ -2822,6 +2883,8 @@ private:
         for (int row = firstRow; row <= lastRow; ++row)
         {
             const auto& track = *project.tracks[static_cast<std::size_t> (row)];
+            if (track.frozen)
+                continue;
             if (track.type == roll::TrackType::Audio)
             {
                 for (const auto& clip : track.audioClips)
@@ -2898,6 +2961,8 @@ private:
             for (int row = first; row <= last; ++row)
             {
                 const auto& track = *project.tracks[static_cast<std::size_t> (row)];
+                if (track.frozen)
+                    continue;
                 selectedTrackIds.push_back (track.id);
                 if (track.type == roll::TrackType::Audio)
                 {
@@ -2935,6 +3000,8 @@ private:
         {
             for (const auto& track : project.tracks)
             {
+                if (track->frozen)
+                    continue;
                 if (tracksToSplit != nullptr
                     && std::find (tracksToSplit->begin(), tracksToSplit->end(), track->id) == tracksToSplit->end())
                     continue;
@@ -2969,6 +3036,8 @@ private:
                 for (const auto& track : project.tracks)
                 {
                     if (std::find (selectedTrackIds.begin(), selectedTrackIds.end(), track->id) == selectedTrackIds.end())
+                        continue;
+                    if (track->frozen)
                         continue;
                     if (track->type == roll::TrackType::Audio)
                     {
@@ -3081,6 +3150,8 @@ private:
             for (int row = first; row <= last; ++row)
             {
                 const auto& track = *project.tracks[static_cast<std::size_t> (row)];
+                if (track.frozen)
+                    continue;
                 if (track.type == roll::TrackType::Audio)
                 {
                     for (const auto& clip : track.audioClips)
@@ -3114,7 +3185,7 @@ private:
         for (const auto& source : sources)
         {
             const auto* track = project.track (source.trackId);
-            if (track == nullptr)
+            if (track == nullptr || track->frozen)
                 continue;
             const int trackOffset = project.trackIndex (source.trackId) - baseTrackRow;
             if (source.audio)
@@ -3200,7 +3271,8 @@ private:
                 return true;
             }
             const auto& targetTrack = *project.tracks[static_cast<std::size_t> (targetRow)];
-            if ((item.audio && targetTrack.type != roll::TrackType::Audio)
+            if (targetTrack.frozen
+                || (item.audio && targetTrack.type != roll::TrackType::Audio)
                 || (! item.audio && targetTrack.type != roll::TrackType::Midi))
             {
                 notifyAction ("The track type does not match the copied clip.", icons::Icon::Pointer, false, 900);
@@ -3253,6 +3325,8 @@ private:
         for (size_t row = 0; row < project.tracks.size(); ++row)
         {
             const auto& track = *project.tracks[row];
+            if (track.frozen)
+                continue;
             bool rowHasClips = false;
             if (track.type == roll::TrackType::Audio)
             {
@@ -4340,6 +4414,7 @@ public:
     {
         auto* t = project.track (trackId);
         addAndMakeVisible (name);
+        addAndMakeVisible (frozenBadge);
         addAndMakeVisible (foldButton);
         addAndMakeVisible (mute);
         addAndMakeVisible (solo);
@@ -4374,6 +4449,12 @@ public:
         name.setColour (juce::Label::textColourId, theme::text());
         name.setFont (juce::FontOptions (14.5f, juce::Font::bold));
         name.setTooltip (theme::ui ("Drag the track name to reorder it; double-click to rename."));
+        frozenBadge.setText ("FROZEN", juce::dontSendNotification);
+        frozenBadge.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        frozenBadge.setColour (juce::Label::textColourId, theme::accent());
+        frozenBadge.setJustificationType (juce::Justification::centredRight);
+        frozenBadge.setTooltip (theme::ui ("This track is frozen. Right-click the track to unfreeze or flatten it."));
+        frozenBadge.setVisible (t != nullptr && t->frozen);
         name.addMouseListener (this, false);
         name.onTextChange = [this]
         {
@@ -4673,6 +4754,7 @@ public:
         const bool collapsed = track != nullptr && track->collapsed;
         updateFoldButton();
         routingButton.setVisible (! collapsed);
+        frozenBadge.setVisible (track != nullptr && track->frozen);
         mute.setVisible (! collapsed);
         solo.setVisible (! collapsed);
         volume.setVisible (! collapsed);
@@ -4691,6 +4773,11 @@ public:
             row.removeFromLeft (4);
             if (track != nullptr && track->parentGroupId != 0)
                 row.removeFromLeft (12);
+            if (track != nullptr && track->frozen)
+            {
+                frozenBadge.setBounds (row.removeFromRight (52));
+                row.removeFromRight (4);
+            }
             name.setBounds (row);
             return;
         }
@@ -4703,6 +4790,11 @@ public:
         topRow.removeFromLeft (4);
         routingButton.setBounds (topRow.removeFromRight (58));
         topRow.removeFromRight (4);
+        if (track != nullptr && track->frozen)
+        {
+            frozenBadge.setBounds (topRow.removeFromRight (52));
+            topRow.removeFromRight (4);
+        }
         if (track != nullptr && track->parentGroupId != 0)
             topRow.removeFromLeft (12);
         name.setBounds (topRow);
@@ -4825,12 +4917,21 @@ public:
         m.addItem (4, theme::ui ("Group Selected Tracks (Ctrl+G)"), canGroup);
         const int tid = trackId;
         const bool isGroup = selected != nullptr && selected->type == roll::TrackType::Group;
+        const bool isFrozen = selected != nullptr && selected->frozen;
         if (isGroup)
             m.addItem (5, theme::ui ("Ungroup Track (Ctrl+Shift+G)"));
         else
         {
             m.addItem (6, theme::ui ("Duplicate Track (Ctrl+D)"));
             m.addItem (2, theme::ui ("Delete Track"), project.tracks.size() > 1);
+            m.addSeparator();
+            if (isFrozen)
+            {
+                m.addItem (8, theme::ui ("Unfreeze Track"), selected->freezeReversible);
+                m.addItem (9, theme::ui ("Flatten Track"), selected->freezeReversible);
+            }
+            else
+                m.addItem (7, theme::ui ("Freeze Track"));
         }
         auto* proj = &project;
         auto* arrangement = &owner;
@@ -4847,6 +4948,12 @@ public:
             if (r == 5) proj->ungroupTrack (tid);
             if (r == 6 && arrangement->onTrackDuplicateRequested)
                 arrangement->onTrackDuplicateRequested (tid);
+            if (r == 7 && arrangement->onFreezeTrackRequested)
+                arrangement->onFreezeTrackRequested (tid);
+            if (r == 8 && arrangement->onUnfreezeTrackRequested)
+                arrangement->onUnfreezeTrackRequested (tid);
+            if (r == 9 && arrangement->onFlattenTrackRequested)
+                arrangement->onFlattenTrackRequested (tid);
         });
     }
 
@@ -4872,7 +4979,7 @@ private:
     ArrangementView& owner;
     int trackId;
     bool reorderPending = false, reorderDragging = false;
-    juce::Label name, volumeDb, volumeLabel, panLabel, panValue;
+    juce::Label name, frozenBadge, volumeDb, volumeLabel, panLabel, panValue;
     juce::TextButton foldButton;
     MidiLearnButton mute { "ON" }, solo { "S" };
     juce::TextButton routingButton;
@@ -5400,7 +5507,12 @@ public:
                 g.fillRoundedRectangle (x, clipY, width, clipHeight, 1.5f);
             };
 
-            if (track.type == roll::TrackType::Audio)
+            if (track.frozen)
+            {
+                if (track.frozenAudioClip != nullptr)
+                    drawClip (track.frozenAudioClip->start, track.frozenAudioClip->lengthBeats);
+            }
+            else if (track.type == roll::TrackType::Audio)
             {
                 for (const auto& clip : track.audioClips)
                     drawClip (clip->start, clip->lengthBeats);

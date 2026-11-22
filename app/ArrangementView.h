@@ -45,6 +45,9 @@ public:
     std::function<void (const juce::File&)> onLocateAudioFileRequested;
     std::function<void (int trackId, int clipId)> onAudioClipDoubleClicked;
     std::function<void (int trackId)> onTrackDuplicateRequested;
+    std::function<void (int trackId)> onFreezeTrackRequested;
+    std::function<void (int trackId)> onUnfreezeTrackRequested;
+    std::function<void (int trackId)> onFlattenTrackRequested;
     std::function<LiveMixerValues (int trackId)> liveMixerProvider;
     std::function<void (int trackId, MidiMappingTarget)> onMidiLearnRequested;
     std::function<void (int trackId, MidiMappingTarget)> onMidiMappingClearRequested;

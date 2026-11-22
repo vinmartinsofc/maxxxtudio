@@ -73,6 +73,33 @@ TEST_CASE ("ProjectModel undo and redo preserve MIDI mapping edits")
     CHECK (project.midiMappings.front().number == 7);
 }
 
+TEST_CASE ("ProjectModel undo and redo preserve frozen track state")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Midi);
+    REQUIRE (track != nullptr);
+    auto* clip = project.addClip (track->id, 0.0, 4.0);
+    REQUIRE (clip != nullptr);
+    const int trackId = track->id;
+
+    project.beginEdit();
+    track->frozen = true;
+    track->frozenAudioClip = std::make_unique<roll::AudioPlacement>();
+    track->frozenAudioClip->id = 2;
+    track->frozenAudioClip->lengthBeats = 4.0;
+    track->frozenAudioClip->filePath = "C:/audio/frozen.wav";
+    project.endEdit();
+
+    REQUIRE (project.track (trackId)->frozen);
+    REQUIRE (project.undo());
+    CHECK_FALSE (project.track (trackId)->frozen);
+    CHECK (project.track (trackId)->clips.size() == 1);
+    REQUIRE (project.redo());
+    CHECK (project.track (trackId)->frozen);
+    REQUIRE (project.track (trackId)->frozenAudioClip != nullptr);
+    CHECK (project.track (trackId)->frozenAudioClip->filePath == "C:/audio/frozen.wav");
+}
+
 TEST_CASE ("ProjectModel copies audio clips from a clipboard snapshot")
 {
     ProjectModel project;

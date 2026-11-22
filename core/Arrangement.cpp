@@ -8,10 +8,13 @@ namespace roll
 Track::Track (const Track& other)
     : id (other.id), name (other.name), type (other.type), volume (other.volume),
       pan (other.pan), colour (other.colour), mute (other.mute), solo (other.solo),
-      collapsed (other.collapsed),
+      collapsed (other.collapsed), frozen (other.frozen),
+      freezeReversible (other.freezeReversible),
       outputRouting (other.outputRouting), parentGroupId (other.parentGroupId),
       automation (other.automation), nextId (other.nextId)
 {
+    if (other.frozenAudioClip != nullptr)
+        frozenAudioClip = std::make_unique<AudioPlacement> (*other.frozenAudioClip);
     for (const auto& clip : other.clips)
         clips.push_back (std::make_unique<Placement> (*clip));
     for (const auto& clip : other.audioClips)
@@ -32,6 +35,10 @@ Track& Track::operator= (const Track& other)
     mute = other.mute;
     solo = other.solo;
     collapsed = other.collapsed;
+    frozen = other.frozen;
+    freezeReversible = other.freezeReversible;
+    frozenAudioClip = other.frozenAudioClip != nullptr
+        ? std::make_unique<AudioPlacement> (*other.frozenAudioClip) : nullptr;
     outputRouting = other.outputRouting;
     parentGroupId = other.parentGroupId;
     nextId = other.nextId;

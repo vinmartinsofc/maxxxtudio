@@ -220,12 +220,11 @@ void ProjectModel::replaceState (State state)
     {
         if (onTrackAdded)
             onTrackAdded (track->id);
-        if (track->type == roll::TrackType::Audio)
-        {
-            if (onAudioClipsChanged)
-                onAudioClipsChanged (track->id);
-        }
-        else if (onTrackNotes)
+        if (onTrackFreezeChanged)
+            onTrackFreezeChanged (track->id);
+        else if (track->type == roll::TrackType::Audio && onAudioClipsChanged)
+            onAudioClipsChanged (track->id);
+        if (track->type == roll::TrackType::Midi && onTrackNotes)
             onTrackNotes (track->id);
     }
 
@@ -329,11 +328,11 @@ void ProjectModel::restoreSnapshot (Snapshot&& snapshot)
 
     for (const auto& track : tracks)
     {
-        if (track->type == roll::TrackType::Audio)
-        {
-            if (onAudioClipsChanged) onAudioClipsChanged (track->id);
-        }
-        else if (track->type == roll::TrackType::Midi && onTrackNotes)
+        if (onTrackFreezeChanged)
+            onTrackFreezeChanged (track->id);
+        else if (track->type == roll::TrackType::Audio && onAudioClipsChanged)
+            onAudioClipsChanged (track->id);
+        if (track->type == roll::TrackType::Midi && onTrackNotes)
             onTrackNotes (track->id);
     }
     if (onSelectionChanged) onSelectionChanged();
@@ -426,16 +425,24 @@ bool ProjectModel::retainsAudioFile (const std::string& path) const
     const auto containsPath = [&path] (const std::vector<roll::Track>& snapshotTracks)
     {
         for (const auto& track : snapshotTracks)
+        {
             for (const auto& clip : track.audioClips)
                 if (clip->filePath == path)
                     return true;
+            if (track.frozenAudioClip != nullptr && track.frozenAudioClip->filePath == path)
+                return true;
+        }
         return false;
     };
 
     for (const auto& track : tracks)
+    {
         for (const auto& clip : track->audioClips)
             if (clip->filePath == path)
                 return true;
+        if (track->frozenAudioClip != nullptr && track->frozenAudioClip->filePath == path)
+            return true;
+    }
     for (const auto& snapshot : undoStack)
         if (containsPath (snapshot.tracks))
             return true;

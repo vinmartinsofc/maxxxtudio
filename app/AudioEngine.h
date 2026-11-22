@@ -330,9 +330,11 @@ public:
 
     // trilhas
     void addTrack (int trackId, roll::TrackType type = roll::TrackType::Midi);
+    void setTrackType (int trackId, roll::TrackType type);
     void removeTrack (int trackId);
     void publishNotes (int trackId, const std::vector<roll::Note>& notes);
     void publishAudioClips (int trackId, const std::vector<AudioClipPlayback>& clips);
+    void setTrackFrozen (int trackId, bool frozen);
     void setMixer (int trackId, float gain, float pan, bool muted);
     void setMixer (int trackId, float gain, float pan, bool muted, bool controlMuted);
     void setTrackAutomation (int trackId, const std::vector<roll::AutomationEnvelope>&);
@@ -345,6 +347,7 @@ public:
     float mixerGain (int trackId) const;
     float mixerPan (int trackId) const;
     bool mixerMuted (int trackId) const;
+    double trackTailLengthSeconds (int trackId) const;
     float peak (int trackId) const;
     float rms (int trackId) const;
     float masterPeak() const;
@@ -427,12 +430,15 @@ private:
     {
         juce::AudioProcessorGraph::Node::Ptr source, mixer;
         juce::AudioProcessorGraph::Node::Ptr automationNode;
+        juce::AudioProcessorGraph::Node::Ptr freezeSource;
         TrackSource* sourcePtr = nullptr;
         TrackAudioSource* audioSourcePtr = nullptr;
+        TrackAudioSource* freezeSourcePtr = nullptr;
         TrackMixer*  mixerPtr = nullptr;
         juce::AudioProcessor* automationProcessor = nullptr;
         std::vector<roll::AutomationEnvelope> automation;
         bool audioTrack = false;
+        bool frozen = false;
         bool isMaster = false;
         bool isGroup = false;
         int parentGroupId = 0;

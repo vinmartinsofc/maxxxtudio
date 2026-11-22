@@ -1742,6 +1742,12 @@ void AudioEngine::addTrack (int trackId, roll::TrackType type)
         t.sourcePtr = src.get();
         t.source = seqGraph.addNode (std::move (src));
     }
+    if (! t.isGroup)
+    {
+        auto frozenSource = std::make_unique<TrackAudioSource> (seqGraph.sharedBlock());
+        t.freezeSourcePtr = frozenSource.get();
+        t.freezeSource = seqGraph.addNode (std::move (frozenSource));
+    }
 
     auto automation = std::make_unique<TrackAutomationProcessor> (seqGraph.sharedBlock());
     t.automationProcessor = automation.get();
@@ -1754,6 +1760,37 @@ void AudioEngine::addTrack (int trackId, roll::TrackType type)
     rewire (tracks[trackId]);
 }
 
+void AudioEngine::setTrackType (int trackId, roll::TrackType type)
+{
+    auto* track = find (trackId);
+    if (track == nullptr || track->isMaster || track->isGroup
+        || type == roll::TrackType::Group)
+        return;
+
+    const bool audioTrack = type == roll::TrackType::Audio;
+    if (track->audioTrack == audioTrack)
+        return;
+
+    clearConnectionsOf (track->source->nodeID);
+    seqGraph.removeNode (track->source->nodeID);
+    track->sourcePtr = nullptr;
+    track->audioSourcePtr = nullptr;
+    if (audioTrack)
+    {
+        auto source = std::make_unique<TrackAudioSource> (seqGraph.sharedBlock());
+        track->audioSourcePtr = source.get();
+        track->source = seqGraph.addNode (std::move (source));
+    }
+    else
+    {
+        auto source = std::make_unique<TrackSource> (seqGraph.sharedBlock());
+        track->sourcePtr = source.get();
+        track->source = seqGraph.addNode (std::move (source));
+    }
+    track->audioTrack = audioTrack;
+    rewire (*track);
+}
+
 void AudioEngine::removeTrack (int trackId)
 {
     if (trackId == masterTrackId) return;
@@ -1763,6 +1800,8 @@ void AudioEngine::removeTrack (int trackId)
     static_cast<TrackAutomationProcessor*> (t->automationProcessor)->clearBindings();
     for (auto& d : t->devices) seqGraph.removeNode (d.node->nodeID);
     seqGraph.removeNode (t->source->nodeID);
+    if (t->freezeSource != nullptr)
+        seqGraph.removeNode (t->freezeSource->nodeID);
     seqGraph.removeNode (t->automationNode->nodeID);
     seqGraph.removeNode (t->mixer->nodeID);
     tracks.erase (trackId);
@@ -1834,6 +1873,8 @@ void AudioEngine::rewire (TrackNodes& t)
         clearConnectionsOf (t.source->nodeID);
     clearConnectionsOf (t.automationNode->nodeID);
     clearConnectionsOf (t.mixer->nodeID);
+    if (t.freezeSource != nullptr)
+        clearConnectionsOf (t.freezeSource->nodeID);
     for (auto& d : t.devices) clearConnectionsOf (d.node->nodeID);
 
     using AG = juce::AudioProcessorGraph;
@@ -1854,6 +1895,16 @@ void AudioEngine::rewire (TrackNodes& t)
 
     for (int ch = 0; ch < 2; ++ch)
         seqGraph.addConnection ({ { t.mixer->nodeID, ch }, { destNode->nodeID, ch } });
+
+    if (t.frozen)
+    {
+        if (t.freezeSource == nullptr)
+            return;
+        for (int ch = 0; ch < 2; ++ch)
+            seqGraph.addConnection ({ { t.freezeSource->nodeID, ch }, { t.mixer->nodeID, ch } });
+        rewireSidechains();
+        return;
+    }
 
     if (t.audioTrack)
     {
@@ -2069,8 +2120,23 @@ void AudioEngine::publishNotes (int trackId, const std::vector<roll::Note>& note
 
 void AudioEngine::publishAudioClips (int trackId, const std::vector<AudioClipPlayback>& clips)
 {
-    if (auto* t = find (trackId); t != nullptr && t->audioSourcePtr != nullptr)
-        t->audioSourcePtr->publishClips (clips);
+    if (auto* t = find (trackId); t != nullptr)
+    {
+        if (t->frozen && t->freezeSourcePtr != nullptr)
+            t->freezeSourcePtr->publishClips (clips);
+        else if (t->audioSourcePtr != nullptr)
+            t->audioSourcePtr->publishClips (clips);
+    }
+}
+
+void AudioEngine::setTrackFrozen (int trackId, bool frozen)
+{
+    if (auto* track = find (trackId); track != nullptr && ! track->isGroup
+        && track->frozen != frozen)
+    {
+        track->frozen = frozen;
+        rewire (*track);
+    }
 }
 
 void AudioEngine::setMixer (int trackId, float gain, float pan, bool muted)
@@ -2146,6 +2212,23 @@ bool AudioEngine::mixerMuted (int trackId) const
 {
     const auto* t = find (trackId);
     return t != nullptr && t->mixerPtr != nullptr && t->mixerPtr->liveMute();
+}
+
+double AudioEngine::trackTailLengthSeconds (int trackId) const
+{
+    const auto* track = find (trackId);
+    if (track == nullptr)
+        return 0.0;
+
+    double tailSeconds = 0.0;
+    for (const auto& device : track->devices)
+    {
+        const auto* processor = device.node->getProcessor();
+        const double deviceTail = processor != nullptr ? processor->getTailLengthSeconds() : 0.0;
+        if (std::isfinite (deviceTail) && deviceTail > 0.0)
+            tailSeconds += deviceTail;
+    }
+    return std::clamp (tailSeconds, 0.0, 30.0);
 }
 
 float AudioEngine::peak (int trackId) const
@@ -2283,15 +2366,20 @@ bool AudioEngine::beginOfflineRenderInternal (juce::String& error, int captureTr
         return false;
     }
     auto* captureTrack = captureTrackId >= 0 ? find (captureTrackId) : nullptr;
-    if (captureTrackId >= 0 && (captureTrack == nullptr || ! captureTrack->audioTrack))
+    if (captureTrackId >= 0 && (captureTrack == nullptr || captureTrack->isGroup))
     {
         error = "The selected track cannot be rendered as audio.";
         return false;
     }
+    if (captureTrack != nullptr && ! captureTrack->audioTrack
+        && (captureTrack->devices.empty() || ! captureTrack->devices.front().instrument))
+    {
+        error = "The selected MIDI track has no instrument to render.";
+        return false;
+    }
 
     auto* device = deviceManager.getCurrentAudioDevice();
-    offlineRenderRate = captureTrackId >= 0 ? 44100.0
-        : device != nullptr ? device->getCurrentSampleRate() : seqGraph.getSampleRate();
+    offlineRenderRate = device != nullptr ? device->getCurrentSampleRate() : seqGraph.getSampleRate();
     offlineRenderBlockSize = device != nullptr ? device->getCurrentBufferSizeSamples() : seqGraph.getBlockSize();
     if (! std::isfinite (offlineRenderRate) || offlineRenderRate <= 0.0
         || offlineRenderBlockSize <= 0)

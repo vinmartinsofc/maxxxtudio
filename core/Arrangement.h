@@ -260,6 +260,9 @@ public:
     bool        mute = false;
     bool        solo = false;
     bool        collapsed = false;
+    bool        frozen = false;
+    bool        freezeReversible = true;
+    std::unique_ptr<AudioPlacement> frozenAudioClip;
     TrackOutputRouting outputRouting = TrackOutputRouting::Master;
     int         parentGroupId = 0;
 

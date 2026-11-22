@@ -56,6 +56,48 @@ TEST_CASE ("Project files preserve flat group bus membership")
     REQUIRE (loaded.project.master.colour == 0xff9c27b0);
 }
 
+TEST_CASE ("Project files preserve reversible frozen MIDI tracks")
+{
+    TemporaryProjectFolder temporary;
+    const auto renderedFile = temporary.folder.getChildFile ("frozen.wav");
+    REQUIRE (renderedFile.replaceWithText ("rendered audio"));
+
+    ProjectFileData data;
+    data.project.master.id = AudioEngine::masterTrackId;
+    roll::Track track;
+    track.id = 1;
+    track.name = "Shaker";
+    track.type = roll::TrackType::Midi;
+    auto* sourceClip = track.addClip (0.0, 4.0);
+    REQUIRE (sourceClip != nullptr);
+    sourceClip->clip.addNote ({ 42, 0.0, 1.0, 100 });
+    track.frozen = true;
+    track.frozenAudioClip = std::make_unique<roll::AudioPlacement>();
+    track.frozenAudioClip->id = track.nextClipId();
+    track.frozenAudioClip->lengthBeats = 4.0;
+    track.frozenAudioClip->durationSeconds = 2.0;
+    track.frozenAudioClip->sourceBpm = 120.0;
+    track.frozenAudioClip->name = "Shaker (Frozen)";
+    track.frozenAudioClip->filePath = renderedFile.getFullPathName().toStdString();
+    data.project.tracks.push_back (track);
+
+    const auto file = temporary.folder.getChildFile ("frozen_track.std");
+    REQUIRE (ProjectFile::save (file, data).wasOk());
+    ProjectFileData loaded;
+    const auto loadResult = ProjectFile::load (file, loaded);
+    INFO (loadResult.getErrorMessage());
+    REQUIRE (loadResult.wasOk());
+    REQUIRE (loaded.project.tracks.size() == 1);
+    const auto& restored = loaded.project.tracks.front();
+    CHECK (restored.type == roll::TrackType::Midi);
+    CHECK (restored.frozen);
+    CHECK (restored.freezeReversible);
+    REQUIRE (restored.frozenAudioClip != nullptr);
+    CHECK (restored.clips.size() == 1);
+    CHECK (restored.clips.front()->clip.notes().size() == 1);
+    CHECK (juce::File (juce::String::fromUTF8 (restored.frozenAudioClip->filePath.c_str())).existsAsFile());
+}
+
 TEST_CASE ("Project files preserve Comp Master and EQ Master plugin state")
 {
     TemporaryProjectFolder temporary;

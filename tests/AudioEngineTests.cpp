@@ -1659,13 +1659,67 @@ TEST_CASE ("Offline track rendering captures audio before the master bus")
     juce::String error;
     REQUIRE (engine.beginOfflineTrackRender (1, error));
 
-    juce::AudioBuffer<float> rendered (2, 44100);
+    juce::AudioBuffer<float> rendered (2, juce::roundToInt (engine.offlineRenderSampleRate()));
     const auto result = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
     engine.finishOfflineRender();
 
     REQUIRE (result.wasOk());
     REQUIRE (rendered.getMagnitude (0, rendered.getNumSamples()) > 0.1f);
     REQUIRE (rendered.getMagnitude (1, rendered.getNumSamples()) > 0.1f);
+}
+
+TEST_CASE ("Frozen MIDI track audio is routed directly to its track output")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Midi);
+    engine.setTrackFrozen (1, true);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    source->samples->clear();
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample, 0.25f);
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 2.0;
+    clip.sourceBpm = 120.0;
+    clip.source = std::move (source);
+    clip.warpEnabled = false;
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (AudioEngine::masterTrackId, error));
+    juce::AudioBuffer<float> rendered (2, juce::roundToInt (engine.offlineRenderSampleRate()));
+    const auto result = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    CHECK (rendered.getMagnitude (0, rendered.getNumSamples()) > 0.1f);
+    CHECK (rendered.getMagnitude (1, rendered.getNumSamples()) > 0.1f);
+
+    engine.setTrackType (1, roll::TrackType::Audio);
+    engine.setTrackFrozen (1, false);
+    engine.publishAudioClips (1, { clip });
+    REQUIRE (engine.beginOfflineTrackRender (AudioEngine::masterTrackId, error));
+    rendered.clear();
+    const auto flattenedResult = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
+    engine.finishOfflineRender();
+    REQUIRE (flattenedResult.wasOk());
+    CHECK (rendered.getMagnitude (0, rendered.getNumSamples()) > 0.1f);
+    CHECK (rendered.getMagnitude (1, rendered.getNumSamples()) > 0.1f);
+}
+
+TEST_CASE ("Offline rendering rejects MIDI tracks without an instrument")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Midi);
+
+    juce::String error;
+    CHECK_FALSE (engine.beginOfflineTrackRender (1, error));
+    CHECK (error.contains ("no instrument"));
 }
 
 TEST_CASE ("Audio clips receive a short safety fade at their start")
@@ -1692,15 +1746,18 @@ TEST_CASE ("Audio clips receive a short safety fade at their start")
     juce::String error;
     REQUIRE (engine.beginOfflineTrackRender (1, error));
 
-    juce::AudioBuffer<float> rendered (2, 4410);
+    const int sampleRate = juce::roundToInt (engine.offlineRenderSampleRate());
+    juce::AudioBuffer<float> rendered (2, juce::roundToInt (0.1 * sampleRate));
     const auto result = engine.renderTrackRange (0.0, 0.2, rendered, {}, {});
     engine.finishOfflineRender();
 
     REQUIRE (result.wasOk());
     REQUIRE (std::abs (rendered.getSample (0, 0)) < 0.0001f);
-    REQUIRE (rendered.getSample (0, 80) > 0.05f);
-    REQUIRE (rendered.getSample (0, 80) < 0.5f);
-    REQUIRE (rendered.getSample (0, 400) > 0.49f);
+    const int earlySample = juce::roundToInt (80.0 * sampleRate / 44100.0);
+    const int settledSample = juce::roundToInt (400.0 * sampleRate / 44100.0);
+    REQUIRE (rendered.getSample (0, earlySample) > 0.05f);
+    REQUIRE (rendered.getSample (0, earlySample) < 0.5f);
+    REQUIRE (rendered.getSample (0, settledSample) > 0.49f);
 }
 
 TEST_CASE ("Audio clip reverse reads the selected source region backwards")
@@ -1728,12 +1785,14 @@ TEST_CASE ("Audio clip reverse reads the selected source region backwards")
 
     juce::String error;
     REQUIRE (engine.beginOfflineTrackRender (1, error));
-    juce::AudioBuffer<float> rendered (2, 44100);
+    const int sampleRate = juce::roundToInt (engine.offlineRenderSampleRate());
+    juce::AudioBuffer<float> rendered (2, sampleRate);
     const auto result = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
     engine.finishOfflineRender();
 
     REQUIRE (result.wasOk());
-    REQUIRE (rendered.getSample (0, 1000) > rendered.getSample (0, 30000));
+    REQUIRE (rendered.getSample (0, juce::roundToInt (1000.0 * sampleRate / 44100.0))
+             > rendered.getSample (0, juce::roundToInt (30000.0 * sampleRate / 44100.0)));
 }
 
 TEST_CASE ("Manual warp markers control audio source timing")
@@ -1760,12 +1819,13 @@ TEST_CASE ("Manual warp markers control audio source timing")
 
     juce::String error;
     REQUIRE (engine.beginOfflineTrackRender (1, error));
-    juce::AudioBuffer<float> rendered (2, 88200);
+    const int sampleRate = juce::roundToInt (engine.offlineRenderSampleRate());
+    juce::AudioBuffer<float> rendered (2, 2 * sampleRate);
     const auto result = engine.renderTrackRange (0.0, 4.0, rendered, {}, {});
     engine.finishOfflineRender();
 
     REQUIRE (result.wasOk());
-    CHECK (std::abs (rendered.getSample (0, 44100) - 0.75f) < 0.02f);
+    CHECK (std::abs (rendered.getSample (0, sampleRate) - 0.75f) < 0.02f);
 }
 
 TEST_CASE ("Audio clip gain automation affects playback and applies base gain once")
@@ -1796,13 +1856,14 @@ TEST_CASE ("Audio clip gain automation affects playback and applies base gain on
 
     juce::String error;
     REQUIRE (engine.beginOfflineTrackRender (1, error));
-    juce::AudioBuffer<float> rendered (2, 44100);
+    const int sampleRate = juce::roundToInt (engine.offlineRenderSampleRate());
+    juce::AudioBuffer<float> rendered (2, sampleRate);
     const auto result = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
     engine.finishOfflineRender();
 
     REQUIRE (result.wasOk());
-    const float lowerGain = rendered.getSample (0, 10000);
-    const float higherGain = rendered.getSample (0, 40000);
+    const float lowerGain = rendered.getSample (0, juce::roundToInt (10000.0 * sampleRate / 44100.0));
+    const float higherGain = rendered.getSample (0, juce::roundToInt (40000.0 * sampleRate / 44100.0));
     REQUIRE (higherGain > lowerGain * 1.4f);
     REQUIRE (higherGain < lowerGain * 1.8f);
 }
@@ -1833,7 +1894,7 @@ TEST_CASE ("Audio from a track passes through its group bus before the master")
 
     juce::String error;
     REQUIRE (engine.beginOfflineTrackRender (AudioEngine::masterTrackId, error));
-    juce::AudioBuffer<float> rendered (2, 44100);
+    juce::AudioBuffer<float> rendered (2, juce::roundToInt (engine.offlineRenderSampleRate()));
     const auto result = engine.renderTrackRange (0.0, 2.0, rendered, {}, {});
     engine.finishOfflineRender();
 

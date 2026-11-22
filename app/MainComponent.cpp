@@ -1071,6 +1071,11 @@ MainComponent::MainComponent()
         const auto* track = project.track (id);
         const auto type = track != nullptr ? track->type : roll::TrackType::Midi;
         engine.addTrack (id, type);
+        if (track != nullptr && track->frozen)
+        {
+            engine.setTrackFrozen (id, true);
+            publishAudioTrack (id);
+        }
         if (type == roll::TrackType::Midi)
             engine.publishNotes (id, {});
         applyMixers();
@@ -1087,6 +1092,15 @@ MainComponent::MainComponent()
             engine.publishNotes (id, roll::flatten (*t));
     };
     project.onAudioClipsChanged = [this] (int id) { publishAudioTrack (id); };
+    project.onTrackFreezeChanged = [this] (int id)
+    {
+        if (const auto* track = project.track (id); track != nullptr)
+        {
+            engine.setTrackType (id, track->type);
+            engine.setTrackFrozen (id, track->frozen);
+        }
+        publishAudioTrack (id);
+    };
     project.onMixerChanged = [this] { applyMixers(); };
     project.onAudioClipAutomationChanged = [this] (int trackId)
     {
@@ -1474,6 +1488,9 @@ MainComponent::MainComponent()
     {
         consolidateAudioRange (startBeat, endBeat, firstTrack, lastTrack);
     };
+    arrangement.onFreezeTrackRequested = [this] (int trackId) { freezeTrack (trackId); };
+    arrangement.onUnfreezeTrackRequested = [this] (int trackId) { unfreezeTrack (trackId); };
+    arrangement.onFlattenTrackRequested = [this] (int trackId) { flattenTrack (trackId); };
     audioBrowser.canDeleteFile = [this] (const juce::File& file)
     {
         for (const auto& track : project.tracks)
@@ -2729,9 +2746,9 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     }
 
     auto* track = project.tracks[static_cast<std::size_t> (firstTrack)].get();
-    if (track->type != roll::TrackType::Audio)
+    if (track->type != roll::TrackType::Audio || track->frozen)
     {
-        audioBrowser.setStatus ("Consolidate: the selected track must be an audio track.");
+        audioBrowser.setStatus ("Consolidate: select an unfrozen audio track.");
         return;
     }
 
@@ -2979,29 +2996,345 @@ void MainComponent::consolidateAudioRange (double startBeat, double endBeat, int
     });
 }
 
+void MainComponent::freezeTrack (int trackId)
+{
+    auto* track = project.track (trackId);
+    if (trackId <= 0 || track == nullptr || track->type == roll::TrackType::Group || track->frozen)
+        return;
+    if (audioRenderInProgress || projectFileOperationInProgress
+        || ! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
+        || pendingAudioLoads > 0 || scanningPlugins)
+    {
+        setProjectStatus ("Wait for current loads and operations to finish before freezing.");
+        return;
+    }
+
+    double endBeat = 0.0;
+    if (track->type == roll::TrackType::Audio)
+    {
+        for (const auto& clip : track->audioClips)
+        {
+            endBeat = std::max (endBeat, clip->end());
+            if (! clip->enabled)
+                continue;
+            const auto asset = audioAssets.find (clip->filePath);
+            if (asset == audioAssets.end() || asset->second == nullptr || asset->second->samples == nullptr)
+            {
+                setProjectStatus ("Freeze: could not access the source for " + juce::String (clip->name));
+                return;
+            }
+        }
+    }
+    else
+    {
+        for (const auto& clip : track->clips)
+            endBeat = std::max (endBeat, clip->end());
+    }
+    if (endBeat <= 0.0)
+    {
+        setProjectStatus ("Freeze: the track has no clips to render.");
+        return;
+    }
+
+    const double bpm = engine.graph().getBpm();
+    if (! std::isfinite (bpm) || bpm <= 0.0)
+    {
+        setProjectStatus ("Freeze: the project BPM is invalid.");
+        return;
+    }
+    const double tailSeconds = engine.trackTailLengthSeconds (trackId);
+    const double renderEndBeat = endBeat + tailSeconds * bpm / 60.0;
+    const double durationSeconds = renderEndBeat * 60.0 / bpm;
+    if (! std::isfinite (durationSeconds) || durationSeconds <= 0.0 || durationSeconds > 600.0)
+    {
+        setProjectStatus ("Freeze: the track is too long to render (maximum 10 minutes).");
+        return;
+    }
+
+    auto outputDirectory = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                              .getChildFile ("MaXXXtudio").getChildFile ("Frozen");
+    if (const auto error = outputDirectory.createDirectory(); error.failed())
+    {
+        setProjectStatus ("Freeze: could not create the cache folder: " + error.getErrorMessage());
+        return;
+    }
+    const auto outputFile = outputDirectory.getNonexistentChildFile (
+        "Frozen_" + juce::Time::getCurrentTime().formatted ("%Y%m%d_%H%M%S"),
+        ".wav", false);
+    const auto trackName = juce::String (track->name);
+
+    releaseComputerMidiNotes();
+    juce::String error;
+    if (! engine.beginOfflineTrackRender (trackId, error))
+    {
+        setProjectStatus ("Could not start freezing: " + error);
+        return;
+    }
+
+    audioRenderInProgress = true;
+    setAudioRenderUiEnabled (false);
+    auto cancelled = std::make_shared<std::atomic<bool>> (false);
+    auto task = std::make_shared<TaskScope> (
+        taskRegistry, "Freezing track: " + trackName, "global", 0.0, true,
+        [cancelled] { cancelled->store (true, std::memory_order_release); });
+    const auto outputSampleRate = engine.offlineRenderSampleRate();
+    const auto token = std::weak_ptr<std::atomic<bool>> (lifetimeToken);
+
+    projectFilePool.addJob ([this, token, task, cancelled, outputFile, trackId,
+                              renderEndBeat, bpm, durationSeconds, outputSampleRate]
+    {
+        const auto frameCountDouble = std::ceil (durationSeconds * outputSampleRate);
+        if (! std::isfinite (frameCountDouble) || frameCountDouble < 1.0
+            || frameCountDouble > static_cast<double> (std::numeric_limits<int>::max()))
+        {
+            juce::MessageManager::callAsync ([this, token, outputFile, task]
+            {
+                if (const auto alive = token.lock(); alive != nullptr && alive->load())
+                {
+                    engine.finishOfflineRender();
+                    audioRenderInProgress = false;
+                    setAudioRenderUiEnabled (true);
+                    outputFile.deleteFile();
+                    task->end();
+                    setProjectStatus ("Freeze: the render buffer is too large.");
+                }
+            });
+            return;
+        }
+
+        const int frameCount = static_cast<int> (frameCountDouble);
+        auto renderedSamples = std::make_shared<juce::AudioBuffer<float>> (2, frameCount);
+        int lastReportedPercent = -1;
+        auto result = engine.renderTrackRange (
+            0.0, renderEndBeat, *renderedSamples,
+            [task, &lastReportedPercent] (double progress)
+            {
+                const int percent = static_cast<int> (progress * 100.0);
+                if (percent != lastReportedPercent)
+                {
+                    task->setProgress (progress);
+                    lastReportedPercent = percent;
+                }
+            },
+            [cancelled] { return cancelled->load (std::memory_order_acquire); });
+
+        std::shared_ptr<AudioFileData> data;
+        if (result.wasOk())
+        {
+            auto fileStream = std::make_unique<juce::FileOutputStream> (outputFile);
+            if (! fileStream->openedOk())
+                result = juce::Result::fail ("Could not create the frozen audio file.");
+            else
+            {
+                std::unique_ptr<juce::OutputStream> outputStream (std::move (fileStream));
+                juce::WavAudioFormat wavFormat;
+                const juce::AudioFormatWriterOptions writerOptions;
+                auto writer = wavFormat.createWriterFor (outputStream,
+                    writerOptions.withSampleRate (outputSampleRate).withNumChannels (2).withBitsPerSample (24));
+                if (writer == nullptr || ! writer->writeFromAudioSampleBuffer (
+                        *renderedSamples, 0, renderedSamples->getNumSamples()))
+                {
+                    writer.reset();
+                    outputStream.reset();
+                    result = juce::Result::fail ("Failed to write the frozen audio file.");
+                }
+                else
+                {
+                    writer.reset();
+                    data = std::make_shared<AudioFileData>();
+                    data->file = outputFile;
+                    data->samples = renderedSamples;
+                    data->sampleRate = outputSampleRate;
+                    data->durationSeconds = durationSeconds;
+                    constexpr int maxWaveformBins = 16384;
+                    const int waveformBins = std::min (renderedSamples->getNumSamples(), maxWaveformBins);
+                    data->waveform.resize (static_cast<std::size_t> (waveformBins));
+                    for (int bin = 0; bin < waveformBins; ++bin)
+                    {
+                        const int from = static_cast<int> (
+                            static_cast<std::int64_t> (bin) * frameCount / waveformBins);
+                        const int to = std::max (from + 1, static_cast<int> (
+                            static_cast<std::int64_t> (bin + 1) * frameCount / waveformBins));
+                        float minimum = 1.0f;
+                        float maximum = -1.0f;
+                        for (int frame = from; frame < std::min (to, frameCount); ++frame)
+                            for (int channel = 0; channel < renderedSamples->getNumChannels(); ++channel)
+                            {
+                                const float value = renderedSamples->getSample (channel, frame);
+                                minimum = std::min (minimum, value);
+                                maximum = std::max (maximum, value);
+                            }
+                        data->waveform[static_cast<std::size_t> (bin)] = { minimum, maximum };
+                    }
+                }
+            }
+        }
+        if (result.failed())
+            outputFile.deleteFile();
+
+        task->end();
+        juce::MessageManager::callAsync ([this, token, task, cancelled, outputFile, trackId,
+                                          renderEndBeat, bpm, durationSeconds, result, data]
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+            {
+                outputFile.deleteFile();
+                return;
+            }
+            engine.finishOfflineRender();
+            audioRenderInProgress = false;
+            setAudioRenderUiEnabled (true);
+            if (cancelled->load (std::memory_order_acquire))
+            {
+                outputFile.deleteFile();
+                setProjectStatus ("Freeze cancelled.");
+                return;
+            }
+            if (result.failed())
+            {
+                setProjectStatus ("Freeze failed: " + result.getErrorMessage());
+                return;
+            }
+
+            auto* targetTrack = project.track (trackId);
+            if (targetTrack == nullptr || targetTrack->type == roll::TrackType::Group
+                || targetTrack->frozen || data == nullptr)
+            {
+                outputFile.deleteFile();
+                setProjectStatus ("Freeze: the track changed during rendering.");
+                return;
+            }
+
+            const auto path = outputFile.getFullPathName().toStdString();
+            audioAssets[path] = data;
+            auto frozenClip = std::make_unique<roll::AudioPlacement>();
+            frozenClip->id = targetTrack->nextClipId();
+            frozenClip->start = 0.0;
+            frozenClip->lengthBeats = renderEndBeat;
+            frozenClip->durationSeconds = durationSeconds;
+            frozenClip->sourceBpm = bpm;
+            frozenClip->warpEnabled = false;
+            frozenClip->name = targetTrack->name + " (Frozen)";
+            frozenClip->filePath = path;
+            frozenClip->waveform = data->waveform;
+
+            project.beginEdit();
+            targetTrack->frozenAudioClip = std::move (frozenClip);
+            targetTrack->frozen = true;
+            targetTrack->freezeReversible = true;
+            project.growTo (renderEndBeat + 64.0);
+            project.selectClip (trackId, -1);
+            project.endEdit();
+            if (project.onTrackFreezeChanged)
+                project.onTrackFreezeChanged (trackId);
+            project.sendChangeMessage();
+            setProjectStatus ("Track frozen: " + outputFile.getFileName());
+        });
+    });
+}
+
+void MainComponent::unfreezeTrack (int trackId)
+{
+    auto* track = project.track (trackId);
+    if (trackId <= 0 || track == nullptr || ! track->frozen || ! track->freezeReversible)
+        return;
+    if (audioRenderInProgress || projectFileOperationInProgress
+        || restoringProjectPlugins || pendingAudioLoads > 0 || scanningPlugins)
+    {
+        setProjectStatus ("Wait for current loads and operations to finish before unfreezing.");
+        return;
+    }
+
+    project.beginEdit();
+    track->frozen = false;
+    track->frozenAudioClip.reset();
+    project.endEdit();
+    if (project.onTrackFreezeChanged)
+        project.onTrackFreezeChanged (trackId);
+    project.sendChangeMessage();
+    setProjectStatus ("Track unfrozen.");
+}
+
+void MainComponent::flattenTrack (int trackId)
+{
+    auto* track = project.track (trackId);
+    if (trackId <= 0 || track == nullptr || ! track->frozen || ! track->freezeReversible
+        || track->frozenAudioClip == nullptr)
+        return;
+    if (audioRenderInProgress || projectFileOperationInProgress
+        || restoringProjectPlugins || pendingAudioLoads > 0 || scanningPlugins)
+    {
+        setProjectStatus ("Wait for current loads and operations to finish before flattening.");
+        return;
+    }
+
+    closeWindowsOfTrack (trackId);
+    project.beginExternalEdit();
+    for (const auto& device : engine.devices (trackId))
+        engine.removeDevice (trackId, device.id);
+    std::erase_if (track->automation, [] (const auto& envelope)
+    {
+        return envelope.target.type == roll::AutomationParameterType::PluginParameter
+            || envelope.target.type == roll::AutomationParameterType::AudioClipGain
+            || envelope.target.type == roll::AutomationParameterType::AudioClipPitch
+            || envelope.target.type == roll::AutomationParameterType::AudioClipFadeIn
+            || envelope.target.type == roll::AutomationParameterType::AudioClipFadeOut;
+    });
+    const int frozenClipId = track->frozenAudioClip->id;
+    track->clips.clear();
+    track->audioClips.clear();
+    track->audioClips.push_back (std::move (track->frozenAudioClip));
+    if (track->type == roll::TrackType::Midi)
+        track->type = roll::TrackType::Audio;
+    track->frozen = false;
+    track->freezeReversible = true;
+    project.endEdit();
+    refreshDeviceView();
+    if (project.onTrackFreezeChanged)
+        project.onTrackFreezeChanged (trackId);
+    project.selectAudioClip (trackId, frozenClipId);
+    project.sendChangeMessage();
+    setProjectStatus ("Track flattened to audio.");
+}
+
 void MainComponent::publishAudioTrack (int trackId)
 {
     std::vector<AudioClipPlayback> clips;
-    if (const auto* track = project.track (trackId); track != nullptr && track->type == roll::TrackType::Audio)
-        for (const auto& clip : track->audioClips)
-            if (clip->enabled)
-                if (const auto asset = audioAssets.find (clip->filePath); asset != audioAssets.end())
-                {
-                    AudioClipPlayback playback {
-                        clip->start, clip->lengthBeats, clip->sourceBpm,
-                        clip->sourceOffsetSeconds, clip->fadeInBeats,
-                        clip->fadeOutBeats, clip->fadeInCurve, clip->fadeOutCurve,
-                        clip->pitchSemitones + clip->pitchCents / 100.0,
-                        clip->gainDb, clip->warpMode, asset->second,
-                        clip->warpEnabled, clip->reverse
-                    };
-                    playback.durationSeconds = clip->durationSeconds;
-                    playback.warpMarkers = clip->warpMarkers;
-                    for (const auto& envelope : track->automation)
-                        if (envelope.target.clipId == clip->id)
-                            playback.automation.push_back (envelope);
-                    clips.push_back (std::move (playback));
-                }
+    if (const auto* track = project.track (trackId); track != nullptr)
+    {
+        const auto appendClip = [&] (const roll::AudioPlacement& clip)
+        {
+            if (! clip.enabled)
+                return;
+            const auto asset = audioAssets.find (clip.filePath);
+            if (asset == audioAssets.end())
+                return;
+
+            AudioClipPlayback playback {
+                clip.start, clip.lengthBeats, clip.sourceBpm,
+                clip.sourceOffsetSeconds, clip.fadeInBeats,
+                clip.fadeOutBeats, clip.fadeInCurve, clip.fadeOutCurve,
+                clip.pitchSemitones + clip.pitchCents / 100.0,
+                clip.gainDb, clip.warpMode, asset->second,
+                clip.warpEnabled, clip.reverse
+            };
+            playback.durationSeconds = clip.durationSeconds;
+            playback.warpMarkers = clip.warpMarkers;
+            for (const auto& envelope : track->automation)
+                if (envelope.target.clipId == clip.id)
+                    playback.automation.push_back (envelope);
+            clips.push_back (std::move (playback));
+        };
+        if (track->frozen)
+        {
+            if (track->frozenAudioClip != nullptr)
+                appendClip (*track->frozenAudioClip);
+        }
+        else if (track->type == roll::TrackType::Audio)
+            for (const auto& clip : track->audioClips)
+                appendClip (*clip);
+    }
     engine.publishAudioClips (trackId, clips);
 
     for (auto it = audioAssets.begin(); it != audioAssets.end();)
@@ -3019,7 +3352,15 @@ bool MainComponent::selectedTrackSpan (double& start, double& end) const
 
     start = std::numeric_limits<double>::max();
     end = 0.0;
-    if (track->type == roll::TrackType::Audio)
+    if (track->frozen)
+    {
+        if (track->frozenAudioClip != nullptr)
+        {
+            start = track->frozenAudioClip->start;
+            end = track->frozenAudioClip->end();
+        }
+    }
+    else if (track->type == roll::TrackType::Audio)
     {
         for (const auto& clip : track->audioClips)
         {
@@ -3179,6 +3520,14 @@ void MainComponent::loopSelectedTrack()
 
     double start = 0.0, end = 0.0;
     const auto* track = project.selectedTrack();
+    if (track != nullptr && track->frozen)
+    {
+        if (! selectedTrackSpan (start, end))
+            return;
+        project.setLoop (start, end);
+        transport.setLoopEnabled (true);
+        return;
+    }
     const auto* audio = track != nullptr && track->type == roll::TrackType::Audio
         ? track->findAudioClip (project.selectedAudioClipId) : nullptr;
     const auto* midi = project.selectedClip();
@@ -4213,9 +4562,12 @@ void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData 
     projectLoadWorkTotal = data.plugins.size();
     std::set<std::string> audioPaths;
     for (const auto& track : data.project.tracks)
-        if (track.type == roll::TrackType::Audio)
-            for (const auto& clip : track.audioClips)
-                audioPaths.insert (clip->filePath);
+    {
+        for (const auto& clip : track.audioClips)
+            audioPaths.insert (clip->filePath);
+        if (track.frozenAudioClip != nullptr)
+            audioPaths.insert (track.frozenAudioClip->filePath);
+    }
     projectLoadWorkTotal += audioPaths.size();
     task->setProgress (0.25);
 
@@ -4237,7 +4589,9 @@ void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData 
     project.replaceState (std::move (data.project));
     audioAssets.clear();
     for (const auto& track : project.tracks)
-        if (track->type == roll::TrackType::Audio && project.onAudioClipsChanged)
+        if (track->frozen && project.onTrackFreezeChanged)
+            project.onTrackFreezeChanged (track->id);
+        else if (track->type == roll::TrackType::Audio && project.onAudioClipsChanged)
             project.onAudioClipsChanged (track->id);
 
     transport.setBpm (data.bpm);
@@ -4417,9 +4771,12 @@ void MainComponent::loadProjectAudio (const ProjectFileData& data)
 {
     std::set<std::string> paths;
     for (const auto& track : project.tracks)
-        if (track->type == roll::TrackType::Audio)
-            for (const auto& clip : track->audioClips)
-                paths.insert (clip->filePath);
+    {
+        for (const auto& clip : track->audioClips)
+            paths.insert (clip->filePath);
+        if (track->frozenAudioClip != nullptr)
+            paths.insert (track->frozenAudioClip->filePath);
+    }
 
     if (paths.empty())
     {
@@ -4456,19 +4813,29 @@ void MainComponent::loadProjectAudio (const ProjectFileData& data)
 
             audioAssets[path] = data;
             for (const auto& track : project.tracks)
-                if (track->type == roll::TrackType::Audio)
+            {
+                bool changed = false;
+                for (auto& clip : track->audioClips)
+                    if (clip->filePath == path)
+                    {
+                        clip->waveform = data->waveform;
+                        clip->durationSeconds = data->durationSeconds;
+                        changed = true;
+                    }
+                if (track->frozenAudioClip != nullptr && track->frozenAudioClip->filePath == path)
                 {
-                    bool changed = false;
-                    for (auto& clip : track->audioClips)
-                        if (clip->filePath == path)
-                        {
-                            clip->waveform = data->waveform;
-                            clip->durationSeconds = data->durationSeconds;
-                            changed = true;
-                        }
-                    if (changed && project.onAudioClipsChanged)
+                    track->frozenAudioClip->waveform = data->waveform;
+                    track->frozenAudioClip->durationSeconds = data->durationSeconds;
+                    changed = true;
+                }
+                if (changed)
+                {
+                    if (track->frozen && project.onTrackFreezeChanged)
+                        project.onTrackFreezeChanged (track->id);
+                    else if (project.onAudioClipsChanged)
                         project.onAudioClipsChanged (track->id);
                 }
+            }
             refreshAudioClipEditor();
             project.sendChangeMessage();
             ++projectLoadWorkDone;

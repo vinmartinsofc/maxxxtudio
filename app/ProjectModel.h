@@ -72,6 +72,7 @@ public:
     std::function<void (int trackId)> onTrackAdded, onTrackRemoved;   // onTrackRemoved: before deletion.
     std::function<void (int trackId)> onTrackNotes;                   // Track notes changed.
     std::function<void (int trackId)> onAudioClipsChanged;
+    std::function<void (int trackId)> onTrackFreezeChanged;
     std::function<void (int trackId)> onAudioClipAutomationChanged;
     std::function<void()> onMixerChanged;
     std::function<void()> onSelectionChanged;                         // Selected track/clip changed.

@@ -55,6 +55,7 @@ std::size_t trackWorkUnits (const roll::Track& track)
     count += track.audioClips.size();
     for (const auto& clip : track.audioClips)
         count += clip->warpMarkers.size();
+    count += track.frozenAudioClip != nullptr ? 1 : 0;
     return count;
 }
 
@@ -85,6 +86,8 @@ std::size_t xmlWorkUnits (const juce::XmlElement& xml)
                         if (marker->hasTagName ("WarpMarker"))
                             ++count;
                 }
+                else if (child->hasTagName ("FrozenAudioClip"))
+                    ++count;
                 else if (child->hasTagName ("Automation"))
                 {
                     for (auto* envelope = child->getFirstChildElement(); envelope != nullptr;
@@ -177,6 +180,8 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
     node->setAttribute ("mute", track.mute);
     node->setAttribute ("solo", track.solo);
     node->setAttribute ("collapsed", track.collapsed);
+    node->setAttribute ("frozen", track.frozen);
+    node->setAttribute ("freezeReversible", track.freezeReversible);
     node->setAttribute ("routing", track.outputRouting == roll::TrackOutputRouting::ExtOut ? "external" : "master");
 
     for (const auto& envelope : track.automation)
@@ -304,6 +309,29 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
         }
         progress.completeUnit();
     }
+
+    if (track.frozen)
+    {
+        if (track.frozenAudioClip == nullptr)
+            throw std::runtime_error ("A frozen track has no rendered audio clip.");
+        const auto& frozenClip = *track.frozenAudioClip;
+        if (frozenClip.id < 1 || ! std::isfinite (frozenClip.lengthBeats)
+            || frozenClip.lengthBeats <= 0.0 || ! std::isfinite (frozenClip.durationSeconds)
+            || frozenClip.durationSeconds <= 0.0 || ! std::isfinite (frozenClip.sourceBpm)
+            || frozenClip.sourceBpm < 20.0 || frozenClip.sourceBpm > 300.0
+            || frozenClip.filePath.empty())
+            throw std::runtime_error ("A frozen track contains invalid rendered audio.");
+        const auto frozenAsset = collectAudioAsset (stringFromUtf8 (frozenClip.filePath), projectFolder,
+                                                    assetFolder, copiedAssets, assetNames);
+        auto* frozenNode = node->createNewChildElement ("FrozenAudioClip");
+        frozenNode->setAttribute ("id", frozenClip.id);
+        frozenNode->setAttribute ("length", frozenClip.lengthBeats);
+        frozenNode->setAttribute ("duration", frozenClip.durationSeconds);
+        frozenNode->setAttribute ("sourceBpm", frozenClip.sourceBpm);
+        frozenNode->setAttribute ("name", stringFromUtf8 (frozenClip.name));
+        frozenNode->setAttribute ("file", frozenAsset);
+        progress.completeUnit();
+    }
     progress.completeUnit();
 }
 
@@ -333,6 +361,10 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
     track.mute = node.getBoolAttribute ("mute", false);
     track.solo = node.getBoolAttribute ("solo", false);
     track.collapsed = node.getBoolAttribute ("collapsed", false);
+    track.frozen = node.getBoolAttribute ("frozen", false);
+    track.freezeReversible = node.getBoolAttribute ("freezeReversible", true);
+    if (! track.frozen && ! track.freezeReversible)
+        return false;
     track.outputRouting = node.getStringAttribute ("routing") == "external"
         ? roll::TrackOutputRouting::ExtOut : roll::TrackOutputRouting::Master;
     if (track.parentGroupId < 0 || ! validNumber (track.volume) || track.volume < 0.0 || track.volume > 1.5
@@ -544,7 +576,40 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
                 missingAudioFiles.push_back (source);
             progress.completeUnit();
         }
+        else if (child->hasTagName ("FrozenAudioClip"))
+        {
+            const int id = child->getIntAttribute ("id", -1);
+            const double length = child->getDoubleAttribute ("length", 0.0);
+            const double duration = child->getDoubleAttribute ("duration", 0.0);
+            const double sourceBpm = child->getDoubleAttribute ("sourceBpm", 120.0);
+            const auto relativePath = child->getStringAttribute ("file");
+            if (! track.frozen || track.frozenAudioClip != nullptr || id < 1
+                || ! clipIds.insert (id).second || ! validNumber (length) || length <= 0.0
+                || ! validNumber (duration) || duration <= 0.0
+                || ! validNumber (sourceBpm) || sourceBpm < 20.0 || sourceBpm > 300.0
+                || relativePath.isEmpty() || juce::File::isAbsolutePath (relativePath))
+                return false;
+
+            const auto source = projectFolder.getChildFile (relativePath);
+            if (! source.isAChildOf (projectFolder))
+                return false;
+            auto clip = std::make_unique<roll::AudioPlacement>();
+            clip->id = id;
+            clip->lengthBeats = length;
+            clip->durationSeconds = duration;
+            clip->sourceBpm = sourceBpm;
+            clip->name = child->getStringAttribute ("name").toStdString();
+            clip->filePath = source.getFullPathName().toStdString();
+            clip->warpEnabled = false;
+            track.reserveClipId (id);
+            track.frozenAudioClip = std::move (clip);
+            if (! source.existsAsFile())
+                missingAudioFiles.push_back (source);
+            progress.completeUnit();
+        }
     }
+    if (track.frozen != (track.frozenAudioClip != nullptr))
+        return false;
     progress.completeUnit();
     return true;
 }
