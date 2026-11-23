@@ -14,6 +14,7 @@
 #include "DrumRackProcessor.h"
 #include "NativeEffectProcessors.h"
 #include "RemotePluginProcessor.h"
+#include "ThemeKnobSlider.h"
 #include <juce_dsp/juce_dsp.h>
 #include "Icons.h"
 #include <algorithm>
@@ -607,8 +608,6 @@ class MainComponent::MixerView final : public juce::Component
             pan.setRange (-1.0, 1.0, 0.01);
             pan.setDoubleClickReturnValue (true, 0.0);
             pan.setTooltip ("Pan: left to right; double-click to center.");
-            pan.setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
-            pan.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border());
             pan.onDragStart = [this] { project.beginEdit(); };
             pan.onDragEnd = [this] { project.endEdit(); };
             pan.onValueChange = [this] { updatePan(); };
@@ -636,13 +635,10 @@ class MainComponent::MixerView final : public juce::Component
             volumeDb.setFont (theme::fontOptions (9.5f));
             addAndMakeVisible (volumeDb);
 
-            volume.setSliderStyle (juce::Slider::LinearVertical);
-            volume.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
-            volume.setRange (-60.0, master ? 6.0 : roll::gainToDecibels (1.5f), 0.1);
+            volume.setNormalisableRange (MixerFaderSlider::decibelRange (
+                master ? 6.0 : roll::gainToDecibels (1.5f)));
             volume.setDoubleClickReturnValue (true, 0.0);
             volume.setTooltip ("Channel level in decibels.");
-            volume.setColour (juce::Slider::trackColourId, theme::accent());
-            volume.setColour (juce::Slider::thumbColourId, theme::accentHover());
             volume.onDragStart = [this] { project.beginEdit(); };
             volume.onDragEnd = [this] { project.endEdit(); };
             volume.onValueChange = [this] { updateVolume(); };
@@ -658,8 +654,9 @@ class MainComponent::MixerView final : public juce::Component
                 return;
 
             name.setText (master ? "MASTER" : track->name, juce::dontSendNotification);
-            channelColour = master ? theme::accent() : ArrangementView::colourFor (*track);
-            volume.setColour (juce::Slider::trackColourId, channelColour);
+            channelColour = ArrangementView::colourFor (*track);
+            volume.setTrackColour (channelColour);
+            pan.setTrackColour (channelColour);
             const float gain = static_cast<float> (track->volume);
             const double db = gain > 0.000001f ? roll::gainToDecibels (gain) : -60.0;
             volume.setValue (db, juce::dontSendNotification);
@@ -686,7 +683,7 @@ class MainComponent::MixerView final : public juce::Component
             theme::drawChromeSurface (g, bounds, 5.0f, theme::panel());
             g.setColour (channelColour);
             g.fillRoundedRectangle (bounds.getX() + 3.0f, bounds.getY() + 3.0f,
-                                    bounds.getWidth() - 6.0f, 2.0f, 1.0f);
+                                    bounds.getWidth() - 6.0f, 3.0f, 1.0f);
 
             const float meterY = 100.0f;
             const float meterHeight = std::max (1.0f, static_cast<float> (getHeight()) - meterY - 24.0f);
@@ -716,7 +713,8 @@ class MainComponent::MixerView final : public juce::Component
             area.removeFromTop (5);
             const int faderBottom = getHeight() - 22;
             volumeDb.setBounds (0, faderBottom, getWidth() - 20, 17);
-            volume.setBounds (15, area.getY(), 32, std::max (1, faderBottom - area.getY() - 4));
+            volume.setBounds (3, area.getY(), std::max (1, getWidth() - 30),
+                              std::max (1, faderBottom - area.getY() - 4));
         }
 
     private:
@@ -773,7 +771,8 @@ class MainComponent::MixerView final : public juce::Component
         bool master = false;
         juce::String channelLabel;
         juce::Label name, panLabel, volumeDb;
-        juce::Slider pan, volume;
+        MixerPanSlider pan;
+        MixerFaderSlider volume;
         juce::TextButton mute { "M" }, solo { "S" };
         juce::Colour channelColour = theme::accent();
         float leftLevel = 0.0f, rightLevel = 0.0f;

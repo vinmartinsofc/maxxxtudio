@@ -1,10 +1,53 @@
 #include "ThemeKnobSlider.h"
 #include "Theme.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace
 {
+constexpr std::array<std::pair<double, double>, 7> mixerFaderCurve {{
+    { 0.00, -60.0 }, { 0.08, -48.0 }, { 0.25, -24.0 }, { 0.45, -12.0 },
+    { 0.60, -6.0 }, { 0.75, 0.0 }, { 1.00, 6.0 }
+}};
+
+double faderPositionForDecibels (double decibels)
+{
+    decibels = std::clamp (decibels, mixerFaderCurve.front().second,
+                           mixerFaderCurve.back().second);
+    for (std::size_t i = 1; i < mixerFaderCurve.size(); ++i)
+    {
+        const auto [rightPosition, rightDb] = mixerFaderCurve[i];
+        if (decibels <= rightDb)
+        {
+            const auto [leftPosition, leftDb] = mixerFaderCurve[i - 1];
+            const double proportion = (decibels - leftDb) / (rightDb - leftDb);
+            return leftPosition + proportion * (rightPosition - leftPosition);
+        }
+    }
+
+    return 1.0;
+}
+
+double decibelsForFaderPosition (double position)
+{
+    position = std::clamp (position, mixerFaderCurve.front().first,
+                           mixerFaderCurve.back().first);
+    for (std::size_t i = 1; i < mixerFaderCurve.size(); ++i)
+    {
+        const auto [rightPosition, rightDb] = mixerFaderCurve[i];
+        if (position <= rightPosition)
+        {
+            const auto [leftPosition, leftDb] = mixerFaderCurve[i - 1];
+            const double proportion = (position - leftPosition)
+                                    / (rightPosition - leftPosition);
+            return leftDb + proportion * (rightDb - leftDb);
+        }
+    }
+
+    return 6.0;
+}
+
 class SelectAllSliderLabel final : public juce::Label
 {
 public:
@@ -121,6 +164,154 @@ void drawHighTechTickBox (juce::Graphics& g, juce::Rectangle<float> bounds,
             juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     }
 }
+}
+
+MixerFaderSlider::MixerFaderSlider()
+    : trackColour (theme::accent())
+{
+    setSliderStyle (juce::Slider::LinearVertical);
+    setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+}
+
+void MixerPanSlider::setTrackColour (juce::Colour colour)
+{
+    if (trackColour == colour)
+        return;
+
+    trackColour = colour;
+    repaint();
+}
+
+void MixerFaderSlider::setTrackColour (juce::Colour colour)
+{
+    if (trackColour == colour)
+        return;
+
+    trackColour = colour;
+    scaleCache = {};
+    repaint();
+}
+
+float MixerFaderSlider::getCapHeight() const noexcept
+{
+    return std::max (1.0f, std::min (16.0f, static_cast<float> (getHeight()) * 0.08f));
+}
+
+double MixerFaderSlider::normalisedPositionForDecibels (double decibels)
+{
+    return faderPositionForDecibels (decibels);
+}
+
+double MixerFaderSlider::decibelsForNormalisedPosition (double position)
+{
+    return decibelsForFaderPosition (position);
+}
+
+juce::NormalisableRange<double> MixerFaderSlider::decibelRange (double maximumDb)
+{
+    maximumDb = std::clamp (maximumDb, -59.9, 6.0);
+    // Keep each channel's existing gain limit; channels below +6 dB simply stop before the scale's top.
+    return {
+        -60.0, maximumDb,
+        [] (double, double, double position)
+        {
+            return decibelsForNormalisedPosition (position);
+        },
+        [] (double, double, double decibels)
+        {
+            return normalisedPositionForDecibels (decibels);
+        },
+        [] (double minimum, double maximum, double decibels)
+        {
+            return juce::jlimit (minimum, maximum, std::round (decibels * 10.0) / 10.0);
+        }
+    };
+}
+
+void MixerFaderSlider::drawCachedScale (juce::Graphics& g)
+{
+    updateScaleCache();
+    g.drawImageWithin (scaleCache, 0, 0, getWidth(), getHeight(),
+                       juce::RectanglePlacement::stretchToFit);
+}
+
+void MixerFaderSlider::updateScaleCache()
+{
+    const auto surfaceColour = theme::control();
+    const auto borderColour = theme::border();
+    const auto textColour = theme::textDim();
+    const float scale = std::max (0.5f, juce::Component::getApproximateScaleFactorForComponent (this));
+    const int imageWidth = std::max (1, juce::roundToInt (static_cast<float> (getWidth()) * scale));
+    const int imageHeight = std::max (1, juce::roundToInt (static_cast<float> (getHeight()) * scale));
+
+    if (scaleCache.isValid() && scaleCache.getWidth() == imageWidth
+        && scaleCache.getHeight() == imageHeight && cachedTrackColour == trackColour
+        && cachedSurfaceColour == surfaceColour && cachedBorderColour == borderColour
+        && cachedTextColour == textColour)
+        return;
+
+    scaleCache = juce::Image (juce::Image::ARGB, imageWidth, imageHeight, true);
+    juce::Graphics cacheGraphics (scaleCache);
+    cacheGraphics.addTransform (juce::AffineTransform::scale (scale));
+
+    const float width = static_cast<float> (getWidth());
+    const float height = static_cast<float> (getHeight());
+    const float capHeight = getCapHeight();
+    const float capWidth = std::min (width * 0.42f, capHeight * 1.9f);
+    const float centreX = width * 0.68f;
+    const float railWidth = std::min (6.0f, std::max (4.0f, width * 0.085f));
+    const float top = capHeight * 0.5f;
+    const float bottom = height - top;
+    const juce::Rectangle<float> rail (centreX - railWidth * 0.5f, top,
+                                       railWidth, std::max (0.0f, bottom - top));
+
+    cacheGraphics.setColour (surfaceColour);
+    cacheGraphics.fillRoundedRectangle (rail, railWidth * 0.5f);
+    cacheGraphics.setColour (borderColour);
+    cacheGraphics.drawRoundedRectangle (rail, railWidth * 0.5f, 0.8f);
+
+    constexpr std::array<std::pair<double, const char*>, 5> ticks {{
+        { -48.0, "-48" }, { -24.0, "-24" }, { -12.0, "-12" },
+        { -6.0, "-6" }, { 0.0, "0" }
+    }};
+    const float labelRight = centreX - capWidth * 0.5f - 2.0f;
+    const float labelWidth = std::max (0.0f, labelRight);
+    const float tickStart = centreX - railWidth * 0.5f - 6.0f;
+    const float tickEnd = centreX - railWidth * 0.5f - 1.5f;
+    cacheGraphics.setFont (theme::fontOptions (11.0f));
+    cacheGraphics.setColour (textColour);
+    for (const auto& [decibels, label] : ticks)
+    {
+        if (decibels > getMaximum())
+            continue;
+
+        const double position = normalisedPositionForDecibels (decibels);
+        const float y = bottom - static_cast<float> (position) * (bottom - top);
+        cacheGraphics.setColour (borderColour.brighter (0.18f));
+        cacheGraphics.drawHorizontalLine (juce::roundToInt (y), tickStart, tickEnd);
+        cacheGraphics.setColour (textColour);
+        cacheGraphics.drawText (label,
+            juce::Rectangle<float> (0.0f, y - 7.0f, labelWidth, 14.0f),
+            juce::Justification::centredRight, false);
+    }
+
+    cachedTrackColour = trackColour;
+    cachedSurfaceColour = surfaceColour;
+    cachedBorderColour = borderColour;
+    cachedTextColour = textColour;
+}
+
+juce::Slider::SliderLayout ThemeKnobLookAndFeel::getSliderLayout (juce::Slider& slider)
+{
+    auto layout = juce::LookAndFeel_V4::getSliderLayout (slider);
+    if (auto* fader = dynamic_cast<MixerFaderSlider*> (&slider))
+    {
+        const int inset = std::min (layout.sliderBounds.getHeight() / 2,
+                                    juce::roundToInt (fader->getCapHeight() * 0.5f));
+        layout.sliderBounds = layout.sliderBounds.withTrimmedTop (inset)
+                                                   .withTrimmedBottom (inset);
+    }
+    return layout;
 }
 
 juce::MouseCursor ThemeKnobLookAndFeel::getMouseCursorFor (juce::Component& component)
@@ -281,6 +472,56 @@ void ThemeKnobLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, in
                                             float maxSliderPosition,
                                             juce::Slider::SliderStyle style, juce::Slider& slider)
 {
+    if (auto* fader = dynamic_cast<MixerFaderSlider*> (&slider))
+    {
+        fader->drawCachedScale (g);
+        const float capHeight = fader->getCapHeight();
+        const float capWidth = std::min (static_cast<float> (fader->getWidth()) * 0.42f,
+                                         capHeight * 1.9f);
+        const float centreX = static_cast<float> (fader->getWidth()) * 0.68f;
+        const float railWidth = std::min (6.0f, std::max (4.0f,
+            static_cast<float> (fader->getWidth()) * 0.085f));
+        const float bottom = static_cast<float> (y + height);
+        const float fillTop = juce::jlimit (static_cast<float> (y), bottom, sliderPosition);
+        const juce::Rectangle<float> rail (centreX - railWidth * 0.5f, fillTop,
+                                           railWidth, std::max (0.0f, bottom - fillTop));
+        g.setColour (fader->getTrackColour().withAlpha (0.8f));
+        g.fillRoundedRectangle (rail, railWidth * 0.5f);
+
+        const juce::Rectangle<float> cap (centreX - capWidth * 0.5f,
+                                          sliderPosition - capHeight * 0.5f,
+                                          capWidth, capHeight);
+        g.setColour (theme::background().withAlpha (0.4f));
+        g.fillRoundedRectangle (cap.translated (0.0f, 2.0f), 3.0f);
+
+        const bool highlighted = slider.isMouseOverOrDragging();
+        const auto capFill = highlighted
+            ? theme::textDim().interpolatedWith (theme::text(), 0.55f)
+            : theme::textDim().interpolatedWith (theme::panelLight(), 0.45f);
+        g.setColour (capFill);
+        g.fillRoundedRectangle (cap, 3.0f);
+        g.setColour (theme::border());
+        g.drawRoundedRectangle (cap, 3.0f, 0.8f);
+
+        g.setColour (theme::textDim().withAlpha (0.75f));
+        for (int line = -1; line <= 1; ++line)
+        {
+            const float lineY = cap.getCentreY() + static_cast<float> (line) * capHeight * 0.2f;
+            g.drawHorizontalLine (juce::roundToInt (lineY),
+                                  cap.getX() + capWidth * 0.32f,
+                                  cap.getRight() - capWidth * 0.32f);
+        }
+        g.setColour (fader->getTrackColour());
+        g.fillRect (cap.getX(), cap.getCentreY() - capHeight * 0.18f,
+                    std::max (1.0f, capHeight * 0.12f), capHeight * 0.36f);
+        if (slider.isMouseButtonDown())
+        {
+            g.setColour (fader->getTrackColour());
+            g.drawRoundedRectangle (cap.expanded (0.5f), 3.5f, 1.2f);
+        }
+        return;
+    }
+
     if (! theme::isHighTech())
     {
         juce::LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, sliderPosition,
@@ -451,6 +692,56 @@ void ThemeKnobLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y,
                                              int width, int height, float,
                                              float, float, juce::Slider& slider)
 {
+    if (auto* pan = dynamic_cast<MixerPanSlider*> (&slider))
+    {
+        const auto bounds = juce::Rectangle<float> (static_cast<float> (x), static_cast<float> (y),
+                                                     static_cast<float> (width), static_cast<float> (height));
+        const juce::Point<float> centre (bounds.getCentreX(), bounds.getCentreY());
+        const float radius = std::max (0.0f, std::min (bounds.getWidth(), bounds.getHeight()) * 0.43f);
+        const float bodyRadius = std::min (7.0f, radius * 0.55f);
+        constexpr float degreesToRadians = juce::MathConstants<float>::pi / 180.0f;
+        constexpr float startAngle = -135.0f * degreesToRadians;
+        constexpr float endAngle = 135.0f * degreesToRadians;
+        const auto toPathAngle = [] (float angle)
+        {
+            return angle - juce::MathConstants<float>::halfPi;
+        };
+
+        juce::Path backgroundArc;
+        backgroundArc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f,
+                                     toPathAngle (startAngle), toPathAngle (endAngle), true);
+        g.setColour (theme::border());
+        g.strokePath (backgroundArc, juce::PathStrokeType (
+            3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        const float panPosition = juce::jlimit (-1.0f, 1.0f,
+            static_cast<float> (pan->getValue()));
+        const float valueAngle = panPosition * 135.0f * degreesToRadians;
+        if (std::abs (valueAngle) > 0.001f)
+        {
+            juce::Path valueArc;
+            valueArc.addCentredArc (centre.x, centre.y, radius, radius, 0.0f,
+                std::min (toPathAngle (0.0f), toPathAngle (valueAngle)),
+                std::max (toPathAngle (0.0f), toPathAngle (valueAngle)), true);
+            const auto activeColour = slider.isMouseOverOrDragging()
+                ? pan->getTrackColour().brighter (0.15f) : pan->getTrackColour();
+            g.setColour (activeColour);
+            g.strokePath (valueArc, juce::PathStrokeType (
+                3.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+
+        const juce::Rectangle<float> body (centre.x - bodyRadius, centre.y - bodyRadius,
+                                           bodyRadius * 2.0f, bodyRadius * 2.0f);
+        g.setColour (theme::control());
+        g.fillEllipse (body);
+        g.setColour (theme::border());
+        g.drawEllipse (body, 1.0f);
+        g.setColour (theme::textDim());
+        g.drawVerticalLine (juce::roundToInt (centre.x),
+                            centre.y - bodyRadius * 0.4f, centre.y + bodyRadius * 0.4f);
+        return;
+    }
+
     const double minimum = slider.getMinimum();
     const double maximum = slider.getMaximum();
     double centreValue = minimum + (maximum - minimum) * 0.5;

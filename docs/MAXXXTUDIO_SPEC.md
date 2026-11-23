@@ -422,6 +422,7 @@ Project
 | Ctrl+Shift+T | Nova trilha MIDI |
 | Shift+Tab ou F12 | Alterna Clip ↔ Dispositivos |
 | F6 | Foco: lista de plugins → arranjo → piano roll |
+| F11 | Alterna o modo tela cheia da janela principal |
 
 ### 8.2 Arranjo
 | Ação | Como |

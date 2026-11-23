@@ -10,9 +10,41 @@ public:
     double centreValue = std::numeric_limits<double>::quiet_NaN();
 };
 
+class MixerFaderSlider final : public juce::Slider
+{
+public:
+    MixerFaderSlider();
+
+    void setTrackColour (juce::Colour);
+    juce::Colour getTrackColour() const noexcept { return trackColour; }
+    float getCapHeight() const noexcept;
+    void drawCachedScale (juce::Graphics&);
+    static juce::NormalisableRange<double> decibelRange (double maximumDb);
+    static double normalisedPositionForDecibels (double decibels);
+    static double decibelsForNormalisedPosition (double position);
+
+private:
+    void updateScaleCache();
+
+    juce::Colour trackColour;
+    juce::Image scaleCache;
+    juce::Colour cachedTrackColour, cachedSurfaceColour, cachedBorderColour, cachedTextColour;
+};
+
+class MixerPanSlider final : public juce::Slider
+{
+public:
+    void setTrackColour (juce::Colour colour);
+    juce::Colour getTrackColour() const noexcept { return trackColour; }
+
+private:
+    juce::Colour trackColour;
+};
+
 class ThemeKnobLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    juce::Slider::SliderLayout getSliderLayout (juce::Slider&) override;
     juce::MouseCursor getMouseCursorFor (juce::Component&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&,
                                bool highlighted, bool down) override;

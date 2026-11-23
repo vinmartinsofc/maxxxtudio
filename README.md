@@ -1,109 +1,141 @@
-<p align="center">
-  <img src="app/assets/icons/app/maxxx-tudio.png" alt="MaXXXtudio visual identity" width="240">
-</p>
-
 <h1 align="center">MaXXXtudio</h1>
 
 <p align="center">
-  A digital audio workstation for creating, organizing, processing, and mixing music.
+  Estação de trabalho de áudio digital para criar, organizar, editar e mixar música.
 </p>
 
-MaXXXtudio is an open-source DAW for Windows, built with C++20 and JUCE.
-Linux is not supported at this time; a port may be considered in the future.
-The project is evolving and brings essential production tools, instruments, effects,
-and music editing together in a custom interface.
+MaXXXtudio é um DAW open source desenvolvido em C++20 e JUCE 8.0.15. A plataforma principal
+é Windows 10/11, com verificações automáticas também realizadas em Linux. O projeto combina
+um view Arrangement, edição MIDI, hospedagem de VST3, mixer, automação e ferramentas nativas
+em uma interface própria.
 
-## Implemented Features
-
-- **Arrangement:** MIDI and audio tracks, clips, navigation, zoom, grids, locators, loop, and transport.
-- **Piano Roll:** create and edit notes, velocity, quantization, scales, fold, grooves, and selection tools.
-- **Audio Editing:** split and merge clips, trim edges, fade-in and fade-out curves, transient analysis, Warp, source BPM, ×2, and ÷2.
-- **Selection:** click, Shift/Ctrl time-range selection, multi-track selection, and selection operations.
-- **Mixer:** volume, pan, mute, solo, peak metering, and Master channel.
-- **Automation:** global envelopes for volume, pan, mute, and plugin parameters; automatic parameter selection when adjusting a control.
-- **VST3 Plugins:** vendor scanning, favorites, custom folders, isolated execution, and project-saved state.
-- **Browsers:** audio files, color-coded favorites, search, preview, history, and File Explorer location.
-- **Drum Master:** 15 pads, sample loading, One-Shot and Classic modes, pitch, volume, start, end, reverse, loop, and per-pad effects.
-- **MIDI Learn:** map MIDI controls to volume, pan, mute, and solo.
-- **Computer MIDI Keyboard:** play from the computer keyboard with octave and velocity controls.
-- **Projects:** save and open `.std` files, undo/redo history, recovery, and Master WAV export.
-- **Themes:** graphite/black with orange, blue, or red; white with orange; Matrix 1 and Matrix 2 with green.
-- **Interface:** accessible tooltips, vector icons, active and hover states, and theme-aware readable text.
-
-## Native Tools tab
-
-The plugin browser's **MaXXXtudio** tab groups the built-in instruments and effects in one place.
+## Interface atual
 
 <p align="center">
-  <img src="app/assets/readme/native-tools.png" alt="MaXXXtudio native tools tab" width="420">
+  <img src="app/assets/readme/interface-overview.png" alt="Interface atual do MaXXXtudio com Arrangement, mixer, faders por canal e painel Master" width="1000">
 </p>
 
-## Native Plugins
+A captura mostra o Arrangement, o navegador de plugins e o Mixer, com faders, pan e meters L/R
+por canal. A tela principal também oferece o Piano Roll, o navegador de áudio e a cadeia de
+dispositivos. Pressione `F11` para entrar ou sair do modo tela cheia.
+
+### Reposicionando uma janela de plugin
+
+Este trecho curto mostra apenas como arrastar a janela de um plugin para a direita,
+mantendo o Arrangement visível; não é uma demonstração completa do MaXXXtudio.
+O GIF é uma prévia; clique nele para abrir o vídeo original.
+
+<p align="center">
+  <a href="app/assets/readme/demo.mp4">
+    <img src="app/assets/readme/demo.gif" alt="Demonstração: arrastando a janela do plugin para a direita" width="900">
+  </a>
+</p>
+
+## Recursos implementados
+
+- **Arrangement:** trilhas MIDI e áudio, múltiplos clips, mover/copiar/duplicar, divisão,
+  grade adaptativa, locators, loop, visão geral, recolhimento de trilhas e transporte.
+- **Piano Roll:** criar e editar notas, velocidade, quantização, seleção, escala, Fold,
+  Highlight, grooves MIDI, teclado do computador e zoom horizontal/vertical.
+- **Edição de áudio:** dividir e mesclar clips, ajustar bordas, fades, análise de transientes,
+  BPM de origem e alternância Warp. O stretch permanece limitado ao modo Re-Pitch atual.
+- **Seleção e atalhos:** seleção de clip inteiro, intervalos, seleção múltipla de clips/faixas,
+  copiar/recortar/colar, duplicar, agrupar e desagrupar trilhas.
+- **Mixer:** volume, pan, mute, solo, medidores de pico, Master e barramentos/grupos.
+- **Automação:** volume, pan, mute e parâmetros VST3 em envelopes globais no Arrangement.
+- **Plugins VST3:** scanner em segundo plano, favoritos, pastas personalizadas, execução em
+  worker isolado e estado salvo no projeto.
+- **Navegadores:** plugins por pasta/fabricante e tipo, arquivos de áudio, favoritos por cor,
+  busca, pré-escuta, histórico e localização no File Explorer.
+- **Grooves MIDI:** importação de `.agr`, biblioteca, pré-escuta, aplicação e persistência.
+- **Ferramentas nativas:** Drum Rack e Volume Master, além dos efeitos Comp Master,
+  EQ Master e Reference Master.
+- **Projetos:** salvar/abrir `.std`, autosave com recuperação, desfazer/refazer do estado
+  suportado e exportação offline do Master em WAV 24-bit.
+- **Identidade visual:** tema grafite próprio, estados ativo/hover/disabled, tooltips,
+  ícones vetoriais e paleta azul/verde/amarela/vermelha conforme a especificação atual.
+
+## Ferramentas nativas
+
+A aba **MaXXXtudio** do navegador reúne os instrumentos e efeitos desenvolvidos diretamente
+no projeto.
+
+<p align="center">
+  <img src="app/assets/readme/native-tools.png" alt="Aba MaXXXtudio no navegador de ferramentas nativas" width="420">
+</p>
+
+### Plugins nativos
 
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="app/assets/readme/drum-master.png" alt="Drum Master interface screenshot" width="400"><br>
+      <img src="app/assets/readme/drum-master.png" alt="Interface do Drum Master" width="400"><br>
       <strong>Drum Master</strong><br>
-      A 15-pad instrument for playing samples over MIDI. Includes audio loading, volume, pitch,
-      start/end positions, reverse, loop, One-Shot mode, and independent effect chains per pad.
+      Sampler de 15 pads MIDI, com One-Shot/Classic, ajuste de pitch e volume,
+      recorte de início/fim, reverse, loop e efeitos por pad.
     </td>
     <td align="center" width="50%">
-      <img src="app/assets/readme/volume-master.png" alt="Volume Master interface screenshot" width="400"><br>
+      <img src="app/assets/readme/volume-master.png" alt="Interface do Volume Master" width="400"><br>
       <strong>Volume Master</strong><br>
-      A utility for gain, stereo width, balance, mono/left/right/swap input, phase inversion,
-      and configurable auto-pan.
+      Controle de ganho e imagem estéreo, balanço, modos de entrada, mono,
+      inversão de fase, Bass Mono e Auto Pan.
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="app/assets/readme/comp-master.png" alt="Comp Master interface screenshot" width="400"><br>
+      <img src="app/assets/readme/comp-master.png" alt="Interface do Comp Master" width="400"><br>
       <strong>Comp Master</strong><br>
-      A compressor with sidechain routing, live waveform and gain-reduction display,
-      stereo input/output meters, and threshold, ratio, timing, and mix controls.
+      Compressor com roteamento sidechain, osciloscópio, medidores de entrada/saída
+      e redução de ganho, além de threshold, ratio, ataque, release, knee e mix.
     </td>
     <td align="center" width="50%">
-      <img src="app/assets/readme/eq-master.png" alt="EQ Master interface screenshot" width="400"><br>
+      <img src="app/assets/readme/eq-master.png" alt="Interface do EQ Master" width="400"><br>
       <strong>EQ Master</strong><br>
-      An eight-band parametric equalizer with a live spectrum analyzer, selectable filter
-      shapes, and Stereo, Mid, and Side processing modes.
+      Equalizador paramétrico de oito bandas com analisador de espectro,
+      filtros ajustáveis e modos Stereo, Mid e Side.
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="app/assets/readme/reference-master.png" alt="Reference Master interface screenshot" width="400"><br>
+      <img src="app/assets/readme/reference-master.png" alt="Interface do Reference Master" width="400"><br>
       <strong>Reference Master</strong><br>
-      A reference-track deck with waveform and spectrum analysis, BPM/key estimates,
-      playback, seeking, and zoom controls.
+      Analisador para faixas de referência: forma de onda, espectro, BPM/tom estimados,
+      reprodução, busca e zoom.
     </td>
     <td width="50%"></td>
   </tr>
 </table>
 
-## Build
+## Compilar no Windows
 
-Requirements: Windows, CMake 3.22+, and Visual Studio with the “Desktop development with C++” workload.
+Requisitos: Windows 10/11, CMake 3.22+ e Visual Studio com a carga
+**Desenvolvimento para desktop com C++**.
 
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-Executable: `build\app\MaXXXtudio_artefacts\Release\MaXXXtudio.exe`
+Executável:
 
-Run the tests with:
+```text
+build\app\MaXXXtudio_artefacts\Release\MaXXXtudio.exe
+```
+
+Executar os testes:
 
 ```powershell
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-In the plugin browser, **Folders** lets you add or remove VST3 search directories.
-These paths are saved in the user settings.
+No navegador de plugins, **Folders** permite adicionar ou remover diretórios de busca VST3.
+Os caminhos são persistidos nas configurações do usuário.
 
-## Project Structure
+## Estrutura do projeto
 
 ```text
-core/    music model and sequencer
-tests/   automated tests
-app/     JUCE application, interface, audio, plugins, and production tools
+core/    modelo musical puro e sequenciador
+tests/   testes automáticos
+app/     aplicação JUCE, interface, áudio, plugins e ferramentas de produção
+docs/    especificação e estado detalhado do projeto
 ```

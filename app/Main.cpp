@@ -233,6 +233,18 @@ private:
                 mainComponent->updatePluginWindowZOrder();
         }
 
+        bool keyPressed (const juce::KeyPress& key) override
+        {
+            if (key.isKeyCode (juce::KeyPress::F11Key)
+                && ! key.getModifiers().isAnyModifierKeyDown())
+            {
+                setFullScreen (! isFullScreen());
+                return true;
+            }
+
+            return juce::DocumentWindow::keyPressed (key);
+        }
+
         void moved() override
         {
             juce::DocumentWindow::moved();
