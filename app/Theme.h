@@ -1,7 +1,11 @@
 #pragma once
 #include <juce_graphics/juce_graphics.h>
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
 
-// MaXXXtudio's graphite-and-orange identity palette.
+// NEONWAVE's black interface with selectable neon accents.
 namespace theme
 {
 // Convert interface text from UTF-8 consistently across compilers.
@@ -17,7 +21,10 @@ enum class Palette
     GraphiteRed,
     BlackRed,
     MatrixGraphite,
-    MatrixBlack
+    MatrixBlack,
+    HighTech,
+    HighTechAmber,
+    BlackTexturedBlue
 };
 
 enum class WaveformStyle
@@ -27,10 +34,27 @@ enum class WaveformStyle
     Spectrum
 };
 
+enum class AccentStyle
+{
+    CyberpunkYellow,
+    SynthwavePurple
+};
+
+inline juce::FontOptions fontOptions (float size, int style = juce::Font::plain)
+{
+    return juce::FontOptions ("Aptos", size, style);
+}
+
 inline Palette& selectedPalette()
 {
-    static Palette palette = Palette::BlackOrange;
+    static Palette palette = Palette::BlackTexturedBlue;
     return palette;
+}
+
+inline AccentStyle& selectedAccentStyle()
+{
+    static AccentStyle selected = AccentStyle::CyberpunkYellow;
+    return selected;
 }
 
 inline WaveformStyle& selectedWaveformStyle()
@@ -81,37 +105,39 @@ inline void setWaveformStyle (WaveformStyle style)
     writePreferences (*xml);
 }
 
+inline AccentStyle accentStyle()
+{
+    return selectedAccentStyle();
+}
+
+inline void setAccentStyle (AccentStyle style)
+{
+    selectedAccentStyle() = style;
+    auto xml = readPreferences();
+    xml->setAttribute ("interfaceAccent",
+                       style == AccentStyle::SynthwavePurple ? "synthwave-purple" : "cyberpunk-yellow");
+    writePreferences (*xml);
+}
+
 inline bool isLight()
 {
     return current() == Palette::WhiteOrange;
 }
 
-inline void setCurrent (Palette palette)
+inline bool isHighTech()
 {
-    selectedPalette() = palette;
+    return current() == Palette::HighTech || current() == Palette::HighTechAmber
+        || current() == Palette::BlackTexturedBlue;
+}
 
-    auto xml = readPreferences();
+inline bool isHighTechAmber()
+{
+    return current() == Palette::HighTechAmber;
+}
 
-    const char* value = "graphite-orange";
-    if (palette == Palette::BlackOrange)
-        value = "black-orange";
-    else if (palette == Palette::WhiteOrange)
-        value = "white-orange";
-    else if (palette == Palette::GraphiteBlue)
-        value = "graphite-blue";
-    else if (palette == Palette::BlackBlue)
-        value = "black-blue";
-    else if (palette == Palette::GraphiteRed)
-        value = "graphite-red";
-    else if (palette == Palette::BlackRed)
-        value = "black-red";
-    else if (palette == Palette::MatrixGraphite)
-        value = "matrix-1";
-    else if (palette == Palette::MatrixBlack)
-        value = "matrix-2";
-
-    xml->setAttribute ("theme", value);
-    writePreferences (*xml);
+inline bool isBlackTexturedBlue()
+{
+    return current() == Palette::BlackTexturedBlue;
 }
 
 inline void load()
@@ -121,30 +147,15 @@ inline void load()
     selectedWaveformStyle() = waveformStyle == "ultraviolet" || waveformStyle == "reference"
         ? WaveformStyle::Ultraviolet
         : waveformStyle == "spectrum" ? WaveformStyle::Spectrum : WaveformStyle::Classic;
-
-    const auto value = xml->getStringAttribute ("theme", "black-orange").toLowerCase();
-    if (value == "graphite-orange")
-        selectedPalette() = Palette::GraphiteOrange;
-    else if (value == "white-orange")
-        selectedPalette() = Palette::WhiteOrange;
-    else if (value == "graphite-blue")
-        selectedPalette() = Palette::GraphiteBlue;
-    else if (value == "black-blue")
-        selectedPalette() = Palette::BlackBlue;
-    else if (value == "graphite-red")
-        selectedPalette() = Palette::GraphiteRed;
-    else if (value == "black-red")
-        selectedPalette() = Palette::BlackRed;
-    else if (value == "matrix-1")
-        selectedPalette() = Palette::MatrixGraphite;
-    else if (value == "matrix-2")
-        selectedPalette() = Palette::MatrixBlack;
-    else
-        selectedPalette() = Palette::BlackOrange;
+    selectedAccentStyle() = xml->getStringAttribute ("interfaceAccent", "cyberpunk-yellow").toLowerCase()
+        == "synthwave-purple" ? AccentStyle::SynthwavePurple : AccentStyle::CyberpunkYellow;
+    selectedPalette() = Palette::BlackTexturedBlue;
 }
 
 inline juce::Colour background()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff030305);
+    if (isHighTech()) return juce::Colour (0xff060a10);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xfff2f2f2);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff101112);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff101112);
@@ -154,6 +165,8 @@ inline juce::Colour background()
 }
 inline juce::Colour panel()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff08090d);
+    if (isHighTech()) return juce::Colour (0xff0a111b);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffffffff);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff191b1d);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff191b1d);
@@ -163,6 +176,8 @@ inline juce::Colour panel()
 }
 inline juce::Colour panelLight()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff0d0e13);
+    if (isHighTech()) return juce::Colour (0xff101a27);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xfffafafa);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff202224);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff202224);
@@ -172,6 +187,8 @@ inline juce::Colour panelLight()
 }
 inline juce::Colour control()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff050609);
+    if (isHighTech()) return juce::Colour (0xff070c13);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffebebeb);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff090a0b);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff090a0b);
@@ -181,6 +198,8 @@ inline juce::Colour control()
 }
 inline juce::Colour hover()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff11131a);
+    if (isHighTech()) return juce::Colour (0xff142333);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffdedede);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff252729);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff252729);
@@ -190,6 +209,8 @@ inline juce::Colour hover()
 }
 inline juce::Colour pressed()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff010203);
+    if (isHighTech()) return juce::Colour (0xff05080d);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffd2d2d2);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff050606);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff050606);
@@ -199,6 +220,8 @@ inline juce::Colour pressed()
 }
 inline juce::Colour border()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff252630);
+    if (isHighTech()) return juce::Colour (0xff1b4c73);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffb8b8b8);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff34373a);
     if (current() == Palette::BlackBlue) return juce::Colour (0xff34373a);
@@ -206,14 +229,23 @@ inline juce::Colour border()
     if (current() == Palette::MatrixBlack) return juce::Colour (0xff34373a);
     return juce::Colour (0xff45484a);
 }
+inline juce::Colour gridLine()
+{
+    if (isBlackTexturedBlue()) return juce::Colour (0xff171820);
+    return isHighTech() ? juce::Colour (0xff102031) : border();
+}
 inline juce::Colour controlBorder() { return border(); }
 inline juce::Colour text()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xffeef3f7);
+    if (isHighTech()) return juce::Colour (0xffedf4fb);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xff202124);
     return juce::Colour (0xfff1f1f1);
 }
 inline juce::Colour textDim()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff9a9ca8);
+    if (isHighTech()) return juce::Colour (0xff9aacc0);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xff56585b);
     if (current() == Palette::BlackOrange) return juce::Colour (0xffb8bbbe);
     if (current() == Palette::BlackBlue) return juce::Colour (0xffb8bbbe);
@@ -223,6 +255,11 @@ inline juce::Colour textDim()
 }
 inline juce::Colour accent()
 {
+    if (isBlackTexturedBlue())
+        return accentStyle() == AccentStyle::SynthwavePurple
+            ? juce::Colour (0xffc35cff) : juce::Colour (0xffffd52a);
+    if (isHighTechAmber()) return juce::Colour (0xffff8500);
+    if (isHighTech()) return juce::Colour (0xff25c2e6);
     if (current() == Palette::GraphiteBlue || current() == Palette::BlackBlue)
         return juce::Colour (0xff1685ff);
     if (current() == Palette::GraphiteRed || current() == Palette::BlackRed)
@@ -233,6 +270,11 @@ inline juce::Colour accent()
 }
 inline juce::Colour accentHover()
 {
+    if (isBlackTexturedBlue())
+        return accentStyle() == AccentStyle::SynthwavePurple
+            ? juce::Colour (0xffe58aff) : juce::Colour (0xffffec75);
+    if (isHighTechAmber()) return juce::Colour (0xffffab32);
+    if (isHighTech()) return juce::Colour (0xff398dff);
     if (current() == Palette::GraphiteBlue || current() == Palette::BlackBlue)
         return juce::Colour (0xff3d9cff);
     if (current() == Palette::GraphiteRed || current() == Palette::BlackRed)
@@ -242,18 +284,116 @@ inline juce::Colour accentHover()
     return juce::Colour (0xffff8524);
 }
 inline juce::Colour taskActive()   { return accent(); }
-inline juce::Colour recording()    { return juce::Colour (0xffe85b5b); }
-inline juce::Colour warning()      { return accentHover(); }
+inline juce::Colour recording()    { return juce::Colour (0xffff4058); }
+inline juce::Colour warning()
+{
+    return isHighTech() ? juce::Colour (0xffffa23b) : accentHover();
+}
+inline juce::Colour cyan()         { return juce::Colour (0xff00cce8); }
+inline juce::Colour violet()       { return juce::Colour (0xffa675ff); }
+inline juce::Colour magenta()      { return juce::Colour (0xffff4fa3); }
+inline juce::Colour amber()        { return juce::Colour (0xffffa23b); }
+inline juce::Colour emerald()      { return juce::Colour (0xff38d99b); }
 inline juce::Colour noteFill()     { return accent(); }
 inline juce::Colour noteSelected() { return accentHover(); }
 inline juce::Colour rowWhite()     { return panel(); }
 inline juce::Colour rowBlack()     { return control(); }
 inline juce::Colour rowInScale()
 {
+    if (isBlackTexturedBlue()) return juce::Colour (0xff101116);
+    if (isHighTech()) return juce::Colour (0xff142333);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffe6e6e6);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff202224);
     if (current() == Palette::BlackRed) return juce::Colour (0xff202224);
     return juce::Colour (0xff303234);
 }
+inline void drawChromeSurface (juce::Graphics& g, juce::Rectangle<float> bounds,
+                               float cornerRadius, juce::Colour fill)
+{
+    if (bounds.isEmpty())
+        return;
+
+    const float radius = juce::jmax (0.0f, juce::jmin (cornerRadius, bounds.getHeight() * 0.5f));
+    juce::Path surface;
+    surface.addRoundedRectangle (bounds, radius);
+    juce::ColourGradient gradient (fill.brighter (0.12f), bounds.getX(), bounds.getY(),
+                                   fill.darker (0.12f), bounds.getX(), bounds.getBottom(), false);
+    g.setGradientFill (gradient);
+    g.fillPath (surface);
+
+    if (isBlackTexturedBlue())
+    {
+        g.setColour (accent().withAlpha (0.035f));
+        g.drawRoundedRectangle (bounds.reduced (1.0f), radius, 5.0f);
+        g.setColour (accent().withAlpha (0.055f));
+        g.drawRoundedRectangle (bounds.reduced (1.0f), radius, 2.0f);
+    }
+
+    {
+        juce::Graphics::ScopedSaveState state (g);
+        g.reduceClipRegion (surface);
+        for (float y = bounds.getY() + 2.0f; y < bounds.getBottom(); y += 4.0f)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.025f));
+            g.drawLine (bounds.getX() + radius * 0.5f, y,
+                        bounds.getRight() - radius * 0.5f, y, 0.5f);
+        }
+    }
+
+    g.setColour (isBlackTexturedBlue() ? accentHover().withAlpha (0.22f)
+                                       : juce::Colours::white.withAlpha (0.12f));
+    g.drawLine (bounds.getX() + radius, bounds.getY() + 0.5f,
+                bounds.getRight() - radius, bounds.getY() + 0.5f, 0.7f);
+    g.setColour (border());
+    g.drawRoundedRectangle (bounds, radius, 1.0f);
+}
+
+inline float meterAmount (float gain)
+{
+    const float db = gain > 0.000001f
+        ? 20.0f * std::log10 (gain) : -100.0f;
+    return juce::jlimit (0.0f, 1.0f, (db + 48.0f) / 48.0f);
+}
+
+inline juce::Colour meterColour (float amount)
+{
+    static constexpr std::array<std::uint32_t, 6> colours {{
+        0xff2878ff, 0xff12c8e8, 0xff20c982, 0xffd5ec55, 0xffff9838, 0xffff4058
+    }};
+    const float scaled = juce::jlimit (0.0f, 1.0f, amount) * static_cast<float> (colours.size() - 1);
+    const auto index = std::min (static_cast<std::size_t> (scaled), colours.size() - 2);
+    return juce::Colour (colours[index]).interpolatedWith (
+        juce::Colour (colours[index + 1]), scaled - static_cast<float> (index));
+}
+
+inline void drawSegmentedMeter (juce::Graphics& g, juce::Rectangle<float> bounds,
+                                float amount, bool vertical = false, int segmentCount = 24)
+{
+    if (bounds.isEmpty() || segmentCount <= 0)
+        return;
+
+    amount = juce::jlimit (0.0f, 1.0f, amount);
+    const float gap = 1.0f;
+    const float totalLength = vertical ? bounds.getHeight() : bounds.getWidth();
+    const float segmentLength = std::max (
+        0.0f, (totalLength - gap * static_cast<float> (segmentCount - 1)) / segmentCount);
+    for (int i = 0; i < segmentCount; ++i)
+    {
+        const float position = static_cast<float> (i) / static_cast<float> (segmentCount);
+        auto segment = vertical
+            ? juce::Rectangle<float> (bounds.getX(),
+                bounds.getBottom() - (static_cast<float> (i + 1) * (segmentLength + gap)),
+                bounds.getWidth(), segmentLength)
+            : juce::Rectangle<float> (bounds.getX() + static_cast<float> (i) * (segmentLength + gap),
+                bounds.getY(), segmentLength, bounds.getHeight());
+        const bool active = position < amount;
+        g.setColour (active ? meterColour (position) : control().brighter (0.12f));
+        g.fillRoundedRectangle (segment, juce::jmin (1.5f, segment.getHeight() * 0.5f));
+    }
+
+    g.setColour (border().withAlpha (0.8f));
+    g.drawRoundedRectangle (bounds, 2.0f, 1.0f);
+}
+
 inline juce::Colour playhead()     { return text(); }
 } // namespace theme

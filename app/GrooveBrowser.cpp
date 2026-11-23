@@ -276,7 +276,7 @@ private:
                 graphics.setColour (theme::panel());
             graphics.fillRoundedRectangle (bounds.toFloat(), 3.0f);
             graphics.setColour (theme::text());
-            graphics.setFont (juce::FontOptions (13.0f));
+            graphics.setFont (theme::fontOptions (13.0f));
             graphics.drawText (juce::String (groove.name),
                                bounds.reduced (8, 0), juce::Justification::centredLeft, true);
         }

@@ -592,6 +592,37 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     const int samples = std::min (buffer.getNumSamples(), pluginworker::maxSamples);
     shared->audioSamples = samples;
+    const auto* hostPlayHead = getPlayHead();
+    const auto hostPosition = hostPlayHead != nullptr ? hostPlayHead->getPosition()
+                                                      : juce::Optional<juce::AudioPlayHead::PositionInfo> {};
+    shared->playHeadValid = hostPosition.hasValue() ? 1 : 0;
+    if (hostPosition.hasValue())
+    {
+        const auto& position = *hostPosition;
+        shared->playHeadPlaying = position.getIsPlaying() ? 1 : 0;
+        shared->playHeadRecording = position.getIsRecording() ? 1 : 0;
+        shared->playHeadLooping = position.getIsLooping() ? 1 : 0;
+        shared->playHeadTimeSamples = position.getTimeInSamples().hasValue()
+            ? *position.getTimeInSamples() : 0;
+        shared->playHeadTimeSeconds = position.getTimeInSeconds().hasValue()
+            ? *position.getTimeInSeconds() : 0.0;
+        shared->playHeadBpm = position.getBpm().hasValue() ? *position.getBpm() : 120.0;
+        shared->playHeadPpqPosition = position.getPpqPosition().hasValue()
+            ? *position.getPpqPosition() : 0.0;
+        shared->playHeadLastBarStartPpq = position.getPpqPositionOfLastBarStart().hasValue()
+            ? *position.getPpqPositionOfLastBarStart() : 0.0;
+        shared->playHeadBarCount = position.getBarCount().hasValue() ? *position.getBarCount() : 0;
+        if (const auto signature = position.getTimeSignature())
+        {
+            shared->playHeadTimeSignatureNumerator = signature->numerator;
+            shared->playHeadTimeSignatureDenominator = signature->denominator;
+        }
+        if (const auto loop = position.getLoopPoints())
+        {
+            shared->playHeadLoopStartPpq = loop->ppqStart;
+            shared->playHeadLoopEndPpq = loop->ppqEnd;
+        }
+    }
     if (shared->numInputs == 1)
     {
         for (int sample = 0; sample < samples; ++sample)

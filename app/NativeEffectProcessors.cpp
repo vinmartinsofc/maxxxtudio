@@ -241,7 +241,7 @@ public:
                 jassert (control->definition != nullptr);
                 control->label.setText (parameter->getName (64), juce::dontSendNotification);
                 control->label.setColour (juce::Label::textColourId, theme::text());
-                control->label.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+                control->label.setFont (theme::fontOptions (13.0f, juce::Font::bold));
                 control->label.setJustificationType (juce::Justification::centred);
                 addAndMakeVisible (control->label);
 
@@ -352,7 +352,7 @@ public:
     {
         g.fillAll (theme::panel());
         g.setColour (theme::text());
-        g.setFont (18.0f);
+        g.setFont (theme::fontOptions (18.0f));
         g.drawText (title, getLocalBounds().removeFromTop (34),
                     juce::Justification::centred, true);
 
@@ -921,7 +921,7 @@ public:
     explicit ParameterKnob (juce::AudioProcessorParameter& parameter)
     {
         label.setColour (juce::Label::textColourId, theme::text());
-        label.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        label.setFont (theme::fontOptions (12.0f, juce::Font::bold));
         label.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (label);
 
@@ -1210,7 +1210,7 @@ public:
     {
         g.fillAll (theme::panel());
         g.setColour (theme::text());
-        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.setFont (theme::fontOptions (18.0f, juce::Font::bold));
         g.drawText ("COMP MASTER", getLocalBounds().removeFromTop (36).reduced (16, 0),
                     juce::Justification::centredLeft, true);
 
@@ -1218,11 +1218,11 @@ public:
         area.removeFromTop (38);
         auto sourceRow = area.removeFromTop (32);
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+        g.setFont (theme::fontOptions (11.0f, juce::Font::bold));
         g.drawText ("SIDECHAIN SOURCE", sourceRow.removeFromLeft (126),
                     juce::Justification::centredLeft, true);
         auto scope = scopeBounds().toFloat();
-        g.setColour (juce::Colour (0xff161616));
+        g.setColour (theme::control());
         g.fillRoundedRectangle (scope, 5.0f);
         g.setColour (theme::border());
         g.drawRoundedRectangle (scope, 5.0f, 1.0f);
@@ -1232,7 +1232,7 @@ public:
         auto peakLabel = scopeBounds().withY (scopeBounds().getBottom())
                                       .withHeight (24).toFloat();
         g.setColour (clipping ? theme::recording() : theme::textDim());
-        g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+        g.setFont (theme::fontOptions (10.0f, juce::Font::bold));
         g.drawText ("Max DB: " + peakHoldText(), peakLabel, juce::Justification::centred, true);
     }
 
@@ -1340,7 +1340,7 @@ private:
         static constexpr std::array<float, 6> dbMarks {
             0.0f, -3.0f, -6.0f, -12.0f, -18.0f, -60.0f
         };
-        g.setFont (juce::FontOptions (8.5f));
+        g.setFont (theme::fontOptions (8.5f));
         for (const float db : dbMarks)
         {
             const float amplitude = juce::Decibels::decibelsToGain (db);
@@ -1404,7 +1404,7 @@ private:
         }
 
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+        g.setFont (theme::fontOptions (9.0f, juce::Font::bold));
         g.drawText ("IN", meters.removeFromLeft (32.0f), juce::Justification::centredTop);
         g.drawText ("GR", meters.removeFromLeft (32.0f), juce::Justification::centredTop);
         g.drawText ("OUT", meters, juce::Justification::centredTop);
@@ -1422,7 +1422,7 @@ private:
         g.fillRect (grArea.getX() + 8.0f, meterY, 14.0f,
                     juce::jlimit (0.0f, meterHeight, reduction / 12.0f * meterHeight));
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (8.0f));
+        g.setFont (theme::fontOptions (8.0f));
         g.drawText (juce::String (reduction, 1), grArea.withY (grArea.getBottom() - 14.0f)
                     .withHeight (12.0f), juce::Justification::centred);
         drawLevelMeter (g, meters, compressor.outputPeak (0), compressor.outputPeak (1),
@@ -1665,7 +1665,7 @@ public:
     {
         g.fillAll (theme::panel());
         g.setColour (theme::text());
-        g.setFont (juce::FontOptions (18.0f, juce::Font::bold));
+        g.setFont (theme::fontOptions (18.0f, juce::Font::bold));
         g.drawText ("EQ MASTER", getLocalBounds().removeFromTop (36).reduced (18, 0),
                     juce::Justification::centredLeft, true);
 
@@ -2078,7 +2078,7 @@ private:
 
     void drawResponseGraph (juce::Graphics& g, juce::Rectangle<float> graph)
     {
-        g.setColour (juce::Colour (0xff161616));
+        g.setColour (theme::control());
         g.fillRoundedRectangle (graph, 5.0f);
         g.setColour (theme::border());
         g.drawRoundedRectangle (graph, 5.0f, 1.0f);
@@ -2092,7 +2092,7 @@ private:
             g.setColour (theme::border().withAlpha (0.42f));
             g.drawVerticalLine (juce::roundToInt (x), graph.getY(), graph.getBottom());
             g.setColour (theme::textDim());
-            g.setFont (juce::FontOptions (9.5f));
+            g.setFont (theme::fontOptions (9.5f));
             const auto label = frequency >= 1000.0
                 ? juce::String (frequency / 1000.0, frequency >= 10000.0 ? 0 : 1) + "k"
                 : juce::String (static_cast<int> (frequency));
@@ -2107,7 +2107,7 @@ private:
                                  : theme::border().withAlpha (0.42f));
             g.drawHorizontalLine (juce::roundToInt (y), graph.getX(), graph.getRight());
             g.setColour (theme::textDim());
-            g.setFont (juce::FontOptions (9.5f));
+            g.setFont (theme::fontOptions (9.5f));
             g.drawText (juce::String (db),
                         juce::Rectangle<int> (juce::roundToInt (graph.getX() + 2.0f),
                                                juce::roundToInt (y - 7.0f), 28, 14),
@@ -2179,7 +2179,7 @@ private:
                 g.drawEllipse (juce::Rectangle<float> (centre.x - 9.0f, centre.y - 9.0f, 18.0f, 18.0f), 1.5f);
             }
             g.setColour (theme::text());
-            g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
+            g.setFont (theme::fontOptions (9.0f, juce::Font::bold));
             g.drawText (juce::String (band + 1),
                         juce::Rectangle<int> (juce::roundToInt (centre.x + 5.0f),
                                                juce::roundToInt (centre.y - 17.0f), 18, 14),

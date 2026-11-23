@@ -9,7 +9,7 @@ TaskStatusBar::TaskStatusBar (TaskRegistry& taskRegistry)
     addAndMakeVisible (cancelButton);
 
     label.setColour (juce::Label::textColourId, theme::textDim());
-    label.setFont (juce::FontOptions (12.5f));
+    label.setFont (theme::fontOptions (12.5f));
 
     cancelButton.setTooltip ("Cancel the current task.");
     cancelButton.setMouseClickGrabsKeyboardFocus (false);
@@ -33,7 +33,10 @@ TaskStatusBar::~TaskStatusBar()
 
 void TaskStatusBar::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+    else
+        g.fillAll (theme::panel());
     g.setColour (theme::border());
     g.drawHorizontalLine (0, 0.0f, static_cast<float> (getWidth()));
 

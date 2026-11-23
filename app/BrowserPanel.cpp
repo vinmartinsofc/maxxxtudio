@@ -42,10 +42,10 @@ public:
     void paintItem (juce::Graphics& g, int width, int height) override
     {
         if (isSelected())
-            g.fillAll (theme::accent().withAlpha (0.25f));
+            g.fillAll (theme::accent().withAlpha (0.20f));
 
         g.setColour (theme::text());
-        g.setFont (juce::FontOptions (isFolder && getParentItem() == nullptr ? 13.0f : 12.0f,
+        g.setFont (theme::fontOptions (isFolder && getParentItem() == nullptr ? 13.0f : 12.0f,
                                       isFolder ? juce::Font::bold : juce::Font::plain));
 
         if (isFolder)
@@ -75,7 +75,7 @@ public:
         g.drawText (description.name, nameX, 0, std::max (0, width - nameX - 150), height,
                     juce::Justification::centredLeft, true);
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (12.0f));
+        g.setFont (theme::fontOptions (12.0f));
         g.drawText (description.manufacturerName, std::max (0, width - 140), 0, 84, height,
                     juce::Justification::centredRight, true);
         g.drawText (description.pluginFormatName, std::max (0, width - 70), 0, 40, height,
@@ -245,11 +245,11 @@ void BrowserPanel::NativeToolCard::paintButton (juce::Graphics& graphics,
 
     auto textArea = getLocalBounds().reduced (14, 8);
     graphics.setColour (theme::text());
-    graphics.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+    graphics.setFont (theme::fontOptions (17.0f, juce::Font::bold));
     graphics.drawText (getButtonText(), textArea.removeFromTop (28),
                        juce::Justification::centredLeft, true);
     graphics.setColour (theme::textDim());
-    graphics.setFont (juce::FontOptions (11.5f));
+    graphics.setFont (theme::fontOptions (11.5f));
     graphics.drawText (detail, textArea, juce::Justification::centredLeft, true);
 }
 
@@ -276,7 +276,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     pluginFavoriteSettings = pluginFavoriteProperties.getUserSettings();
     loadPluginFavorites();
 
-    title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+    title.setFont (theme::fontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
     title.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (title);
@@ -308,6 +308,11 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     tree->addKeyListener (this);
     addAndMakeVisible (*tree);
 
+    toolsViewport.setScrollBarsShown (true, false);
+    toolsViewport.setScrollBarThickness (10);
+    toolsViewport.setViewedComponent (&toolsContent, false);
+    addAndMakeVisible (toolsViewport);
+
     for (auto* b : { &allButton, &instrumentsButton, &effectsButton, &favoritesButton })
     {
         b->setClickingTogglesState (true);
@@ -331,12 +336,12 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     effectsButton.onClick     = [this] { setFilter (Filter::Effects); };
     favoritesButton.onClick   = [this] { setFilter (Filter::Favorites); };
 
-    status.setFont (juce::FontOptions (12.5f));
+    status.setFont (theme::fontOptions (12.5f));
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
 
     maXXXtudioDescription.setText ("Native instruments and effects.", juce::dontSendNotification);
-    maXXXtudioDescription.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    maXXXtudioDescription.setFont (theme::fontOptions (14.0f, juce::Font::bold));
     maXXXtudioDescription.setColour (juce::Label::textColourId, theme::text());
     addAndMakeVisible (maXXXtudioDescription);
     drumRackCard.onClick = [this]
@@ -369,6 +374,13 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     addAndMakeVisible (compMasterCard);
     addAndMakeVisible (eqMasterCard);
     addAndMakeVisible (referenceCard);
+    for (auto* card : { &drumRackCard, &utilityCard, &compMasterCard, &eqMasterCard, &referenceCard })
+    {
+        card->addKeyListener (this);
+        toolsContent.addAndMakeVisible (*card);
+    }
+    maXXXtudioDescription.addKeyListener (this);
+    toolsContent.addAndMakeVisible (maXXXtudioDescription);
     setMaXXXtudioTab (false);
 
     scanner.list().addChangeListener (this);
@@ -379,6 +391,7 @@ BrowserPanel::~BrowserPanel()
 {
     saveTreeState();
     scanner.list().removeChangeListener (this);
+    toolsViewport.setViewedComponent (nullptr, false);
 }
 
 void BrowserPanel::grabFocus()
@@ -391,6 +404,19 @@ void BrowserPanel::grabFocus()
 
 bool BrowserPanel::keyPressed (const juce::KeyPress& key, juce::Component*)
 {
+    if (showingMaXXXtudioTools)
+    {
+        const int keyCode = key.getKeyCode();
+        if (keyCode == juce::KeyPress::upKey || keyCode == juce::KeyPress::downKey)
+        {
+            const int direction = keyCode == juce::KeyPress::upKey ? -1 : 1;
+            const int maxY = std::max (0, toolsContent.getHeight() - toolsViewport.getHeight());
+            toolsViewport.setViewPosition (0, std::clamp (
+                toolsViewport.getViewPositionY() + direction * 32, 0, maxY));
+            return true;
+        }
+    }
+
     if (! showingMaXXXtudioTools && key.getModifiers().isCommandDown()
         && juce::CharacterFunctions::toLowerCase (key.getKeyCode()) == 'f')
     {
@@ -422,6 +448,7 @@ void BrowserPanel::setMaXXXtudioTab (bool showTools)
     effectsButton.setVisible (! showTools);
     favoritesButton.setVisible (! showTools);
     tree->setVisible (! showTools);
+    toolsViewport.setVisible (showTools);
     maXXXtudioDescription.setVisible (showTools);
     drumRackCard.setVisible (showTools);
     utilityCard.setVisible (showTools);
@@ -429,6 +456,8 @@ void BrowserPanel::setMaXXXtudioTab (bool showTools)
     eqMasterCard.setVisible (showTools);
     referenceCard.setVisible (showTools);
     resized();
+    if (showTools)
+        drumRackCard.grabKeyboardFocus();
 }
 
 juce::File BrowserPanel::treeStateFile (Filter stateFilter) const
@@ -908,7 +937,10 @@ void BrowserPanel::savePluginFavorites()
 
 void BrowserPanel::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+    else
+        g.fillAll (theme::panel());
     g.setColour (theme::border());
     g.drawVerticalLine (0, 0.0f, static_cast<float> (getHeight()));
 }
@@ -926,21 +958,24 @@ void BrowserPanel::resized()
 
     if (showingMaXXXtudioTools)
     {
-        area.removeFromTop (12);
-        maXXXtudioDescription.setBounds (area.removeFromTop (24));
-        area.removeFromTop (8);
-        drumRackCard.setBounds (area.removeFromTop (68));
         area.removeFromTop (6);
-        utilityCard.setBounds (area.removeFromTop (68));
-        area.removeFromTop (6);
-        compMasterCard.setBounds (area.removeFromTop (68));
-        area.removeFromTop (6);
-        eqMasterCard.setBounds (area.removeFromTop (68));
-        area.removeFromTop (6);
-        referenceCard.setBounds (area.removeFromTop (68));
+        status.setBounds (area.removeFromBottom (20));
+        toolsViewport.setBounds (area);
+
+        const int contentWidth = std::max (1, toolsViewport.getWidth() - toolsViewport.getScrollBarThickness());
+        int y = 12;
+        maXXXtudioDescription.setBounds (0, y, contentWidth, 24);
+        y += 32;
+        for (auto* card : { &drumRackCard, &utilityCard, &compMasterCard, &eqMasterCard, &referenceCard })
+        {
+            card->setBounds (0, y, contentWidth, 68);
+            y += 74;
+        }
+        toolsContent.setSize (contentWidth, y);
     }
     else
     {
+        toolsViewport.setBounds ({});
         area.removeFromTop (6);
         search.setBounds (area.removeFromTop (26));
         area.removeFromTop (6);
@@ -961,6 +996,13 @@ void BrowserPanel::resized()
     }
 
     area.removeFromTop (6);
-    status.setBounds (area.removeFromBottom (20));
-    tree->setBounds (showingMaXXXtudioTools ? juce::Rectangle<int>() : area);
+    if (! showingMaXXXtudioTools)
+    {
+        status.setBounds (area.removeFromBottom (20));
+        tree->setBounds (area);
+    }
+    else
+    {
+        tree->setBounds ({});
+    }
 }

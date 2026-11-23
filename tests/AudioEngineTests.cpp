@@ -15,6 +15,38 @@
 
 namespace
 {
+class TestTransportPlayHead final : public juce::AudioPlayHead
+{
+public:
+    void setSamplePosition (std::int64_t samplePositionIn) { samplePosition = samplePositionIn; }
+
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        constexpr double sampleRate = 44100.0;
+        constexpr double tempo = 120.0;
+        const double seconds = static_cast<double> (samplePosition) / sampleRate;
+        const double ppq = seconds * tempo / 60.0;
+        PositionInfo position;
+        position.setTimeInSamples (samplePosition);
+        position.setTimeInSeconds (seconds);
+        position.setBpm (tempo);
+        position.setTimeSignature (TimeSignature {});
+        position.setPpqPosition (ppq);
+        position.setPpqPositionOfLastBarStart (std::floor (ppq / 4.0) * 4.0);
+        position.setBarCount (static_cast<std::int64_t> (std::floor (ppq / 4.0)));
+        position.setIsPlaying (true);
+        position.setIsLooping (true);
+        LoopPoints loop;
+        loop.ppqStart = 0.0;
+        loop.ppqEnd = 4.0;
+        position.setLoopPoints (loop);
+        return position;
+    }
+
+private:
+    std::int64_t samplePosition = 0;
+};
+
 struct TemporaryWavFile
 {
     TemporaryWavFile()
@@ -570,6 +602,33 @@ TEST_CASE ("Comp Master mix blends dry audio to preserve transient weight")
 
     REQUIRE (buffer.getSample (0, 511) > 0.4f);
     REQUIRE (buffer.getSample (0, 511) < 0.5f);
+}
+
+TEST_CASE ("Comp Master visualization keeps only the newest scope columns")
+{
+    CompMasterProcessor processor;
+    processor.getParameters()[8]->setValue (1.0f);
+    processor.prepareToPlay (120.0, 1);
+
+    juce::AudioBuffer<float> buffer (4, 1);
+    juce::MidiBuffer midi;
+    for (int column = 0; column <= CompMasterProcessor::scopeBufferSize; ++column)
+    {
+        buffer.clear();
+        const float input = column == 0 ? 0.9f : 0.1f;
+        buffer.setSample (0, 0, input);
+        buffer.setSample (1, 0, input);
+        processor.processBlock (buffer, midi);
+    }
+
+    std::vector<CompMasterProcessor::ScopeColumn> scope (
+        static_cast<std::size_t> (CompMasterProcessor::scopeBufferSize + 1));
+    const int count = processor.copyScopeSnapshot (
+        scope.data(), static_cast<int> (scope.size()));
+
+    REQUIRE (count == CompMasterProcessor::scopeBufferSize);
+    REQUIRE (std::none_of (scope.begin(), scope.begin() + count,
+        [] (const auto& column) { return column.maximum > 0.2f; }));
 }
 
 TEST_CASE ("EQ Master applies its eight parametric bands and restores their state")
@@ -1984,6 +2043,34 @@ TEST_CASE ("Cancelling an offline WAV export removes the partial file")
     REQUIRE_FALSE (output.file.existsAsFile());
 }
 
+TEST_CASE ("Sequencer graph publishes transport timing to its plugin nodes")
+{
+    SequencerGraph graph;
+    graph.setBpm (120.0);
+    graph.setLoop (false);
+    graph.setPlaying (true);
+    graph.prepareToPlay (44100.0, 512);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    juce::MidiBuffer midi;
+    graph.processBlock (buffer, midi);
+
+    auto position = graph.getPlayHead()->getPosition();
+    REQUIRE (position.hasValue());
+    REQUIRE (position->getBpm().hasValue());
+    CHECK (*position->getBpm() == 120.0);
+    CHECK (position->getIsPlaying());
+    REQUIRE (position->getPpqPosition().hasValue());
+    CHECK (*position->getPpqPosition() == 0.0);
+
+    graph.processBlock (buffer, midi);
+    position = graph.getPlayHead()->getPosition();
+    REQUIRE (position.hasValue());
+    REQUIRE (position->getPpqPosition().hasValue());
+    CHECK (*position->getPpqPosition() > 0.0);
+    graph.releaseResources();
+}
+
 #if defined(_WIN32)
 TEST_CASE ("Remote VST3 processing runs outside the host process", "[integration][plugin-worker]")
 {
@@ -2025,6 +2112,135 @@ TEST_CASE ("Remote VST3 processing runs outside the host process", "[integration
     juce::MemoryBlock state;
     processor->getStateInformation (state);
     REQUIRE_FALSE (processor->hasFailed());
+}
+
+TEST_CASE ("A saved VST3 preset can be restored by a plugin worker",
+           "[integration][plugin-worker][plugin-state]")
+{
+    const auto projectPath = juce::SystemStats::getEnvironmentVariable (
+        "MAXXXTUDIO_TEST_PROJECT", {});
+    const auto pluginName = juce::SystemStats::getEnvironmentVariable (
+        "MAXXXTUDIO_TEST_PLUGIN", {});
+    if (projectPath.isEmpty() || pluginName.isEmpty())
+    {
+        SUCCEED ("Set MAXXXTUDIO_TEST_PROJECT and MAXXXTUDIO_TEST_PLUGIN to test a saved plugin state.");
+        return;
+    }
+
+    const auto projectXml = juce::XmlDocument::parse (juce::File (projectPath));
+    REQUIRE (projectXml != nullptr);
+    auto* pluginsNode = projectXml->getChildByName ("Plugins");
+    REQUIRE (pluginsNode != nullptr);
+
+    juce::MemoryBlock savedState;
+    for (auto* node = pluginsNode->getFirstChildElement(); node != nullptr; node = node->getNextElement())
+        if (node->hasTagName ("Plugin")
+            && node->getStringAttribute ("identifier").containsIgnoreCase (pluginName))
+        {
+            REQUIRE (savedState.fromBase64Encoding (node->getStringAttribute ("state")));
+            break;
+        }
+    REQUIRE (savedState.getSize() > 0);
+
+    const auto pluginListFile = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                    .getChildFile ("MaXXXtudio").getChildFile ("plugins.xml");
+    const auto pluginListXml = juce::XmlDocument::parse (pluginListFile);
+    REQUIRE (pluginListXml != nullptr);
+
+    juce::KnownPluginList knownPlugins;
+    knownPlugins.recreateFromXml (*pluginListXml);
+    const auto descriptions = knownPlugins.getTypes();
+    const auto description = std::find_if (descriptions.begin(), descriptions.end(),
+        [&pluginName] (const auto& candidate) { return candidate.name.equalsIgnoreCase (pluginName); });
+    REQUIRE (description != descriptions.end());
+
+    juce::String error;
+    auto defaultProcessor = RemotePluginProcessor::create (*description, 44100.0, 512, error);
+    INFO ("Plugin creation failed: " << error);
+    REQUIRE (defaultProcessor != nullptr);
+    std::vector<float> defaultParameters;
+    for (auto* parameter : defaultProcessor->getParameters())
+        defaultParameters.push_back (parameter != nullptr ? parameter->getValue() : 0.0f);
+
+    auto processor = RemotePluginProcessor::create (*description, 44100.0, 512, error);
+    INFO ("Plugin creation failed: " << error);
+    REQUIRE (processor != nullptr);
+    processor->setStateInformation (savedState.getData(), static_cast<int> (savedState.getSize()));
+    REQUIRE_FALSE (processor->hasFailed());
+    std::size_t changedParameterCount = 0;
+    for (int i = 0; i < std::min (processor->getParameters().size(),
+                                  static_cast<int> (defaultParameters.size())); ++i)
+        if (std::abs (processor->getParameters().getUnchecked (i)->getValue()
+                      - defaultParameters[static_cast<std::size_t> (i)]) > 1.0e-5f)
+            ++changedParameterCount;
+    INFO ("Parameters changed from plugin defaults: " << changedParameterCount);
+    if (pluginName.containsIgnoreCase ("Nexus"))
+        CHECK (changedParameterCount > 0);
+
+    juce::MemoryBlock restoredState;
+    processor->getStateInformation (restoredState);
+    REQUIRE_FALSE (processor->hasFailed());
+    REQUIRE (restoredState.getSize() > 0);
+
+    auto repeatedState = restoredState;
+    for (int iteration = 0; iteration < 2; ++iteration)
+    {
+        auto repeatedProcessor = RemotePluginProcessor::create (*description, 44100.0, 512, error);
+        INFO ("Plugin creation failed: " << error);
+        REQUIRE (repeatedProcessor != nullptr);
+        repeatedProcessor->setStateInformation (
+            repeatedState.getData(), static_cast<int> (repeatedState.getSize()));
+        REQUIRE_FALSE (repeatedProcessor->hasFailed());
+        juce::MemoryBlock nextState;
+        repeatedProcessor->getStateInformation (nextState);
+        REQUIRE_FALSE (repeatedProcessor->hasFailed());
+        REQUIRE (nextState.getSize() > 0);
+        repeatedState = std::move (nextState);
+    }
+    INFO ("Saved / first restore / repeated restore bytes: "
+          << savedState.getSize() << " / " << restoredState.getSize()
+          << " / " << repeatedState.getSize());
+    CHECK (repeatedState.getSize() > 0);
+
+    if (pluginName.containsIgnoreCase ("Effectrix") || pluginName.containsIgnoreCase ("Glitch"))
+    {
+        auto effectProcessor = RemotePluginProcessor::create (*description, 44100.0, 512, error);
+        INFO ("Plugin creation failed: " << error);
+        REQUIRE (effectProcessor != nullptr);
+        TestTransportPlayHead transport;
+        effectProcessor->setPlayHead (&transport);
+        effectProcessor->setStateInformation (
+            savedState.getData(), static_cast<int> (savedState.getSize()));
+        REQUIRE_FALSE (effectProcessor->hasFailed());
+
+        constexpr int blockSize = 512;
+        constexpr int blocksToProcess = 400;
+        constexpr double twoPi = 6.283185307179586;
+        juce::AudioBuffer<float> buffer (2, blockSize);
+        juce::MidiBuffer midi;
+        double maximumDifference = 0.0;
+        for (int block = 0; block < blocksToProcess; ++block)
+        {
+            transport.setSamplePosition (static_cast<std::int64_t> (block) * blockSize);
+            std::array<float, blockSize> inputSamples {};
+            for (int sample = 0; sample < blockSize; ++sample)
+            {
+                const double position = static_cast<double> (block * blockSize + sample);
+                const float input = static_cast<float> (0.5 * std::sin (twoPi * 440.0 * position / 44100.0));
+                inputSamples[static_cast<std::size_t> (sample)] = input;
+                buffer.setSample (0, sample, input);
+                buffer.setSample (1, sample, input);
+            }
+            effectProcessor->processBlock (buffer, midi);
+            REQUIRE_FALSE (effectProcessor->hasFailed());
+            for (int sample = 0; sample < blockSize; ++sample)
+                maximumDifference = std::max (maximumDifference, std::abs (
+                    static_cast<double> (buffer.getSample (0, sample)
+                                         - inputSamples[static_cast<std::size_t> (sample)])));
+        }
+        INFO ("Maximum processed-signal difference: " << maximumDifference);
+        CHECK (maximumDifference > 1.0e-5);
+    }
 }
 
 TEST_CASE ("Plugin scanning runs in the isolated worker", "[integration][plugin-worker]")

@@ -643,6 +643,7 @@ juce::Result ProjectFile::save (const juce::File& file, const ProjectFileData& d
         xml->setAttribute ("transportPosition", data.transportPosition);
         xml->setAttribute ("loopEnabled", data.loopEnabled);
         xml->setAttribute ("metronomeEnabled", data.metronomeEnabled);
+        xml->setAttribute ("computerMidiKeyboardEnabled", data.computerMidiKeyboardEnabled);
         xml->setAttribute ("metronomeGain", data.metronomeGain);
         xml->setAttribute ("loopStart", state.loopStart);
         xml->setAttribute ("loopEnd", state.loopEnd);
@@ -820,6 +821,7 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
     loaded.transportPosition = xml->getDoubleAttribute ("transportPosition", 0.0);
     loaded.loopEnabled = xml->getBoolAttribute ("loopEnabled", true);
     loaded.metronomeEnabled = xml->getBoolAttribute ("metronomeEnabled", false);
+    loaded.computerMidiKeyboardEnabled = xml->getBoolAttribute ("computerMidiKeyboardEnabled", false);
     loaded.metronomeGain = static_cast<float> (xml->getDoubleAttribute ("metronomeGain", 1.0));
     loaded.project.loopStart = xml->getDoubleAttribute ("loopStart", 0.0);
     loaded.project.loopEnd = xml->getDoubleAttribute ("loopEnd", 16.0);

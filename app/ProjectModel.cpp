@@ -255,7 +255,10 @@ void ProjectModel::replaceState (State state)
     sendChangeMessage();
 }
 
-ProjectModel::Snapshot ProjectModel::makeSnapshot (bool includePluginState) const
+ProjectModel::Snapshot ProjectModel::makeSnapshot (
+    bool includePluginState, const std::vector<int>& pluginTrackIds,
+    const std::vector<PluginState>* capturedPluginStates,
+    const std::vector<PluginState>* reusablePluginStates) const
 {
     Snapshot snapshot;
     snapshot.master = *masterTrack;
@@ -276,8 +279,19 @@ ProjectModel::Snapshot ProjectModel::makeSnapshot (bool includePluginState) cons
     snapshot.songStartLocatorId = songStartLocatorId;
     snapshot.nextLocatorId = nextLocatorId;
     snapshot.includesPluginState = includePluginState;
-    if (includePluginState && capturePluginHistoryState)
-        snapshot.plugins = capturePluginHistoryState();
+    snapshot.pluginTrackIds = pluginTrackIds;
+    if (includePluginState)
+    {
+        if (capturedPluginStates != nullptr)
+            snapshot.plugins = *capturedPluginStates;
+        else if (capturePluginHistoryState)
+        {
+            static const std::vector<PluginState> noReusablePlugins;
+            snapshot.plugins = capturePluginHistoryState (
+                pluginTrackIds, reusablePluginStates != nullptr
+                    ? *reusablePluginStates : noReusablePlugins);
+        }
+    }
     return snapshot;
 }
 
@@ -339,7 +353,7 @@ void ProjectModel::restoreSnapshot (Snapshot&& snapshot)
     if (onMixerChanged) onMixerChanged();
     if (onLoopChanged) onLoopChanged();
     if (snapshot.includesPluginState && restorePluginHistoryState)
-        restorePluginHistoryState (snapshot.plugins);
+        restorePluginHistoryState (snapshot.plugins, snapshot.pluginTrackIds);
     sendChangeMessage();
 }
 
@@ -366,16 +380,43 @@ void ProjectModel::beginEdit()
     redoStack.clear();
 }
 
-void ProjectModel::beginExternalEdit()
+void ProjectModel::beginExternalEdit (std::vector<int> pluginTrackIds)
+{
+    beginExternalEdit (std::move (pluginTrackIds), nullptr);
+}
+
+void ProjectModel::beginExternalEdit (
+    std::vector<int> pluginTrackIds, const std::vector<PluginState>& pluginStates)
+{
+    beginExternalEdit (std::move (pluginTrackIds), &pluginStates);
+}
+
+void ProjectModel::beginExternalEdit (
+    std::vector<int> pluginTrackIds, const std::vector<PluginState>* capturedPluginStates)
 {
     if (editInProgress)
         return;
     editInProgress = true;
-    undoStack.push_back (makeSnapshot (true));
+    std::sort (pluginTrackIds.begin(), pluginTrackIds.end());
+    pluginTrackIds.erase (std::unique (pluginTrackIds.begin(), pluginTrackIds.end()),
+                          pluginTrackIds.end());
+    undoStack.push_back (makeSnapshot (true, pluginTrackIds, capturedPluginStates));
     if (undoStack.size() > 200)
         undoStack.erase (undoStack.begin());
     redoStackBeforeEdit = std::move (redoStack);
     redoStack.clear();
+}
+
+void ProjectModel::includeTrackInCurrentPluginHistoryScope (int trackId)
+{
+    if (! editInProgress || undoStack.empty() || ! undoStack.back().includesPluginState
+        || undoStack.back().pluginTrackIds.empty()
+        || std::find (undoStack.back().pluginTrackIds.begin(),
+                      undoStack.back().pluginTrackIds.end(), trackId)
+               != undoStack.back().pluginTrackIds.end())
+        return;
+
+    undoStack.back().pluginTrackIds.push_back (trackId);
 }
 
 void ProjectModel::endEdit()
@@ -401,7 +442,11 @@ bool ProjectModel::undo()
     endEdit();
     if (undoStack.empty())
         return false;
-    redoStack.push_back (makeSnapshot (undoStack.back().includesPluginState));
+    auto current = makeSnapshot (undoStack.back().includesPluginState,
+                                 undoStack.back().pluginTrackIds, nullptr,
+                                 &undoStack.back().plugins);
+    current.reusablePluginStates = undoStack.back().plugins;
+    redoStack.push_back (std::move (current));
     auto snapshot = std::move (undoStack.back());
     undoStack.pop_back();
     restoreSnapshot (std::move (snapshot));
@@ -413,7 +458,9 @@ bool ProjectModel::redo()
     endEdit();
     if (redoStack.empty())
         return false;
-    undoStack.push_back (makeSnapshot (redoStack.back().includesPluginState));
+    undoStack.push_back (makeSnapshot (redoStack.back().includesPluginState,
+                                       redoStack.back().pluginTrackIds, nullptr,
+                                       &redoStack.back().reusablePluginStates));
     auto snapshot = std::move (redoStack.back());
     redoStack.pop_back();
     restoreSnapshot (std::move (snapshot));
@@ -499,7 +546,7 @@ void ProjectModel::removeTrack (int id)
         return;
     }
 
-    beginExternalEdit();
+    beginExternalEdit ({ id });
     if (selectedTrackId == id)
     {
         selectedClipId = -1;

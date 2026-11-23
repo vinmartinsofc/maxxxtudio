@@ -32,6 +32,7 @@ public:
 
     std::function<void (double beats)>  onSeek;
     std::function<float (int trackId)>  meterProvider;
+    std::function<std::pair<float, float> (int trackId)> trackStereoPeakProvider;
     std::function<bool()> playbackStateProvider;
     std::function<bool()> computerMidiKeyboardEnabledProvider;
     std::function<void()> onMasterPeakReset;
@@ -72,6 +73,7 @@ public:
     bool getAutomationMode() const noexcept { return automationMode; }
     void duplicateSelection();
     void refresh();                       // recria os cabecalhos
+    juce::Component* masterControlComponent() noexcept;
     void refreshWaveformAppearance();
     void refreshMidiMappingInfo();
     void grabFocus();
@@ -88,11 +90,13 @@ public:
     void navigateLocator (bool forward);
     void addLocatorAtPlayhead();
     void deleteSelectedLocator();
+    static juce::Colour colourFor (int trackId);
+    static juce::Colour colourFor (const roll::Track&);
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int headerWidth = 210, overviewHeight = 20, rulerHeight = 28, timeRulerHeight = 24,
+    static constexpr int headerWidth = 210, overviewHeight = 20, rulerHeight = 28, timeRulerHeight = 0,
                          trackHeight = 94, collapsedTrackHeight = 24;
 
 private:
@@ -129,9 +133,6 @@ private:
     int rowAt (int y) const;
     int rowInsertionIndexAt (int y) const;
     void toggleTrackCollapsed (int trackId);
-    static juce::Colour colourFor (int trackId);
-    static juce::Colour colourFor (const roll::Track&);
-
     ProjectModel& project;
     double pixelsPerBeat = 22.0;          // Pixels per beat.
     double playhead = 0.0;

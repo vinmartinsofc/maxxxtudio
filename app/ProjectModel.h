@@ -77,8 +77,10 @@ public:
     std::function<void()> onMixerChanged;
     std::function<void()> onSelectionChanged;                         // Selected track/clip changed.
     std::function<void()> onLoopChanged;
-    std::function<std::vector<PluginState>()> capturePluginHistoryState;
-    std::function<void (const std::vector<PluginState>&)> restorePluginHistoryState;
+    std::function<std::vector<PluginState> (
+        const std::vector<int>&, const std::vector<PluginState>&)> capturePluginHistoryState;
+    std::function<void (const std::vector<PluginState>&, const std::vector<int>&)>
+        restorePluginHistoryState;
 
     roll::Track*     track (int id) const;
     roll::Track*     selectedTrack() const { return track (selectedTrackId); }
@@ -159,7 +161,10 @@ public:
     const ArrangementLocator* locator (int id) const;
     void growTo (double beats);
     void beginEdit();
-    void beginExternalEdit();
+    void beginExternalEdit (std::vector<int> pluginTrackIds = {});
+    void beginExternalEdit (std::vector<int> pluginTrackIds,
+                            const std::vector<PluginState>& pluginStates);
+    void includeTrackInCurrentPluginHistoryScope (int trackId);
     void endEdit();
     void cancelEdit();
     bool undo();
@@ -184,10 +189,17 @@ private:
         int selectedLocatorId = -1, songStartLocatorId = -1;
         int nextLocatorId = 1;
         std::vector<PluginState> plugins;
+        std::vector<PluginState> reusablePluginStates;
+        std::vector<int> pluginTrackIds;
         bool includesPluginState = false;
     };
 
-    Snapshot makeSnapshot (bool includePluginState = false) const;
+    Snapshot makeSnapshot (bool includePluginState = false,
+                           const std::vector<int>& pluginTrackIds = {},
+                           const std::vector<PluginState>* capturedPluginStates = nullptr,
+                           const std::vector<PluginState>* reusablePluginStates = nullptr) const;
+    void beginExternalEdit (std::vector<int> pluginTrackIds,
+                            const std::vector<PluginState>* capturedPluginStates);
     void restoreSnapshot (Snapshot&&);
     void recordUndo();
 

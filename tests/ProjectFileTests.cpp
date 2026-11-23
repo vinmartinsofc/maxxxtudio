@@ -56,6 +56,24 @@ TEST_CASE ("Project files preserve flat group bus membership")
     REQUIRE (loaded.project.master.colour == 0xff9c27b0);
 }
 
+TEST_CASE ("Project files preserve the computer MIDI keyboard state")
+{
+    TemporaryProjectFolder temporary;
+    ProjectFileData data;
+    data.project.master.id = AudioEngine::masterTrackId;
+    data.computerMidiKeyboardEnabled = true;
+    roll::Track track;
+    track.id = 1;
+    data.project.tracks.push_back (track);
+
+    const auto file = temporary.folder.getChildFile ("computer_midi_keyboard.std");
+    REQUIRE (ProjectFile::save (file, data).wasOk());
+
+    ProjectFileData loaded;
+    REQUIRE (ProjectFile::load (file, loaded).wasOk());
+    CHECK (loaded.computerMidiKeyboardEnabled);
+}
+
 TEST_CASE ("Project files preserve reversible frozen MIDI tracks")
 {
     TemporaryProjectFolder temporary;

@@ -83,9 +83,10 @@ public:
 
         if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
         {
+            laf->setDefaultSansSerifTypefaceName ("Aptos");
             laf->setColourScheme ({ theme::background(), theme::panel(), theme::panel(),
                                     theme::border(), theme::text(), theme::control(),
-                                    juce::Colours::black, theme::accent(), theme::text() });
+                                    theme::text(), theme::accent(), theme::text() });
             laf->setColour (juce::ResizableWindow::backgroundColourId, theme::background());
             laf->setColour (juce::BubbleComponent::backgroundColourId, theme::panel());
             laf->setColour (juce::BubbleComponent::outlineColourId, theme::border());

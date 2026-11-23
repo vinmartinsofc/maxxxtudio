@@ -877,6 +877,77 @@ TEST_CASE ("ProjectModel duplicates a MIDI track's clips and note data")
     REQUIRE (duplicate->clips.front()->clip.notes().front().pitch == 67);
 }
 
+TEST_CASE ("ProjectModel scopes plugin history to tracks involved in duplication")
+{
+    ProjectModel project;
+    const int sourceId = project.addTrack (roll::TrackType::Midi)->id;
+    const int otherId = project.addTrack (roll::TrackType::Audio)->id;
+    std::vector<std::vector<int>> capturedScopes;
+    std::vector<std::vector<int>> restoredScopes;
+    std::vector<std::vector<juce::String>> restoredPluginIdentifiers;
+
+    project.capturePluginHistoryState = [&] (const std::vector<int>& trackIds,
+                                              const std::vector<PluginState>& reusable)
+    {
+        capturedScopes.push_back (trackIds);
+        std::vector<PluginState> states;
+        for (const int trackId : trackIds)
+            if (project.track (trackId) != nullptr)
+            {
+                const auto existing = std::find_if (reusable.begin(), reusable.end(),
+                    [trackId] (const PluginState& candidate)
+                    {
+                        return candidate.trackId == trackId;
+                    });
+                if (existing != reusable.end())
+                {
+                    states.push_back (*existing);
+                    continue;
+                }
+                PluginState state;
+                state.trackId = trackId;
+                state.identifier = "test.plugin." + std::to_string (trackId);
+                states.push_back (std::move (state));
+            }
+        return states;
+    };
+    project.restorePluginHistoryState = [&] (const std::vector<PluginState>& plugins,
+                                              const std::vector<int>& trackIds)
+    {
+        restoredScopes.push_back (trackIds);
+        std::vector<juce::String> identifiers;
+        for (const auto& plugin : plugins)
+            identifiers.push_back (plugin.identifier);
+        restoredPluginIdentifiers.push_back (std::move (identifiers));
+    };
+
+    PluginState capturedPlugin;
+    capturedPlugin.trackId = sourceId;
+    capturedPlugin.identifier = "captured.once";
+    project.beginExternalEdit ({ sourceId }, { capturedPlugin });
+    const int duplicateId = project.duplicateTrack (sourceId);
+    project.includeTrackInCurrentPluginHistoryScope (duplicateId);
+    project.endEdit();
+
+    REQUIRE (duplicateId > 0);
+    REQUIRE (capturedScopes.empty());
+
+    REQUIRE (project.undo());
+    REQUIRE (capturedScopes.size() == 1);
+    REQUIRE (capturedScopes.back() == std::vector<int> { sourceId, duplicateId });
+    REQUIRE (restoredScopes.size() == 1);
+    REQUIRE (restoredScopes.back() == std::vector<int> { sourceId, duplicateId });
+    REQUIRE (restoredPluginIdentifiers.front() == std::vector<juce::String> { "captured.once" });
+    REQUIRE (project.track (otherId) != nullptr);
+
+    REQUIRE (project.redo());
+    REQUIRE (restoredScopes.size() == 2);
+    REQUIRE (restoredScopes.back() == std::vector<int> { sourceId, duplicateId });
+    REQUIRE (restoredPluginIdentifiers.back()
+             == std::vector<juce::String> { "captured.once", "test.plugin." + juce::String (duplicateId) });
+    REQUIRE (project.track (duplicateId) != nullptr);
+}
+
 TEST_CASE ("ProjectModel does not duplicate a group bus by itself")
 {
     ProjectModel project;

@@ -36,7 +36,7 @@ DrumRackEditor::DrumRackEditor (DrumRackProcessor& owner)
     title.setJustificationType (juce::Justification::centredLeft);
     title.setColour (juce::Label::textColourId, theme::text());
     selectedPadLabel.setColour (juce::Label::textColourId, theme::text());
-    selectedPadLabel.setFont (juce::FontOptions (14.0f, juce::Font::bold));
+    selectedPadLabel.setFont (theme::fontOptions (14.0f, juce::Font::bold));
 
     addAndMakeVisible (title);
     addAndMakeVisible (clearButton);

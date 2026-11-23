@@ -76,6 +76,8 @@ private:
     juce::Label title { {}, "Plugins" };
     juce::TextEditor search;
     std::unique_ptr<PluginTree> tree;
+    juce::Viewport toolsViewport;
+    juce::Component toolsContent;
     juce::TextButton vstTab { "VST" }, maXXXtudioTab { "MaXXXtudio" };
     NativeToolCard drumRackCard;
     NativeToolCard utilityCard;

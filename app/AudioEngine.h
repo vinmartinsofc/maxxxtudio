@@ -4,9 +4,11 @@
 #include "PluginState.h"
 #include "Sequencer.h"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <utility>
@@ -113,6 +115,11 @@ private:
 class SequencerGraph : public juce::AudioProcessorGraph
 {
 public:
+    static constexpr int visualizationSampleCount = 1024;
+
+    SequencerGraph();
+    ~SequencerGraph() override;
+
     // ---- message thread ----
     void setPlaying (bool p)       { playing = p; }
     bool isPlaying() const         { return playing; }
@@ -130,6 +137,9 @@ public:
     double positionBeats() const   { return positionAtomic; }
     double audioCpuCurrent() const { return audioCpuCurrentValue.load (std::memory_order_relaxed); }
     double audioCpuAverage() const { return audioCpuAverageValue.load (std::memory_order_relaxed); }
+    bool copyVisualizationSamples (std::array<float, visualizationSampleCount>& left,
+                                   std::array<float, visualizationSampleCount>& right,
+                                   double& sampleRate) const noexcept;
     const BlockShared& sharedBlock() const { return shared; }
 
     // ---- audio thread ----
@@ -137,14 +147,23 @@ public:
     using juce::AudioProcessorGraph::processBlock;
 
 private:
+    void publishVisualizationSamples (const juce::AudioBuffer<float>&) noexcept;
+
     roll::TransportClock clock;
+    class TransportPlayHead;
+    std::unique_ptr<TransportPlayHead> transportPlayHead;
     BlockShared shared;
     bool wasPlaying = false;
     std::atomic<bool>   playing { false }, rewindRequested { false }, seekRequested { false }, loopEnabled { true };
     std::atomic<bool> metronomeEnabled { false };
     std::atomic<float> metronomeGain { 1.0f };
     std::atomic<double> bpm { 120.0 }, loopStart { 0.0 }, loopEnd { 16.0 }, seekTarget { 0.0 }, positionAtomic { 0.0 };
+    std::atomic<double> playHeadPosition { 0.0 };
     std::atomic<double> audioCpuCurrentValue { 0.0 }, audioCpuAverageValue { 0.0 };
+    std::array<std::atomic<float>, visualizationSampleCount> visualizationLeft {}, visualizationRight {};
+    std::atomic<int> visualizationWritePosition { 0 };
+    std::atomic<std::uint64_t> visualizationSequence { 0 };
+    std::atomic<double> visualizationSampleRate { 44100.0 };
     int clickSamplesRemaining = 0;
     double clickPhase = 0.0, clickPhaseStep = 0.0;
     double freeMetronomeBeatPhase = 1.0;
@@ -350,6 +369,7 @@ public:
     bool mixerMuted (int trackId) const;
     double trackTailLengthSeconds (int trackId) const;
     float peak (int trackId) const;
+    std::pair<float, float> peakStereo (int trackId) const;
     float rms (int trackId) const;
     float masterPeak() const;
     std::pair<float, float> masterPeakStereo() const;
@@ -406,7 +426,9 @@ public:
     juce::String pluginParameterValueText (int trackId, const roll::AutomationTarget&,
                                            double normalizedValue) const;
     std::vector<PluginParameterGesture> consumePluginParameterGestures();
-    std::vector<PluginState> getPluginStates();
+    std::vector<PluginState> getPluginStates (
+        const std::vector<int>& trackIds = {},
+        const std::vector<PluginState>& reusableStates = {});
     bool restorePluginState (int trackId, int deviceId, const juce::MemoryBlock&);
     IsolatedEditorResult showIsolatedDeviceEditor (int trackId, int deviceId,
                                                     int editorX = -1, int editorY = -1);

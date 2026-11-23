@@ -178,7 +178,7 @@ public:
             g.fillRoundedRectangle (5.0f, static_cast<float> (height / 2 - 5), 10.0f, 10.0f, 2.0f);
         }
         g.setColour (theme::text());
-        g.setFont (juce::FontOptions (13.5f, isBold ? juce::Font::bold : juce::Font::plain));
+        g.setFont (theme::fontOptions (13.5f, isBold ? juce::Font::bold : juce::Font::plain));
         g.drawText (label, textX, 0, width - textX - 5, height, juce::Justification::centredLeft, true);
     }
 
@@ -407,7 +407,7 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
     loadFavorites();
     loadExpandedItems();
 
-    title.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+    title.setFont (theme::fontOptions (14.5f, juce::Font::bold));
     title.setColour (juce::Label::textColourId, theme::text());
     addAndMakeVisible (title);
 
@@ -426,7 +426,7 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
     tree.setWantsKeyboardFocus (true);
     addAndMakeVisible (tree);
 
-    status.setFont (juce::FontOptions (12.0f));
+    status.setFont (theme::fontOptions (12.0f));
     status.setColour (juce::Label::textColourId, theme::textDim());
     addAndMakeVisible (status);
 
@@ -453,7 +453,7 @@ AudioFileBrowser::AudioFileBrowser (const juce::AudioFormatManager& audioFormats
     previewGain.setValue (0.5, juce::dontSendNotification);
     previewGain.setTooltip ("Preview Volume");
     previewGainLabel.setColour (juce::Label::textColourId, theme::textDim());
-    previewGainLabel.setFont (juce::FontOptions (12.5f));
+    previewGainLabel.setFont (theme::fontOptions (12.5f));
     previewGain.onValueChange = [this]
     {
         if (onPreviewGainChanged)
@@ -566,7 +566,10 @@ void AudioFileBrowser::stopPreview()
 
 void AudioFileBrowser::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+    else
+        g.fillAll (theme::panel());
     g.setColour (theme::border());
     g.drawVerticalLine (0, 0.0f, static_cast<float> (getHeight()));
 }

@@ -12,6 +12,7 @@ struct ProjectFileData
     double transportPosition = 0.0;
     bool loopEnabled = true;
     bool metronomeEnabled = false;
+    bool computerMidiKeyboardEnabled = false;
     float metronomeGain = 1.0f;
     std::vector<juce::File> missingAudioFiles;
 };

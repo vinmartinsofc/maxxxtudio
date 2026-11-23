@@ -27,7 +27,7 @@ AudioClipEditor::AudioClipEditor()
     addAndMakeVisible (closeButton);
 
     fileName.setColour (juce::Label::textColourId, theme::text());
-    fileName.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+    fileName.setFont (theme::fontOptions (14.5f, juce::Font::bold));
     tempoInfo.setColour (juce::Label::textColourId, theme::textDim());
     bpmLabel.setColour (juce::Label::textColourId, theme::textDim());
     sourceBpm.setRange (20.0, 300.0, 0.1);
@@ -194,7 +194,7 @@ AudioClipEditor::AudioClipEditor()
              &fadeInLabel, &fadeOutLabel })
     {
         label->setColour (juce::Label::textColourId, theme::textDim());
-        label->setFont (juce::FontOptions (11.0f));
+        label->setFont (theme::fontOptions (11.0f));
     }
 
     const auto configureSlider = [] (AudioClipKnobSlider& slider)
@@ -261,10 +261,15 @@ void AudioClipEditor::applyPlaybackProperties()
 {
     if (clip == nullptr || onPlaybackChanged == nullptr)
         return;
-    onPlaybackChanged (pitchSlider.getValue(), centsSlider.getValue(),
-                       gainSlider.getValue(),
-                       std::clamp (warpModeBox.getSelectedId() - 1, 0, 5),
-                       reverseButton.getToggleState());
+    if (! onPlaybackChanged (pitchSlider.getValue(), centsSlider.getValue(),
+                             gainSlider.getValue(),
+                             std::clamp (warpModeBox.getSelectedId() - 1, 0, 5),
+                             reverseButton.getToggleState()))
+    {
+        reverseButton.setToggleState (clip->reverse, juce::dontSendNotification);
+        return;
+    }
+    repaint();
 }
 
 void AudioClipEditor::setClip (const roll::AudioPlacement* selected,

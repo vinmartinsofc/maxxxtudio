@@ -1,4 +1,5 @@
 #include "Icons.h"
+#include "Theme.h"
 #include <BinaryData.h>
 #include <algorithm>
 #include <array>
@@ -76,6 +77,21 @@ juce::Image appIcon()
     if (data == nullptr || dataSize <= 0)
         return {};
 
-    return juce::ImageFileFormat::loadFrom (data, static_cast<std::size_t> (dataSize));
+    auto image = juce::ImageFileFormat::loadFrom (data, static_cast<std::size_t> (dataSize));
+    if (! image.isValid())
+        return image;
+
+    const auto accent = theme::accent();
+    juce::Image::BitmapData pixels (image, juce::Image::BitmapData::readWrite);
+    for (int y = 0; y < pixels.height; ++y)
+        for (int x = 0; x < pixels.width; ++x)
+        {
+            const auto pixel = pixels.getPixelColour (x, y);
+            if (pixel.getRed() > pixel.getGreen() * 1.35f
+                && pixel.getGreen() > pixel.getBlue() * 1.3f
+                && pixel.getRed() > 80)
+                pixels.setPixelColour (x, y, accent.withAlpha (pixel.getFloatAlpha()));
+        }
+    return image;
 }
 }

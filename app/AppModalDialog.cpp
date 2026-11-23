@@ -30,7 +30,7 @@ void drawWarningTriangle (juce::Graphics& g, juce::Rectangle<float> bounds,
     const auto centreX = bounds.getCentreX();
     const auto markTop = bounds.getY() + bounds.getHeight() * 0.40f;
     const auto markBottom = bounds.getY() + bounds.getHeight() * 0.65f;
-    g.setColour (filled ? juce::Colour (0xff242426) : colour);
+    g.setColour (filled ? theme::control() : colour);
     g.drawLine (centreX, markTop, centreX, markBottom, std::max (2.0f, strokeWidth));
     g.fillEllipse (centreX - strokeWidth, bounds.getY() + bounds.getHeight() * 0.73f,
                    strokeWidth * 2.0f, strokeWidth * 2.0f);
@@ -71,7 +71,7 @@ public:
         const auto textColour = style == ButtonStyle::Tertiary && ! isMouseOver && ! isButtonDown
             ? theme::textDim() : theme::text();
         g.setColour (textColour);
-        g.setFont (juce::FontOptions (14.0f, style == ButtonStyle::Primary
+        g.setFont (theme::fontOptions (14.0f, style == ButtonStyle::Primary
                                                  ? juce::Font::bold : juce::Font::plain));
         g.drawFittedText (getButtonText(), getLocalBounds().reduced (8, 0),
                           juce::Justification::centred, 1);
@@ -198,7 +198,7 @@ void AppModalDialog::paint (juce::Graphics& g)
             g.setColour (theme::controlBorder());
             g.fillEllipse (badge);
             g.setColour (theme::accent());
-            g.setFont (juce::FontOptions (52.0f, juce::Font::bold));
+            g.setFont (theme::fontOptions (52.0f, juce::Font::bold));
             g.drawText ("?", badge.toNearestInt().translated (0, -1),
                         juce::Justification::centred);
             drawWarningTriangle (g, { badge.getRight() - 23.0f, badge.getBottom() - 25.0f,
@@ -217,13 +217,13 @@ void AppModalDialog::paint (juce::Graphics& g)
     const float contentLeft = panel.getX() + (icon == Icon::None ? 24.0f : 112.0f);
     const float contentRight = panel.getRight() - 24.0f;
     g.setColour (theme::text());
-    g.setFont (juce::FontOptions (17.0f, juce::Font::bold));
+    g.setFont (theme::fontOptions (17.0f, juce::Font::bold));
     g.drawFittedText (title, juce::Rectangle<int> (juce::roundToInt (contentLeft),
                                                     juce::roundToInt (panel.getY() + 24.0f),
                                                     juce::roundToInt (contentRight - contentLeft), 26),
                       juce::Justification::centredLeft, 1);
     g.setColour (theme::textDim());
-    g.setFont (juce::FontOptions (14.0f));
+    g.setFont (theme::fontOptions (14.0f));
     g.drawFittedText (message, juce::Rectangle<int> (juce::roundToInt (contentLeft),
                                                       juce::roundToInt (panel.getY() + 58.0f),
                                                       juce::roundToInt (contentRight - contentLeft),

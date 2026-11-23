@@ -19,6 +19,29 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     auto r = getLocalBounds().toFloat().reduced (1.0f);
     const bool active = icon == icons::Icon::Pause;
+    if (theme::isHighTech())
+    {
+        const auto fill = down ? theme::pressed()
+                        : active ? theme::panelLight()
+                        : over ? theme::hover() : theme::control();
+        theme::drawChromeSurface (g, r, 5.0f, fill);
+        g.setColour (active || down ? theme::accent()
+                    : over ? theme::accentHover() : theme::controlBorder());
+        g.drawRoundedRectangle (r, 5.0f, 1.0f);
+        if (active)
+        {
+            g.setColour (theme::accent());
+            g.fillRoundedRectangle (r.withHeight (2.0f), 1.0f);
+        }
+
+        const auto iconColour = ! isEnabled() ? theme::textDim().withAlpha (0.4f)
+                                  : active ? theme::accent() : theme::text();
+        if (const auto* drawable = icons::get (icon, iconColour, 20))
+            drawable->drawWithin (g, r.reduced (9.0f, 7.0f),
+                                  juce::RectanglePlacement::centred, 1.0f);
+        return;
+    }
+
     const auto fill = active ? (over ? theme::accentHover() : theme::accent())
                              : down ? theme::pressed() : over ? theme::hover() : theme::control();
     g.setColour (fill);
@@ -34,7 +57,7 @@ void IconButton::paintButton (juce::Graphics& g, bool over, bool down)
     else
     {
         g.setColour (iconColour);
-        g.setFont (juce::FontOptions (20.0f, juce::Font::bold));
+        g.setFont (theme::fontOptions (20.0f, juce::Font::bold));
         g.drawText ("?", r, juce::Justification::centred);
     }
 }
@@ -43,6 +66,29 @@ void IconToggleButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
     const bool active = getToggleState();
+    if (theme::isHighTech())
+    {
+        const auto fill = down ? theme::pressed()
+                        : active ? theme::panelLight()
+                        : over ? theme::hover() : theme::control();
+        theme::drawChromeSurface (g, bounds, 5.0f, fill);
+        g.setColour (active || down ? theme::accent()
+                    : over ? theme::accentHover() : theme::controlBorder());
+        g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+        if (active)
+        {
+            g.setColour (theme::accent());
+            g.fillRoundedRectangle (bounds.withHeight (2.0f), 1.0f);
+        }
+
+        const auto iconColour = isEnabled() ? (active ? theme::accent() : theme::textDim())
+                                            : theme::textDim().withAlpha (0.4f);
+        if (const auto* drawable = icons::get (icon, iconColour, 18))
+            drawable->drawWithin (g, bounds.reduced (8.0f, 7.0f),
+                                  juce::RectanglePlacement::centred, 1.0f);
+        return;
+    }
+
     const auto fill = down ? theme::pressed() : over ? theme::hover() : theme::control();
     g.setColour (fill);
     g.fillRoundedRectangle (bounds, 4.0f);
@@ -74,7 +120,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     optionsButton.setMouseClickGrabsKeyboardFocus (false);
     projectButton.setTooltip ("Project: open, create, save, or export the session");
     projectButton.onClick = [this] { if (onProjectMenu) onProjectMenu(); };
-    optionsButton.setTooltip ("Preferences: audio, plugins, themes, and other settings (Ctrl+,)");
+    optionsButton.setTooltip ("Preferences: audio, plugins, interface, and other settings (Ctrl+,)");
     optionsButton.onClick = [this] { if (onOptionsMenu) onOptionsMenu(); };
     metronomeButton.setTooltip ("Metronome: toggle and adjust click volume");
     metronomeButton.setClickingTogglesState (true);
@@ -151,7 +197,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
             onFavoritesToggled (favoritesButton.getToggleState());
     };
 
-    pianoRollButton.setTooltip ("Piano Roll and devices: show or hide the bottom panel");
+    pianoRollButton.setTooltip ("Piano Roll and devices: show or hide the bottom panel (Ctrl+')");
     pianoRollButton.setClickingTogglesState (true);
     pianoRollButton.setToggleState (true, juce::dontSendNotification);
     pianoRollButton.onClick = [this]
@@ -194,12 +240,14 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     };
 
     bpmCaption.setColour (juce::Label::textColourId, theme::textDim());
-    bpmCaption.setFont (juce::FontOptions (12.5f));
+    bpmCaption.setFont (theme::fontOptions (12.5f));
 
+    positionLabel.setName ("Current Project Time");
+    positionLabel.setTooltip ("Current position in project time (hours:minutes:seconds:frames)");
     positionLabel.setJustificationType (juce::Justification::centred);
     positionLabel.setColour (juce::Label::backgroundColourId, theme::control());
     positionLabel.setColour (juce::Label::textColourId, theme::text());
-    positionLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 16.0f, juce::Font::plain));
+    positionLabel.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 18.0f, juce::Font::bold));
 
     startTimerHz (30);
     timerCallback();
@@ -298,20 +346,38 @@ void TransportBar::timerCallback()
     repaint (cpuMeterBounds);
 
     const double pos = graph.positionBeats();
-    if (std::abs (pos - lastPosition) < 1.0e-9) return;
+    const double bpm = graph.getBpm();
+    const bool positionChanged = std::abs (pos - lastPosition) >= 1.0e-9;
+    const bool tempoChanged = std::abs (bpm - lastBpm) >= 1.0e-9;
+    if (! positionChanged && ! tempoChanged)
+        return;
     lastPosition = pos;
+    lastBpm = bpm;
 
-    const int bar   = static_cast<int> (std::floor (pos / 4.0)) + 1;
-    const int beat  = static_cast<int> (std::floor (std::fmod (pos, 4.0))) + 1;
-    const int sixt  = static_cast<int> (std::floor (std::fmod (pos, 1.0) * 4.0)) + 1;
-    positionLabel.setText (juce::String (bar) + " . " + juce::String (beat) + " . " + juce::String (sixt), juce::dontSendNotification);
+    const double safeBpm = std::isfinite (bpm) && bpm > 0.0 ? bpm : 120.0;
+    const double seconds = std::max (0.0, pos) * 60.0 / safeBpm;
+    const auto totalFrames = static_cast<juce::int64> (std::floor (seconds * 30.0));
+    const auto totalSeconds = totalFrames / 30;
+    const auto hours = totalSeconds / 3600;
+    const auto minutes = (totalSeconds / 60) % 60;
+    const auto displaySeconds = totalSeconds % 60;
+    const auto frames = totalFrames % 30;
+    const auto timecode = juce::String (hours).paddedLeft ('0', 2) + ":"
+        + juce::String (minutes).paddedLeft ('0', 2) + ":"
+        + juce::String (displaySeconds).paddedLeft ('0', 2) + ":"
+        + juce::String (frames).paddedLeft ('0', 2);
+    positionLabel.setText (timecode, juce::dontSendNotification);
 
-    if (onPosition) onPosition (pos);
+    if (positionChanged && onPosition)
+        onPosition (pos);
 }
 
 void TransportBar::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+    else
+        g.fillAll (theme::panel());
     if (! cpuMeterBounds.isEmpty())
     {
         const auto meter = cpuMeterBounds.toFloat().reduced (1.0f);
@@ -330,7 +396,7 @@ void TransportBar::paint (juce::Graphics& g)
             cpuIcon->drawWithin (g, iconBounds, juce::RectanglePlacement::centred, 1.0f);
         }
         g.setColour (theme::text());
-        g.setFont (juce::FontOptions (11.5f));
+        g.setFont (theme::fontOptions (11.5f));
         const auto cpuText = juce::String (
             static_cast<int> (std::lround (displayedCpuAverage * 100.0))) + "%";
         g.drawText (cpuText,
@@ -350,10 +416,6 @@ void TransportBar::resized()
 {
     auto area = getLocalBounds().reduced (8, 4);
     const bool compact = getWidth() < 1120;
-    projectButton.setBounds (area.removeFromLeft (72));
-    area.removeFromLeft (8);
-    optionsButton.setBounds (area.removeFromLeft (72));
-    area.removeFromLeft (8);
     bpmCaption.setBounds (area.removeFromLeft (34));
     bpmLabel.setBounds (area.removeFromLeft (76));
     area.removeFromLeft (16);
@@ -371,10 +433,12 @@ void TransportBar::resized()
     area.removeFromLeft (6);
     metronomeVolumeSlider.setBounds (area.removeFromLeft (68).reduced (0, 8));
     area.removeFromLeft (12);
-    positionLabel.setBounds (area.removeFromLeft (120));
-    area.removeFromLeft (12);
-    const int rightControlsWidth = compact ? 312 : 360;
-    const int cpuWidth = std::min (150, std::max (0, area.getWidth() - rightControlsWidth - 12));
+    const int spacing = compact ? 4 : 6;
+    const int rightControlsWidth = 7 * 40 + 6 * spacing;
+    const int availableWidth = std::max (0, area.getWidth() - rightControlsWidth);
+    int cpuWidth = std::min (150, std::max (0, availableWidth - 192));
+    if (cpuWidth < 72)
+        cpuWidth = 0;
     if (cpuWidth >= 72)
     {
         cpuMeterBounds = area.removeFromLeft (cpuWidth);
@@ -388,6 +452,13 @@ void TransportBar::resized()
         cpuTooltipArea.setBounds ({});
         cpuTooltipArea.setVisible (false);
     }
+    const int clockAreaWidth = std::max (0, area.getWidth() - rightControlsWidth);
+    const int clockWidth = std::min (190, clockAreaWidth);
+    positionLabel.setVisible (clockWidth >= 96);
+    positionLabel.setBounds (clockWidth >= 96
+        ? juce::Rectangle<int> (area.getX() + (clockAreaWidth - clockWidth) / 2,
+                                3, clockWidth, getHeight() - 6)
+        : juce::Rectangle<int>());
     browserButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
     fileBrowserButton.setBounds (area.removeFromRight (40));
@@ -397,4 +468,8 @@ void TransportBar::resized()
     pianoRollButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
     computerKeyboardButton.setBounds (area.removeFromRight (40));
+    area.removeFromRight (compact ? 4 : 6);
+    optionsButton.setBounds (area.removeFromRight (40));
+    area.removeFromRight (compact ? 4 : 6);
+    projectButton.setBounds (area.removeFromRight (40));
 }

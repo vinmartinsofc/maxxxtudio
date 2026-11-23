@@ -202,7 +202,7 @@ void NoteGrid::paint (juce::Graphics& g)
     {
         g.fillAll (theme::rowBlack());
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (14.5f));
+        g.setFont (theme::fontOptions (14.5f));
         g.drawFittedText (theme::ui ("Select a clip in the arrangement\n(double-click a track to create a clip)"),
                           getLocalBounds().reduced (10), juce::Justification::centred, 3);
         return;
@@ -222,7 +222,7 @@ void NoteGrid::paint (juce::Graphics& g)
         g.setColour (bg);
         g.fillRect (clipBox.getX(), r * model.rowHeight, clipBox.getWidth(), model.rowHeight);
 
-        g.setColour (pitch % 12 == 0 ? theme::border().brighter (0.3f) : theme::border().withAlpha (0.45f));
+        g.setColour (pitch % 12 == 0 ? theme::gridLine().brighter (0.3f) : theme::gridLine().withAlpha (0.45f));
         g.drawHorizontalLine ((r + 1) * model.rowHeight - 1, static_cast<float> (clipBox.getX()), static_cast<float> (clipBox.getRight()));
     }
 
@@ -234,7 +234,7 @@ void NoteGrid::paint (juce::Graphics& g)
         if (x > clipBox.getRight()) break;
         const bool bar  = std::abs (b / 4.0 - std::round (b / 4.0)) < 1e-6;
         const bool beat = std::abs (b - std::round (b)) < 1e-6;
-        g.setColour (bar ? theme::border().brighter (0.6f) : beat ? theme::border().brighter (0.2f) : theme::border().withAlpha (0.5f));
+        g.setColour (bar ? theme::gridLine().brighter (0.6f) : beat ? theme::gridLine().brighter (0.2f) : theme::gridLine().withAlpha (0.5f));
         g.drawVerticalLine (static_cast<int> (x), static_cast<float> (clipBox.getY()), static_cast<float> (clipBox.getBottom()));
     }
 
@@ -277,7 +277,7 @@ void NoteGrid::paint (juce::Graphics& g)
             g.setColour (theme::accent());
             g.drawRoundedRectangle (hint.toFloat(), 5.0f, 1.0f);
             g.setColour (theme::text());
-            g.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+            g.setFont (theme::fontOptions (12.0f, juce::Font::bold));
             g.drawText (message, hint.reduced (6, 0), juce::Justification::centredLeft, true);
         }
 
@@ -723,7 +723,7 @@ void KeyColumn::paint (juce::Graphics& g)
 
         const float fontSize = std::min (11.0f, std::max (7.0f, static_cast<float> (model.rowHeight - 1)));
         g.setColour (lit ? theme::text() : black ? theme::textDim() : juce::Colours::black);
-        g.setFont (juce::FontOptions (fontSize, pitch % 12 == 0 ? juce::Font::bold : juce::Font::plain));
+        g.setFont (theme::fontOptions (fontSize, pitch % 12 == 0 ? juce::Font::bold : juce::Font::plain));
         g.drawFittedText (pitchName (pitch, model.noteSpelling, model.scale.root(), model.scaleOn),
                           juce::Rectangle<int> (4, y, getWidth() - zoomStripWidth - 10, model.rowHeight),
                           juce::Justification::centredRight, 1);
@@ -825,7 +825,10 @@ void KeyColumn::mouseUp (const juce::MouseEvent& e)
 
 void RulerBar::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panelLight());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panelLight());
+    else
+        g.fillAll (theme::panelLight());
 
     const auto clipBox = g.getClipBounds();
     const double ppb = model.pixelsPerBeat;
@@ -834,7 +837,7 @@ void RulerBar::paint (juce::Graphics& g)
     g.setColour (theme::accent().withAlpha (0.22f));
     g.fillRect (0.0f, 0.0f, static_cast<float> (model.gridWidthPixels()), 4.0f);   // Clip/loop range.
 
-    g.setFont (juce::FontOptions (12.5f));
+    g.setFont (theme::fontOptions (12.5f));
     for (int b = 0; b <= totalBeats; ++b)
     {
         const float x = static_cast<float> (b * ppb);
@@ -868,13 +871,13 @@ void RulerBar::paint (juce::Graphics& g)
         flag.closeSubPath();
         g.fillPath (flag);
         g.setColour (theme::panelLight());
-        g.setFont (juce::FontOptions (8.0f, juce::Font::bold));
+        g.setFont (theme::fontOptions (8.0f, juce::Font::bold));
         g.drawText (juce::String (static_cast<int> (index + 1)),
                     juce::Rectangle<int> (static_cast<int> (x) + 1, 0, 10, 11),
                     juce::Justification::centred, true);
     }
 
-    if (hovered && ! hoveringLocator && getWidth() > 0)
+    if (hovered && ! hoveringLocator && ! startPlaybackHovered && getWidth() > 0)
     {
         const float centreX = std::clamp (hoveredX, 10.0f, static_cast<float> (getWidth()) - 10.0f);
         const float centreY = static_cast<float> (getHeight()) * 0.67f;
@@ -895,6 +898,21 @@ void RulerBar::paint (juce::Graphics& g)
                              0.0f, -0.8f, 0.8f, true);
         g.strokePath (waves, juce::PathStrokeType (1.4f));
     }
+
+    const auto startButton = juce::Rectangle<float> (2.0f, 2.0f, 18.0f, 18.0f);
+    g.setColour (startPlaybackHovered ? theme::hover() : theme::control());
+    g.fillRoundedRectangle (startButton, 3.0f);
+    g.setColour (theme::accent());
+    g.drawRoundedRectangle (startButton, 3.0f, 1.0f);
+    const float centreY = startButton.getCentreY();
+    juce::Path startSpeaker;
+    startSpeaker.addTriangle (5.0f, centreY - 2.5f, 8.0f, centreY - 2.5f, 10.0f, centreY - 5.0f);
+    startSpeaker.addTriangle (5.0f, centreY + 2.5f, 8.0f, centreY + 2.5f, 10.0f, centreY + 5.0f);
+    startSpeaker.addRectangle (5.0f, centreY - 2.5f, 3.0f, 5.0f);
+    g.fillPath (startSpeaker);
+    juce::Path startWaves;
+    startWaves.addCentredArc (9.0f, centreY, 3.0f, 3.0f, 0.0f, -0.8f, 0.8f, true);
+    g.strokePath (startWaves, juce::PathStrokeType (1.0f));
 }
 
 void RulerBar::setLocators (std::vector<std::pair<int, double>> newLocators, int selectedId)
@@ -928,6 +946,14 @@ bool RulerBar::isResizeHandle (juce::Point<float> position) const
 
 void RulerBar::mouseDown (const juce::MouseEvent& e)
 {
+    if (e.mods.isLeftButtonDown() && e.position.x <= 22.0f && e.position.y <= 22.0f)
+    {
+        startPlaybackPressed = true;
+        startPlaybackHovered = true;
+        repaint();
+        return;
+    }
+
     hovered = true;
     hoveredX = e.position.x;
     hoveringLocator = locatorAt (e.position.x) >= 0;
@@ -961,8 +987,15 @@ void RulerBar::mouseMove (const juce::MouseEvent& e)
     hovered = true;
     hoveredX = e.position.x;
     hoveringLocator = locatorAt (e.position.x) >= 0;
+    const bool overStartButton = e.position.x <= 22.0f && e.position.y <= 22.0f;
+    if (startPlaybackHovered != overStartButton)
+    {
+        startPlaybackHovered = overStartButton;
+        repaint();
+    }
     repaint();
-    setMouseCursor (locatorAt (e.position.x) >= 0 ? juce::MouseCursor::DraggingHandCursor
+    setMouseCursor (overStartButton || locatorAt (e.position.x) >= 0
+                        ? juce::MouseCursor::PointingHandCursor
                        : isResizeHandle (e.position) ? juce::MouseCursor::LeftRightResizeCursor
                                                      : juce::MouseCursor::NormalCursor);
 }
@@ -971,12 +1004,16 @@ void RulerBar::mouseExit (const juce::MouseEvent&)
 {
     hovered = false;
     hoveringLocator = false;
+    startPlaybackHovered = false;
     repaint();
     setMouseCursor (juce::MouseCursor::NormalCursor);
 }
 
 void RulerBar::mouseDrag (const juce::MouseEvent& e)
 {
+    if (startPlaybackPressed)
+        return;
+
     hoveredX = e.position.x;
     hoveringLocator = locatorDragPending || locatorAt (e.position.x) >= 0;
     repaint();
@@ -1019,6 +1056,14 @@ void RulerBar::mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheel
 
 void RulerBar::mouseUp (const juce::MouseEvent& e)
 {
+    if (startPlaybackPressed)
+    {
+        startPlaybackPressed = false;
+        if (e.position.x <= 22.0f && e.position.y <= 22.0f && onSeek)
+            onSeek (0.0);
+        return;
+    }
+
     if (e.mods.isPopupMenu())
     {
         const int locatorId = locatorAt (e.position.x);
@@ -1085,8 +1130,11 @@ juce::Rectangle<float> PianoRollOverview::visibleRangeBounds() const
 
 void PianoRollOverview::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel().darker (0.55f));
     const auto bounds = getLocalBounds().toFloat();
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, bounds, 0.0f, theme::panel().darker (0.55f));
+    else
+        g.fillAll (theme::panel().darker (0.55f));
     if (model.hasClip() && bounds.getWidth() > 0.0f)
     {
         const double length = std::max (0.001, model.clip().length());
@@ -1223,7 +1271,7 @@ void PianoRollOverview::mouseDrag (const juce::MouseEvent& e)
         const double panBeats = (e.position.x - startPosition.x)
             * std::max (0.001, model.clip().length()) / getWidth();
         const int viewX = std::max (0, static_cast<int> (std::lround (
-            (startBeat - panBeats) * model.pixelsPerBeat)));
+            (startBeat + panBeats) * model.pixelsPerBeat)));
         viewport.setViewPosition (viewX, viewport.getViewPositionY());
     }
 }
@@ -1251,7 +1299,10 @@ int VelocityLane::velocityAt (float y) const
 
 void VelocityLane::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+    else
+        g.fillAll (theme::panel());
     const auto clipBox = g.getClipBounds();
 
     g.setColour (theme::border());
@@ -1271,7 +1322,7 @@ void VelocityLane::paint (juce::Graphics& g)
     }
 
     g.setColour (theme::textDim());
-    g.setFont (juce::FontOptions (11.5f));
+    g.setFont (theme::fontOptions (11.5f));
     g.drawText ("Velocity", 4 + clipBox.getX() * 0, 2, 60, 12, juce::Justification::left);
 }
 
@@ -1439,11 +1490,17 @@ PianoRollEditor::~PianoRollEditor()
 
 void PianoRollEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+    else
+        g.fillAll (theme::panel());
     if (grid.hasKeyboardFocus (false))               // Focus ring (keyboard navigation).
     {
         g.setColour (theme::accent());
-        g.drawRect (getLocalBounds(), 2);
+        if (theme::isHighTech())
+            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 6.0f, 2.0f);
+        else
+            g.drawRect (getLocalBounds(), 2);
     }
 }
 

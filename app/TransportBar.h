@@ -98,5 +98,5 @@ private:
     juce::Rectangle<int> cpuMeterBounds;
     CpuTooltipButton cpuTooltipArea;
     double displayedCpuAverage = 0.0;
-    double lastPosition = -1.0;
+    double lastPosition = -1.0, lastBpm = -1.0;
 };

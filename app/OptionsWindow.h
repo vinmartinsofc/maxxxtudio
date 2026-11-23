@@ -9,7 +9,7 @@ class OptionsWindow final : public juce::DocumentWindow
 public:
     OptionsWindow (juce::AudioDeviceManager&, PluginScanner&, bool createEdgeFades,
                    std::function<void (bool)> onCreateEdgeFadesChanged,
-                   std::function<void (theme::Palette)> onThemeChanged,
+                   std::function<void (theme::AccentStyle)> onAccentStyleChanged,
                    theme::WaveformStyle waveformStyle,
                    std::function<void (theme::WaveformStyle)> onWaveformStyleChanged);
 

@@ -1421,6 +1421,118 @@ void TrackMixer::resetPeak()
 
 // ======================================================= SequencerGraph
 
+class SequencerGraph::TransportPlayHead final : public juce::AudioPlayHead
+{
+public:
+    explicit TransportPlayHead (const SequencerGraph& graphIn) : graph (graphIn) {}
+
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        PositionInfo position;
+        const auto transportBpm = graph.bpm.load (std::memory_order_relaxed);
+        const auto ppq = graph.playHeadPosition.load (std::memory_order_relaxed);
+        const auto sampleRate = graph.getSampleRate();
+        const auto timeSeconds = transportBpm > 0.0 ? ppq * 60.0 / transportBpm : 0.0;
+        position.setTimeInSamples (static_cast<std::int64_t> (
+            std::llround (timeSeconds * sampleRate)));
+        position.setTimeInSeconds (timeSeconds);
+        position.setBpm (transportBpm);
+        juce::AudioPlayHead::TimeSignature signature;
+        position.setTimeSignature (signature);
+        position.setPpqPosition (ppq);
+        const auto barStart = std::floor (ppq / 4.0) * 4.0;
+        position.setPpqPositionOfLastBarStart (barStart);
+        position.setBarCount (static_cast<std::int64_t> (std::floor (ppq / 4.0)));
+        position.setIsPlaying (graph.playing.load (std::memory_order_relaxed));
+        const bool looping = graph.loopEnabled.load (std::memory_order_relaxed);
+        position.setIsLooping (looping);
+        if (looping)
+        {
+            juce::AudioPlayHead::LoopPoints loop;
+            loop.ppqStart = graph.loopStart.load (std::memory_order_relaxed);
+            loop.ppqEnd = graph.loopEnd.load (std::memory_order_relaxed);
+            position.setLoopPoints (loop);
+        }
+        return position;
+    }
+
+private:
+    const SequencerGraph& graph;
+};
+
+SequencerGraph::SequencerGraph()
+    : transportPlayHead (std::make_unique<TransportPlayHead> (*this))
+{
+    setPlayHead (transportPlayHead.get());
+    for (auto& sample : visualizationLeft)
+        sample.store (0.0f, std::memory_order_relaxed);
+    for (auto& sample : visualizationRight)
+        sample.store (0.0f, std::memory_order_relaxed);
+}
+
+SequencerGraph::~SequencerGraph()
+{
+    setPlayHead (nullptr);
+}
+
+void SequencerGraph::publishVisualizationSamples (const juce::AudioBuffer<float>& buffer) noexcept
+{
+    const int channelCount = buffer.getNumChannels();
+    const int sampleCount = buffer.getNumSamples();
+    if (channelCount <= 0 || sampleCount <= 0)
+        return;
+
+    visualizationSequence.fetch_add (1, std::memory_order_acq_rel);
+    auto writePosition = visualizationWritePosition.load (std::memory_order_relaxed);
+    const auto* left = buffer.getReadPointer (0);
+    const auto* right = buffer.getReadPointer (std::min (1, channelCount - 1));
+    for (int sample = 0; sample < sampleCount; ++sample)
+    {
+        visualizationLeft[static_cast<std::size_t> (writePosition)].store (left[sample],
+                                                                           std::memory_order_relaxed);
+        visualizationRight[static_cast<std::size_t> (writePosition)].store (right[sample],
+                                                                            std::memory_order_relaxed);
+        writePosition = (writePosition + 1) % visualizationSampleCount;
+    }
+    visualizationWritePosition.store (writePosition, std::memory_order_relaxed);
+    const auto sampleRate = getSampleRate();
+    if (sampleRate > 0.0)
+        visualizationSampleRate.store (sampleRate, std::memory_order_relaxed);
+    visualizationSequence.fetch_add (1, std::memory_order_release);
+}
+
+bool SequencerGraph::copyVisualizationSamples (
+    std::array<float, visualizationSampleCount>& left,
+    std::array<float, visualizationSampleCount>& right,
+    double& sampleRate) const noexcept
+{
+    for (int attempt = 0; attempt < 3; ++attempt)
+    {
+        const auto before = visualizationSequence.load (std::memory_order_acquire);
+        if ((before & 1U) != 0)
+            continue;
+
+        const int writePosition = visualizationWritePosition.load (std::memory_order_relaxed);
+        for (int sample = 0; sample < visualizationSampleCount; ++sample)
+        {
+            const auto index = static_cast<std::size_t> (
+                (writePosition + sample) % visualizationSampleCount);
+            left[static_cast<std::size_t> (sample)] =
+                visualizationLeft[index].load (std::memory_order_relaxed);
+            right[static_cast<std::size_t> (sample)] =
+                visualizationRight[index].load (std::memory_order_relaxed);
+        }
+
+        const auto after = visualizationSequence.load (std::memory_order_acquire);
+        if (before == after)
+        {
+            sampleRate = visualizationSampleRate.load (std::memory_order_relaxed);
+            return true;
+        }
+    }
+    return false;
+}
+
 void SequencerGraph::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     const auto blockStart = std::chrono::steady_clock::now();
@@ -1433,6 +1545,7 @@ void SequencerGraph::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     if (rewindRequested.exchange (false)) { shared.flush = true; clock.setPosition (0.0); }
     if (seekRequested.exchange (false))   { shared.flush = true; clock.setPosition (seekTarget.load()); }
 
+    playHeadPosition.store (clock.position(), std::memory_order_relaxed);
     shared.plan.count = 0;
     shared.plan.numSamples = buffer.getNumSamples();
     shared.playing = nowPlaying;
@@ -1546,6 +1659,8 @@ void SequencerGraph::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
             freeMetronomeBeatPhase += beatsPerSample;
         }
     }
+
+    publishVisualizationSamples (buffer);
 
     if (sampleRate > 0.0 && buffer.getNumSamples() > 0)
     {
@@ -2249,6 +2364,14 @@ float AudioEngine::peak (int trackId) const
 {
     auto* t = find (trackId);
     return t != nullptr ? t->mixerPtr->peak() : 0.0f;
+}
+
+std::pair<float, float> AudioEngine::peakStereo (int trackId) const
+{
+    const auto* track = find (trackId);
+    if (track == nullptr || track->mixerPtr == nullptr)
+        return { 0.0f, 0.0f };
+    return { track->mixerPtr->peakLeft(), track->mixerPtr->peakRight() };
 }
 
 float AudioEngine::rms (int trackId) const
@@ -3164,10 +3287,16 @@ std::vector<PluginParameterGesture> AudioEngine::consumePluginParameterGestures(
     return gestures;
 }
 
-std::vector<PluginState> AudioEngine::getPluginStates()
+std::vector<PluginState> AudioEngine::getPluginStates (
+    const std::vector<int>& trackIds, const std::vector<PluginState>& reusableStates)
 {
     std::vector<PluginState> states;
     for (auto& [trackId, track] : tracks)
+    {
+        if (! trackIds.empty()
+            && std::find (trackIds.begin(), trackIds.end(), trackId) == trackIds.end())
+            continue;
+
         for (size_t order = 0; order < track.devices.size(); ++order)
         {
             const auto& device = track.devices[order];
@@ -3177,10 +3306,19 @@ std::vector<PluginState> AudioEngine::getPluginStates()
             state.identifier = device.pluginIdentifier;
             state.bypassed = device.node->isBypassed();
             state.groupId = device.groupId;
-            if (auto* processor = device.node->getProcessor())
+            const auto reusable = std::find_if (reusableStates.begin(), reusableStates.end(),
+                [trackId, &state] (const PluginState& candidate)
+                {
+                    return candidate.trackId == trackId
+                        && candidate.identifier == state.identifier;
+                });
+            if (reusable != reusableStates.end())
+                state.state = reusable->state;
+            else if (auto* processor = device.node->getProcessor())
                 processor->getStateInformation (state.state);
             states.push_back (std::move (state));
         }
+    }
     return states;
 }
 

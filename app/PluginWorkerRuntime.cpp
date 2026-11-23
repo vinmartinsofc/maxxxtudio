@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace
 {
@@ -53,6 +54,35 @@ void copyString (char* destination, int capacity, const juce::String& value)
     pluginworker::writeText (destination, capacity, value.toRawUTF8());
 }
 
+template <typename Function>
+bool runOnMessageThreadAndWait (Function&& function)
+{
+    auto* messageManager = juce::MessageManager::getInstance();
+    if (messageManager == nullptr)
+        return false;
+    if (messageManager->isThisTheMessageThread())
+    {
+        function();
+        return true;
+    }
+
+    juce::WaitableEvent completed;
+    if (! juce::MessageManager::callAsync (
+            [callback = std::forward<Function> (function), &completed] () mutable
+            {
+                struct SignalOnExit
+                {
+                    juce::WaitableEvent& event;
+                    ~SignalOnExit() { event.signal(); }
+                } signal { completed };
+                callback();
+            }))
+        return false;
+
+    completed.wait();
+    return true;
+}
+
 class ParameterGestureRelay final : public juce::AudioProcessorParameter::Listener
 {
 public:
@@ -71,6 +101,45 @@ public:
 
 private:
     pluginworker::SharedData* shared = nullptr;
+};
+
+class SharedPlayHead final : public juce::AudioPlayHead
+{
+public:
+    explicit SharedPlayHead (pluginworker::SharedData& sharedData) : shared (sharedData) {}
+
+    juce::Optional<PositionInfo> getPosition() const override
+    {
+        if (InterlockedCompareExchange (&shared.playHeadValid, 0, 0) == 0)
+            return {};
+
+        PositionInfo position;
+        position.setTimeInSamples (shared.playHeadTimeSamples);
+        position.setTimeInSeconds (shared.playHeadTimeSeconds);
+        position.setBpm (shared.playHeadBpm);
+        juce::AudioPlayHead::TimeSignature signature;
+        signature.numerator = shared.playHeadTimeSignatureNumerator;
+        signature.denominator = shared.playHeadTimeSignatureDenominator;
+        position.setTimeSignature (signature);
+        position.setPpqPosition (shared.playHeadPpqPosition);
+        position.setPpqPositionOfLastBarStart (shared.playHeadLastBarStartPpq);
+        position.setBarCount (shared.playHeadBarCount);
+        position.setIsPlaying (InterlockedCompareExchange (&shared.playHeadPlaying, 0, 0) != 0);
+        position.setIsRecording (InterlockedCompareExchange (&shared.playHeadRecording, 0, 0) != 0);
+        const bool looping = InterlockedCompareExchange (&shared.playHeadLooping, 0, 0) != 0;
+        position.setIsLooping (looping);
+        if (looping)
+        {
+            juce::AudioPlayHead::LoopPoints loop;
+            loop.ppqStart = shared.playHeadLoopStartPpq;
+            loop.ppqEnd = shared.playHeadLoopEndPpq;
+            position.setLoopPoints (loop);
+        }
+        return position;
+    }
+
+private:
+    pluginworker::SharedData& shared;
 };
 
 void setNativeWindowIcon (juce::DocumentWindow& window)
@@ -234,6 +303,8 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
         return;
     }
 
+    playHead = std::make_unique<SharedPlayHead> (*shared);
+    processor->setPlayHead (playHead.get());
     configurePluginBusesForStereoHost (*processor);
     const int inputChannels = processor->getTotalNumInputChannels();
     const int outputChannels = processor->getTotalNumOutputChannels();
@@ -294,7 +365,10 @@ PluginWorkerRuntime::~PluginWorkerRuntime()
                 parameter->removeListener (parameterGestureListener.get());
     parameterGestureListener.reset();
     if (processor != nullptr)
+    {
+        processor->setPlayHead (nullptr);
         processor->releaseResources();
+    }
     if (shared != nullptr)
         UnmapViewOfFile (shared);
     if (parentProcess != nullptr) CloseHandle (parentProcess);
@@ -433,7 +507,13 @@ void PluginWorkerRuntime::processRequest (pluginworker::Command command)
         case pluginworker::Command::getState:
         {
             juce::MemoryBlock state;
-            processor->getStateInformation (state);
+            if (! runOnMessageThreadAndWait (
+                    [this, &state] { processor->getStateInformation (state); }))
+            {
+                copyString (shared->error, pluginworker::errorLength,
+                            "Could not query plugin state on the message thread.");
+                break;
+            }
             const auto stateFile = juce::File::createFileWithoutCheckingPath (
                 juce::String::fromUTF8 (shared->stateFilePath));
             juce::FileOutputStream stream (stateFile);
@@ -460,8 +540,25 @@ void PluginWorkerRuntime::processRequest (pluginworker::Command command)
             if (shared->stateBytes >= 0 && stateFile.loadFileAsData (state)
                 && state.getSize() == static_cast<std::size_t> (shared->stateBytes))
             {
-                processor->setStateInformation (state.getData(), shared->stateBytes);
-                InterlockedExchange (&shared->result, 1);
+                if (runOnMessageThreadAndWait ([this, &state]
+                    {
+                        processor->setStateInformation (
+                            state.getData(), static_cast<int> (state.getSize()));
+                        const auto parameters = processor->getParameters();
+                        const int count = std::min (parameters.size(),
+                                                    static_cast<int> (shared->numParameters));
+                        for (int i = 0; i < count; ++i)
+                            if (auto* parameter = parameters.getUnchecked (i))
+                            {
+                                InterlockedExchange (&shared->parameterValues[i],
+                                    pluginworker::floatToBits (parameter->getValue()));
+                                InterlockedExchange (&shared->parameterChanged[i], 0);
+                            }
+                    }))
+                    InterlockedExchange (&shared->result, 1);
+                else
+                    copyString (shared->error, pluginworker::errorLength,
+                                "Could not restore plugin state on the message thread.");
             }
             break;
         }

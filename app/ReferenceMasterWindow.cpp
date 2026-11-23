@@ -84,13 +84,13 @@ public:
     {
         setWantsKeyboardFocus (true);
         title.setText ("REFERENCE MASTER", juce::dontSendNotification);
-        title.setFont (juce::FontOptions (19.0f, juce::Font::bold));
+        title.setFont (theme::fontOptions (19.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
         instructions.setText ("REFERENCE ANALYZER  |  Click/drag to seek, Shift-drag to scroll, mouse wheel to zoom.",
                               juce::dontSendNotification);
-        instructions.setFont (juce::FontOptions (11.5f));
+        instructions.setFont (theme::fontOptions (11.5f));
         instructions.setColour (juce::Label::textColourId, theme::textDim());
         addAndMakeVisible (instructions);
 
@@ -108,13 +108,13 @@ public:
         rescanButton.setEnabled (false);
         addAndMakeVisible (rescanButton);
 
-        fileName.setFont (juce::FontOptions (13.5f, juce::Font::bold));
+        fileName.setFont (theme::fontOptions (13.5f, juce::Font::bold));
         fileName.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (fileName);
 
         status.setText ("Drag a track onto the deck or choose a file.",
                         juce::dontSendNotification);
-        status.setFont (juce::FontOptions (11.5f));
+        status.setFont (theme::fontOptions (11.5f));
         status.setColour (juce::Label::textColourId, theme::textDim());
         addAndMakeVisible (status);
 
@@ -124,9 +124,9 @@ public:
             metric->setColour (juce::Label::textColourId, theme::text());
             addAndMakeVisible (*metric);
         }
-        bpm.setFont (juce::FontOptions (26.0f, juce::Font::bold));
-        key.setFont (juce::FontOptions (26.0f, juce::Font::bold));
-        duration.setFont (juce::FontOptions (22.0f, juce::Font::bold));
+        bpm.setFont (theme::fontOptions (26.0f, juce::Font::bold));
+        key.setFont (theme::fontOptions (26.0f, juce::Font::bold));
+        duration.setFont (theme::fontOptions (22.0f, juce::Font::bold));
 
         halveBpmButton.setButtonText ("/2");
         halveBpmButton.onClick = [this] { adjustBpm (0.5); };
@@ -176,7 +176,7 @@ public:
         addAndMakeVisible (seekSlider);
 
         timeReadout.setText ("00:00 / 00:00", juce::dontSendNotification);
-        timeReadout.setFont (juce::FontOptions (12.0f, juce::Font::bold));
+        timeReadout.setFont (theme::fontOptions (12.0f, juce::Font::bold));
         timeReadout.setColour (juce::Label::textColourId, theme::text());
         timeReadout.setJustificationType (juce::Justification::centred);
         addAndMakeVisible (timeReadout);
@@ -289,7 +289,7 @@ public:
             g.drawRoundedRectangle (card.toFloat(), 6.0f, 1.0f);
         }
         g.setColour (theme::textDim());
-        g.setFont (juce::FontOptions (10.5f, juce::Font::bold));
+        g.setFont (theme::fontOptions (10.5f, juce::Font::bold));
         const auto bpmCard = cards.withWidth (cardWidth - 6);
         const auto keyCard = cards.withX (cards.getX() + cardWidth).withWidth (cardWidth - 6);
         const auto durationCard = cards.withX (cards.getX() + cardWidth * 2)
@@ -562,7 +562,7 @@ private:
             const double interval = (normalized <= 1.0 ? 1.0 : normalized <= 2.0 ? 2.0
                                       : normalized <= 5.0 ? 5.0 : 10.0) * power;
             const double first = std::ceil (viewStartSeconds / interval) * interval;
-            g.setFont (juce::FontOptions (10.0f));
+            g.setFont (theme::fontOptions (10.0f));
             for (double seconds = first;
                  seconds <= viewStartSeconds + range && interval > 0.0;
                  seconds += interval)
@@ -581,12 +581,12 @@ private:
 
         void drawWaveform (juce::Graphics& g, juce::Rectangle<int> area) const
         {
-            g.setColour (juce::Colour (0xff161616));
+            g.setColour (theme::control());
             g.fillRect (area);
             if (analysis == nullptr || analysis->waveformColumns.empty() || area.isEmpty())
             {
                 g.setColour (theme::textDim());
-                g.setFont (14.0f);
+                g.setFont (theme::fontOptions (14.0f));
                 g.drawText ("Load audio to view the waveform.",
                             area, juce::Justification::centred);
                 return;
@@ -599,7 +599,7 @@ private:
             const auto& columns = analysis->waveformColumns;
             const float centreY = static_cast<float> (area.getCentreY());
             const float amplitudeScale = static_cast<float> (area.getHeight()) * 0.46f;
-            g.setColour (juce::Colour (0xff353535));
+            g.setColour (theme::border());
             g.drawHorizontalLine (juce::roundToInt (centreY), static_cast<float> (area.getX()),
                                   static_cast<float> (area.getRight()));
 
@@ -732,7 +732,7 @@ private:
             }
 
             g.setColour (theme::textDim().withAlpha (0.8f));
-            g.setFont (juce::FontOptions (9.5f));
+            g.setFont (theme::fontOptions (9.5f));
             g.drawText ("8 kHz", labels.withY (labels.getY()).withHeight (14),
                         juce::Justification::centredLeft);
             g.drawText ("1 kHz", labels.withY (heatmap.getY()
@@ -803,7 +803,7 @@ private:
                             < static_cast<std::size_t> (analysis->spectrumColumns * analysis->spectrumRows))
                     {
                         g.setColour (theme::textDim());
-                        g.setFont (11.0f);
+                        g.setFont (theme::fontOptions (11.0f));
                         g.drawText ("Live Spectrum", area, juce::Justification::centred);
                         return;
                     }

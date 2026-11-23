@@ -34,7 +34,7 @@ class PluginPreferencesPage final : public juce::Component, private juce::Timer
 public:
     explicit PluginPreferencesPage (PluginScanner& pluginScanner) : scanner (pluginScanner)
     {
-        title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        title.setFont (theme::fontOptions (15.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
@@ -180,7 +180,7 @@ public:
     FadePreferencesPage (bool enabled, std::function<void (bool)> onChanged)
         : changed (std::move (onChanged))
     {
-        title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        title.setFont (theme::fontOptions (15.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         title.setText ("Record / Warp / Launch", juce::dontSendNotification);
         addAndMakeVisible (title);
@@ -223,55 +223,32 @@ private:
 class AppearancePreferencesPage final : public juce::Component
 {
 public:
-    explicit AppearancePreferencesPage (std::function<void (theme::Palette)> onChanged)
+    explicit AppearancePreferencesPage (std::function<void (theme::AccentStyle)> onChanged)
         : changed (std::move (onChanged))
     {
-        title.setText ("Interface Theme", juce::dontSendNotification);
-        title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        title.setText ("NEONWAVE Interface", juce::dontSendNotification);
+        title.setFont (theme::fontOptions (15.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
-        description.setText (
-            "Choose the interface contrast. Dark themes use light text; the white theme uses dark text.",
-            juce::dontSendNotification);
+        description.setText ("Choose a NEONWAVE interface colorway.",
+                             juce::dontSendNotification);
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (description);
 
-        themeBox.addItem ("Graphite + Orange", 1);
-        themeBox.addItem ("Black + Orange", 2);
-        themeBox.addItem ("White + Orange", 3);
-        themeBox.addItem ("Graphite + Blue", 4);
-        themeBox.addItem ("Black + Blue", 5);
-        themeBox.addItem ("Graphite + Red", 6);
-        themeBox.addItem ("Black + Red", 7);
-        themeBox.addItem ("Matrix 1", 8);
-        themeBox.addItem ("Matrix 2", 9);
-        themeBox.setSelectedId (theme::current() == theme::Palette::GraphiteOrange ? 1
-                               : theme::current() == theme::Palette::BlackOrange ? 2
-                               : theme::current() == theme::Palette::WhiteOrange ? 3
-                               : theme::current() == theme::Palette::GraphiteBlue ? 4
-                               : theme::current() == theme::Palette::BlackBlue ? 5
-                               : theme::current() == theme::Palette::GraphiteRed ? 6
-                               : theme::current() == theme::Palette::BlackRed ? 7
-                               : theme::current() == theme::Palette::MatrixGraphite ? 8 : 9,
-                               juce::dontSendNotification);
-        themeBox.onChange = [this]
+        accentBox.addItem ("NEONWAVE Theme 1", 1);
+        accentBox.addItem ("NEONWAVE Theme 2", 2);
+        accentBox.setSelectedId (theme::accentStyle() == theme::AccentStyle::SynthwavePurple ? 2 : 1,
+                                 juce::dontSendNotification);
+        accentBox.onChange = [this]
         {
-            const theme::Palette palette =
-                themeBox.getSelectedId() == 1 ? theme::Palette::GraphiteOrange
-                : themeBox.getSelectedId() == 2 ? theme::Palette::BlackOrange
-                : themeBox.getSelectedId() == 3 ? theme::Palette::WhiteOrange
-                : themeBox.getSelectedId() == 4 ? theme::Palette::GraphiteBlue
-                : themeBox.getSelectedId() == 5 ? theme::Palette::BlackBlue
-                : themeBox.getSelectedId() == 6 ? theme::Palette::GraphiteRed
-                : themeBox.getSelectedId() == 7 ? theme::Palette::BlackRed
-                : themeBox.getSelectedId() == 8 ? theme::Palette::MatrixGraphite
-                                                : theme::Palette::MatrixBlack;
             if (changed)
-                changed (palette);
+                changed (accentBox.getSelectedId() == 2 ? theme::AccentStyle::SynthwavePurple
+                                                        : theme::AccentStyle::CyberpunkYellow);
         };
-        addAndMakeVisible (themeBox);
+        addAndMakeVisible (accentBox);
+
     }
 
     void resized() override
@@ -280,13 +257,13 @@ public:
         title.setBounds (area.removeFromTop (28));
         description.setBounds (area.removeFromTop (58));
         area.removeFromTop (12);
-        themeBox.setBounds (area.removeFromTop (34).withWidth (260));
+        accentBox.setBounds (area.removeFromTop (34).withWidth (260));
     }
 
 private:
-    std::function<void (theme::Palette)> changed;
+    std::function<void (theme::AccentStyle)> changed;
     juce::Label title, description;
-    juce::ComboBox themeBox;
+    juce::ComboBox accentBox;
 };
 
 class WaveformPreferencesPage final : public juce::Component
@@ -297,7 +274,7 @@ public:
         : changed (std::move (onChanged))
     {
         title.setText ("Waveform Style", juce::dontSendNotification);
-        title.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+        title.setFont (theme::fontOptions (15.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
@@ -345,7 +322,7 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
                               PluginScanner& scanner,
                               bool createEdgeFades,
                               std::function<void (bool)> onCreateEdgeFadesChanged,
-                              std::function<void (theme::Palette)> onThemeChanged,
+                              std::function<void (theme::AccentStyle)> onAccentStyleChanged,
                               theme::WaveformStyle waveformStyle,
                               std::function<void (theme::WaveformStyle)> onWaveformStyleChanged)
     : juce::DocumentWindow (theme::ui ("Preferences"), theme::panel(),
@@ -356,8 +333,8 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
     tabs->addTab (theme::ui ("Plugins"), theme::panel(), new PluginPreferencesPage (scanner), true);
     tabs->addTab (theme::ui ("Record/Warp/Launch"), theme::panel(),
                   new FadePreferencesPage (createEdgeFades, std::move (onCreateEdgeFadesChanged)), true);
-    tabs->addTab (theme::ui ("Appearance"), theme::panel(),
-                  new AppearancePreferencesPage (std::move (onThemeChanged)), true);
+    tabs->addTab (theme::ui ("Interface"), theme::panel(),
+                  new AppearancePreferencesPage (std::move (onAccentStyleChanged)), true);
     tabs->addTab (theme::ui ("Waveform"), theme::panel(),
                   new WaveformPreferencesPage (waveformStyle,
                                                std::move (onWaveformStyleChanged)), true);

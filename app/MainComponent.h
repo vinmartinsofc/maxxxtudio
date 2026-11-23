@@ -49,6 +49,10 @@ public:
 private:
     class ActionIndicator;
     class ComputerMidiIndicator;
+    class SpectrumAnalyzer;
+    class StereoImager;
+    class LoudnessHistory;
+    class MixerView;
     class PluginWindow;
     class PluginWindowNavigator;
     struct PluginHistoryRestore;
@@ -92,6 +96,7 @@ private:
     void closeWindowsOfPad (int trackId, int rackDeviceId, int pad);
     void showProjectMenu();
     void showOptionsWindow();
+    void showMixer();
     void chooseProjectFile (bool open, std::function<void (bool)> onSaveComplete = {});
     void chooseWavExportFile();
     void showWavRenderOptions (const juce::File&);
@@ -118,7 +123,8 @@ private:
     void showDetail (bool devices);
     void cycleFocus();
     void updateComputerMidiKeyboard();
-    void restorePluginHistoryState (const std::vector<PluginState>&);
+    void restorePluginHistoryState (const std::vector<PluginState>&,
+                                    const std::vector<int>& trackIds);
     void restoreNextPluginHistoryState();
     void finishPluginHistoryRestore();
     void copyDevicesToClipboard (int trackId, const std::vector<int>& deviceIds);
@@ -164,7 +170,7 @@ private:
     DeviceView deviceView { taskRegistry };
 
     // Clip panel.
-    juce::TextButton clipTab { "Clip" }, deviceTab { "Devices" };
+    juce::TextButton clipTab { "Clip" }, deviceTab { "Devices" }, mixerTab { "Mixer" };
     juce::Label scaleCaption { {}, "Scale" }, lengthCaption { {}, "Size" }, gridCaption { {}, "Grid" }, zoomCaption { {}, "Zoom" };
     juce::ComboBox rootBox, modeBox, lengthBox;
     juce::TextButton scaleButton { "Scale" }, highlightButton { "Highlight (K)" }, foldButton { "Fold" }, foldScaleButton { "Scale Fold" },
@@ -210,6 +216,10 @@ private:
     std::shared_ptr<std::atomic<bool>> lifetimeToken { std::make_shared<std::atomic<bool>> (true) };
     std::unique_ptr<ActionIndicator> actionIndicator;
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
+    std::unique_ptr<SpectrumAnalyzer> spectrumAnalyzer;
+    std::unique_ptr<StereoImager> stereoImager;
+    std::unique_ptr<LoudnessHistory> loudnessHistory;
+    std::unique_ptr<MixerView> mixerView;
     std::jthread taskSimulationThread;
     int nextPluginCascadeIndex = 0;
     int nextPadEffectWindowId = -1;
@@ -228,6 +238,7 @@ private:
     juce::String scanMessage;
 
     bool showingDevices = false;
+    bool showingMixer = false;
     bool createFadesOnClipEdges = false;
     bool audioClipEditorOpen = false;
     bool pianoRollVisible = true;
@@ -252,7 +263,8 @@ private:
     bool computerMidiModeKeyDown = false, computerMidiKeyboardEnabled = false;
     bool remoteTransportSpaceKeyDown = false;
     int computerMidiOctaveOffset = 0, computerMidiVelocity = 100;
-    int browserWidth = 390;
+    int browserWidth = 260;
+    int monitorPanelWidth = 260;
     juce::Rectangle<int> browserSplitterRect;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)

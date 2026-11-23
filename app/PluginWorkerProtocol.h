@@ -24,7 +24,7 @@ inline constexpr int pluginNameLength = 128;
 inline constexpr int errorLength = 512;
 inline constexpr int descriptionLength = 16384;
 inline constexpr int statePathLength = 1024;
-inline constexpr LONG protocolVersion = 6;
+inline constexpr LONG protocolVersion = 7;
 
 enum class Command : LONG
 {
@@ -67,6 +67,20 @@ struct SharedData
     LONG editorPositionValid = 0;
     double sampleRate = 44100.0;
     int blockSize = 512;
+    LONG playHeadValid = 0;
+    LONG playHeadPlaying = 0;
+    LONG playHeadRecording = 0;
+    LONG playHeadLooping = 0;
+    int playHeadTimeSignatureNumerator = 4;
+    int playHeadTimeSignatureDenominator = 4;
+    std::int64_t playHeadTimeSamples = 0;
+    std::int64_t playHeadBarCount = 0;
+    double playHeadTimeSeconds = 0.0;
+    double playHeadBpm = 120.0;
+    double playHeadPpqPosition = 0.0;
+    double playHeadLastBarStartPpq = 0.0;
+    double playHeadLoopStartPpq = 0.0;
+    double playHeadLoopEndPpq = 0.0;
     char pluginName[pluginNameLength] {};
     char error[errorLength] {};
     char pluginDescription[descriptionLength] {};

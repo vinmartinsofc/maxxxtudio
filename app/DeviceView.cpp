@@ -18,6 +18,23 @@ class DeviceView::Box : public juce::Component, public juce::DragAndDropTarget
         {
             const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
             const auto active = invertActiveState ? ! getToggleState() : getToggleState();
+            if (theme::isHighTech())
+            {
+                const auto fill = isButtonDown ? theme::pressed()
+                                : active ? theme::panelLight()
+                                : isMouseOver ? theme::hover() : theme::control();
+                theme::drawChromeSurface (g, bounds, 5.0f, fill);
+                g.setColour (active || isButtonDown ? theme::accent()
+                            : isMouseOver ? theme::accentHover() : theme::controlBorder());
+                g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+                if (const auto* drawable = icons::get (
+                        icon, isMouseOver || isButtonDown ? theme::text()
+                            : active ? theme::accent() : theme::textDim(), 18))
+                    drawable->drawWithin (g, getLocalBounds().reduced (5).toFloat(),
+                                          juce::RectanglePlacement::centred, 1.0f);
+                return;
+            }
+
             g.setColour (isButtonDown ? theme::accent()
                                       : isMouseOver ? theme::accentHover()
                                                     : theme::panel());
@@ -207,24 +224,24 @@ public:
         if (rackCollapsed)
         {
             g.setColour (theme::text());
-            g.setFont (juce::FontOptions (15.5f, juce::Font::bold));
+            g.setFont (theme::fontOptions (15.5f, juce::Font::bold));
             g.drawText ("Rack (" + juce::String (rackSize) + ")", getLocalBounds().reduced (10, 0).withTrimmedTop (12).withHeight (36),
                         juce::Justification::centredLeft, true);
             g.setColour (theme::textDim());
-            g.setFont (juce::FontOptions (12.5f));
+            g.setFont (theme::fontOptions (12.5f));
             g.drawText (theme::ui ("Serial Chain"), 10, 46, getWidth() - 20, 16,
                         juce::Justification::centredLeft);
         }
         else
         {
             g.setColour (theme::text());
-            g.setFont (juce::FontOptions (14.5f, juce::Font::bold));
+            g.setFont (theme::fontOptions (14.5f, juce::Font::bold));
             auto title = getLocalBounds().reduced (10, 0).withTrimmedTop (12).withHeight (36);
             if (rackHeader)
                 title = title.withTrimmedRight (24);
             g.drawText (info.name, title, juce::Justification::centredLeft, true);
             g.setColour (theme::textDim());
-            g.setFont (juce::FontOptions (12.5f));
+            g.setFont (theme::fontOptions (12.5f));
             g.drawText (info.isInstrument ? theme::ui ("Instrument") : theme::ui ("Effect"),
                         10, 46, getWidth() - 20, 16, juce::Justification::centredLeft);
         }
@@ -655,7 +672,10 @@ void DeviceView::positionLoadingIndicators()
 
 void DeviceView::paint (juce::Graphics& g)
 {
-    g.fillAll (theme::panel());
+    if (theme::isHighTech())
+        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+    else
+        g.fillAll (theme::panel());
 
     for (std::size_t i = 0; i < boxes.size();)
     {
@@ -680,13 +700,13 @@ void DeviceView::paint (juce::Graphics& g)
         g.setColour (theme::panel());
         g.fillRect (label);
         g.setColour (theme::accent());
-        g.setFont (juce::FontOptions (11.5f, juce::Font::bold));
+        g.setFont (theme::fontOptions (11.5f, juce::Font::bold));
         g.drawText ("Rack", label.toNearestInt(), juce::Justification::centred, true);
         i = last + 1;
     }
 
     g.setColour (theme::textDim());
-    g.setFont (juce::FontOptions (13.5f));
+    g.setFont (theme::fontOptions (13.5f));
     if (boxes.empty())
     {
         if (trackId == 0)

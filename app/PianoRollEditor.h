@@ -96,7 +96,7 @@ class RulerBar : public juce::Component, public juce::SettableTooltipClient
 public:
     explicit RulerBar (RollModel& m) : model (m)
     {
-        setTooltip ("Click to play from this position.");
+        setTooltip ("Click the speaker to play from the beginning, or the ruler to play from that position.");
     }
     std::function<void (double)> onSeek;
     std::function<void (int)> onLocatorSelected;
@@ -126,6 +126,7 @@ private:
     bool hovered = false, hoveringLocator = false;
     bool dragging = false, resizing = false;
     bool locatorDragPending = false, locatorDragging = false;
+    bool startPlaybackHovered = false, startPlaybackPressed = false;
     int draggedLocatorId = -1;
     double locatorGrabOffset = 0.0;
 };

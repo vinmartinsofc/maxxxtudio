@@ -94,7 +94,7 @@ class CompMasterProcessor final : public juce::AudioProcessor
 {
 public:
     static constexpr const char* pluginIdentifier = "MaXXXtudio.CompMaster";
-    static constexpr int scopeBufferSize = 131072;
+    static constexpr int scopeBufferSize = 8192;
     struct ScopeColumn
     {
         float minimum = 0.0f, maximum = 0.0f, gainReductionDb = 0.0f;
