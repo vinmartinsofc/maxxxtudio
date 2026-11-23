@@ -15,6 +15,7 @@
 #include "RollModel.h"
 #include "TaskRegistry.h"
 #include "TaskStatusBar.h"
+#include "ThemeBackground.h"
 #include "TransportBar.h"
 #include <array>
 #include <map>
@@ -45,6 +46,7 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void mouseMove (const juce::MouseEvent&) override;
+    void mouseExit (const juce::MouseEvent&) override;
 
 private:
     class ActionIndicator;
@@ -160,6 +162,7 @@ private:
     ProjectModel project;
     RollModel model;
 
+    ThemeBackground themeBackground;
     TransportBar transport { engine.graph() };
     TaskStatusBar taskStatusBar { taskRegistry };
     BrowserPanel browser { scanner };
@@ -254,6 +257,7 @@ private:
     juce::Rectangle<int> splitterRect;
     int rightTop = 0, rightHeight = 1;
     bool draggingSplitter = false, draggingBrowserSplitter = false;
+    bool hoveringSplitter = false, hoveringBrowserSplitter = false;
     std::uint64_t lastLo = 0, lastHi = 0;
     std::array<bool, 15> computerMidiKeyDown {}, computerMidiNoteActive {};
     std::array<int, 15> computerMidiKeyPitch {}, computerMidiTrackIds {};

@@ -256,6 +256,31 @@ TEST_CASE ("Red themes use red accents on their selected dark backgrounds")
     theme::selectedPalette() = previousPalette;
 }
 
+TEST_CASE ("Neon accent choices keep the layered blue-black interface palette")
+{
+    const auto previousPalette = theme::selectedPalette();
+    const auto previousAccent = theme::accentStyle();
+    theme::selectedPalette() = theme::Palette::BlackTexturedBlue;
+
+    CHECK (theme::background() == juce::Colour (0xff08090a));
+    CHECK (theme::panel() == juce::Colour (0xff111315));
+    CHECK (theme::border() == juce::Colour (0xff1d2023));
+
+    theme::selectedAccentStyle() = theme::AccentStyle::NeonCyan;
+    CHECK (theme::accent() == juce::Colour (0xff00e5ff));
+    theme::selectedAccentStyle() = theme::AccentStyle::NeonGreen;
+    CHECK (theme::accent() == juce::Colour (0xff39ff88));
+    theme::selectedAccentStyle() = theme::AccentStyle::NeonRed;
+    CHECK (theme::accent() == juce::Colour (0xffff3b4f));
+    theme::selectedAccentStyle() = theme::AccentStyle::NeonBlue;
+    CHECK (theme::accent() == juce::Colour (0xff398bff));
+    theme::selectedAccentStyle() = theme::AccentStyle::NeonMagenta;
+    CHECK (theme::accent() == juce::Colour (0xffff2bd6));
+
+    theme::selectedPalette() = previousPalette;
+    theme::selectedAccentStyle() = previousAccent;
+}
+
 TEST_CASE ("Ultraviolet waveform colors transition from red to orange to green")
 {
     const auto red = ultravioletWaveformColour (0.0f);

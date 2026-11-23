@@ -43,6 +43,7 @@ target_sources(MaXXXtudio PRIVATE
     PluginScanner.cpp
     BrowserPanel.cpp
     TransportBar.cpp
+    ThemeBackground.cpp
     TaskRegistry.cpp
     ActivityIndicator.cpp
     TaskStatusBar.cpp

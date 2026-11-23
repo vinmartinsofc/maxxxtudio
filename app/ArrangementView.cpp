@@ -6753,10 +6753,13 @@ void ArrangementView::timerCallback()
 
 void ArrangementView::paint (juce::Graphics& g)
 {
-    if (theme::isHighTech())
-        theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
-    else
-        g.fillAll (theme::panel());
+    if (! theme::isBlackTexturedBlue())
+    {
+        if (theme::isHighTech())
+            theme::drawChromeSurface (g, getLocalBounds().toFloat(), 0.0f, theme::panel());
+        else
+            g.fillAll (theme::panel());
+    }
     if (lanes->hasKeyboardFocus (false))
     {
         g.setColour (theme::accent());

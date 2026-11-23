@@ -231,21 +231,39 @@ public:
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
-        description.setText ("Choose a NEONWAVE interface colorway.",
+        description.setText ("Choose the neon accent for the blue-black interface.",
                              juce::dontSendNotification);
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (description);
 
-        accentBox.addItem ("NEONWAVE Theme 1", 1);
-        accentBox.addItem ("NEONWAVE Theme 2", 2);
-        accentBox.setSelectedId (theme::accentStyle() == theme::AccentStyle::SynthwavePurple ? 2 : 1,
-                                 juce::dontSendNotification);
+        accentBox.addItem ("Neon Cyan", 1);
+        accentBox.addItem ("Neon Green", 2);
+        accentBox.addItem ("Neon Red", 3);
+        accentBox.addItem ("Neon Blue", 4);
+        accentBox.addItem ("Neon Magenta", 5);
+        accentBox.addItem ("Synthwave Purple", 6);
+        accentBox.addItem ("Cyberpunk Yellow", 7);
+        const auto selectedId = theme::accentStyle() == theme::AccentStyle::NeonGreen ? 2
+            : theme::accentStyle() == theme::AccentStyle::NeonRed ? 3
+            : theme::accentStyle() == theme::AccentStyle::NeonBlue ? 4
+            : theme::accentStyle() == theme::AccentStyle::NeonMagenta ? 5
+            : theme::accentStyle() == theme::AccentStyle::SynthwavePurple ? 6
+            : theme::accentStyle() == theme::AccentStyle::CyberpunkYellow ? 7 : 1;
+        accentBox.setSelectedId (selectedId, juce::dontSendNotification);
         accentBox.onChange = [this]
         {
             if (changed)
-                changed (accentBox.getSelectedId() == 2 ? theme::AccentStyle::SynthwavePurple
-                                                        : theme::AccentStyle::CyberpunkYellow);
+            {
+                const auto style = accentBox.getSelectedId() == 2 ? theme::AccentStyle::NeonGreen
+                    : accentBox.getSelectedId() == 3 ? theme::AccentStyle::NeonRed
+                    : accentBox.getSelectedId() == 4 ? theme::AccentStyle::NeonBlue
+                    : accentBox.getSelectedId() == 5 ? theme::AccentStyle::NeonMagenta
+                    : accentBox.getSelectedId() == 6 ? theme::AccentStyle::SynthwavePurple
+                    : accentBox.getSelectedId() == 7 ? theme::AccentStyle::CyberpunkYellow
+                                                     : theme::AccentStyle::NeonCyan;
+                changed (style);
+            }
         };
         addAndMakeVisible (accentBox);
 

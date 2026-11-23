@@ -37,7 +37,12 @@ enum class WaveformStyle
 enum class AccentStyle
 {
     CyberpunkYellow,
-    SynthwavePurple
+    SynthwavePurple,
+    NeonCyan,
+    NeonMagenta,
+    NeonGreen,
+    NeonRed,
+    NeonBlue
 };
 
 inline juce::FontOptions fontOptions (float size, int style = juce::Font::plain)
@@ -53,7 +58,7 @@ inline Palette& selectedPalette()
 
 inline AccentStyle& selectedAccentStyle()
 {
-    static AccentStyle selected = AccentStyle::CyberpunkYellow;
+    static AccentStyle selected = AccentStyle::NeonCyan;
     return selected;
 }
 
@@ -114,8 +119,18 @@ inline void setAccentStyle (AccentStyle style)
 {
     selectedAccentStyle() = style;
     auto xml = readPreferences();
-    xml->setAttribute ("interfaceAccent",
-                       style == AccentStyle::SynthwavePurple ? "synthwave-purple" : "cyberpunk-yellow");
+    const char* value = "neon-cyan";
+    switch (style)
+    {
+        case AccentStyle::CyberpunkYellow: value = "cyberpunk-yellow"; break;
+        case AccentStyle::SynthwavePurple: value = "synthwave-purple"; break;
+        case AccentStyle::NeonCyan:        value = "neon-cyan"; break;
+        case AccentStyle::NeonMagenta:     value = "neon-magenta"; break;
+        case AccentStyle::NeonGreen:       value = "neon-green"; break;
+        case AccentStyle::NeonRed:         value = "neon-red"; break;
+        case AccentStyle::NeonBlue:        value = "neon-blue"; break;
+    }
+    xml->setAttribute ("interfaceAccent", value);
     writePreferences (*xml);
 }
 
@@ -147,14 +162,20 @@ inline void load()
     selectedWaveformStyle() = waveformStyle == "ultraviolet" || waveformStyle == "reference"
         ? WaveformStyle::Ultraviolet
         : waveformStyle == "spectrum" ? WaveformStyle::Spectrum : WaveformStyle::Classic;
-    selectedAccentStyle() = xml->getStringAttribute ("interfaceAccent", "cyberpunk-yellow").toLowerCase()
-        == "synthwave-purple" ? AccentStyle::SynthwavePurple : AccentStyle::CyberpunkYellow;
+    const auto accent = xml->getStringAttribute ("interfaceAccent", "neon-cyan").toLowerCase();
+    selectedAccentStyle() = accent == "cyberpunk-yellow" ? AccentStyle::CyberpunkYellow
+        : accent == "synthwave-purple" ? AccentStyle::SynthwavePurple
+        : accent == "neon-magenta" ? AccentStyle::NeonMagenta
+        : accent == "neon-green" ? AccentStyle::NeonGreen
+        : accent == "neon-red" ? AccentStyle::NeonRed
+        : accent == "neon-blue" ? AccentStyle::NeonBlue
+        : AccentStyle::NeonCyan;
     selectedPalette() = Palette::BlackTexturedBlue;
 }
 
 inline juce::Colour background()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff030305);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff08090a); // Blue-black gradient base.
     if (isHighTech()) return juce::Colour (0xff060a10);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xfff2f2f2);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff101112);
@@ -165,7 +186,7 @@ inline juce::Colour background()
 }
 inline juce::Colour panel()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff08090d);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff111315); // Main panel surface.
     if (isHighTech()) return juce::Colour (0xff0a111b);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffffffff);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff191b1d);
@@ -176,7 +197,7 @@ inline juce::Colour panel()
 }
 inline juce::Colour panelLight()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff0d0e13);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff191c20); // Raised panel surface.
     if (isHighTech()) return juce::Colour (0xff101a27);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xfffafafa);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff202224);
@@ -187,7 +208,7 @@ inline juce::Colour panelLight()
 }
 inline juce::Colour control()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff050609);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff0c0e11); // Recessed controls.
     if (isHighTech()) return juce::Colour (0xff070c13);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffebebeb);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff090a0b);
@@ -198,7 +219,7 @@ inline juce::Colour control()
 }
 inline juce::Colour hover()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff11131a);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff181b20); // Hovered control surface.
     if (isHighTech()) return juce::Colour (0xff142333);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffdedede);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff252729);
@@ -209,7 +230,7 @@ inline juce::Colour hover()
 }
 inline juce::Colour pressed()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff010203);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff090a0c); // Pressed control surface.
     if (isHighTech()) return juce::Colour (0xff05080d);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffd2d2d2);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff050606);
@@ -220,7 +241,7 @@ inline juce::Colour pressed()
 }
 inline juce::Colour border()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff252630);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff1d2023); // Subtle panel outline.
     if (isHighTech()) return juce::Colour (0xff1b4c73);
     if (current() == Palette::WhiteOrange) return juce::Colour (0xffb8b8b8);
     if (current() == Palette::BlackOrange) return juce::Colour (0xff34373a);
@@ -231,7 +252,7 @@ inline juce::Colour border()
 }
 inline juce::Colour gridLine()
 {
-    if (isBlackTexturedBlue()) return juce::Colour (0xff171820);
+    if (isBlackTexturedBlue()) return juce::Colour (0xff1d2023); // Low-contrast grid line.
     return isHighTech() ? juce::Colour (0xff102031) : border();
 }
 inline juce::Colour controlBorder() { return border(); }
@@ -256,8 +277,18 @@ inline juce::Colour textDim()
 inline juce::Colour accent()
 {
     if (isBlackTexturedBlue())
-        return accentStyle() == AccentStyle::SynthwavePurple
-            ? juce::Colour (0xffc35cff) : juce::Colour (0xffffd52a);
+    {
+        switch (accentStyle())
+        {
+            case AccentStyle::CyberpunkYellow: return juce::Colour (0xffffd52a); // Legacy neon yellow.
+            case AccentStyle::SynthwavePurple: return juce::Colour (0xffc35cff); // Legacy synthwave purple.
+            case AccentStyle::NeonCyan:        return juce::Colour (0xff00e5ff); // Neon cyan accent.
+            case AccentStyle::NeonMagenta:     return juce::Colour (0xffff2bd6); // Neon magenta accent.
+            case AccentStyle::NeonGreen:       return juce::Colour (0xff39ff88); // Neon green accent.
+            case AccentStyle::NeonRed:         return juce::Colour (0xffff3b4f); // Neon red accent.
+            case AccentStyle::NeonBlue:        return juce::Colour (0xff398bff); // Neon blue accent.
+        }
+    }
     if (isHighTechAmber()) return juce::Colour (0xffff8500);
     if (isHighTech()) return juce::Colour (0xff25c2e6);
     if (current() == Palette::GraphiteBlue || current() == Palette::BlackBlue)
@@ -271,8 +302,18 @@ inline juce::Colour accent()
 inline juce::Colour accentHover()
 {
     if (isBlackTexturedBlue())
-        return accentStyle() == AccentStyle::SynthwavePurple
-            ? juce::Colour (0xffe58aff) : juce::Colour (0xffffec75);
+    {
+        switch (accentStyle())
+        {
+            case AccentStyle::CyberpunkYellow: return juce::Colour (0xffffec75);
+            case AccentStyle::SynthwavePurple: return juce::Colour (0xffe58aff);
+            case AccentStyle::NeonCyan:        return juce::Colour (0xff75f4ff); // Cyan hover.
+            case AccentStyle::NeonMagenta:     return juce::Colour (0xffff7de7); // Magenta hover.
+            case AccentStyle::NeonGreen:       return juce::Colour (0xff82ffb6); // Green hover.
+            case AccentStyle::NeonRed:         return juce::Colour (0xffff7b89); // Red hover.
+            case AccentStyle::NeonBlue:        return juce::Colour (0xff79b2ff); // Blue hover.
+        }
+    }
     if (isHighTechAmber()) return juce::Colour (0xffffab32);
     if (isHighTech()) return juce::Colour (0xff398dff);
     if (current() == Palette::GraphiteBlue || current() == Palette::BlackBlue)
@@ -316,19 +357,19 @@ inline void drawChromeSurface (juce::Graphics& g, juce::Rectangle<float> bounds,
     const float radius = juce::jmax (0.0f, juce::jmin (cornerRadius, bounds.getHeight() * 0.5f));
     juce::Path surface;
     surface.addRoundedRectangle (bounds, radius);
-    juce::ColourGradient gradient (fill.brighter (0.12f), bounds.getX(), bounds.getY(),
-                                   fill.darker (0.12f), bounds.getX(), bounds.getBottom(), false);
-    g.setGradientFill (gradient);
-    g.fillPath (surface);
-
     if (isBlackTexturedBlue())
     {
-        g.setColour (accent().withAlpha (0.035f));
-        g.drawRoundedRectangle (bounds.reduced (1.0f), radius, 5.0f);
-        g.setColour (accent().withAlpha (0.055f));
-        g.drawRoundedRectangle (bounds.reduced (1.0f), radius, 2.0f);
+        g.setColour (fill);
     }
+    else
+    {
+        juce::ColourGradient gradient (fill.brighter (0.12f), bounds.getX(), bounds.getY(),
+                                       fill.darker (0.12f), bounds.getX(), bounds.getBottom(), false);
+        g.setGradientFill (gradient);
+    }
+    g.fillPath (surface);
 
+    if (! isBlackTexturedBlue())
     {
         juce::Graphics::ScopedSaveState state (g);
         g.reduceClipRegion (surface);
@@ -340,10 +381,12 @@ inline void drawChromeSurface (juce::Graphics& g, juce::Rectangle<float> bounds,
         }
     }
 
-    g.setColour (isBlackTexturedBlue() ? accentHover().withAlpha (0.22f)
-                                       : juce::Colours::white.withAlpha (0.12f));
-    g.drawLine (bounds.getX() + radius, bounds.getY() + 0.5f,
-                bounds.getRight() - radius, bounds.getY() + 0.5f, 0.7f);
+    if (! isBlackTexturedBlue())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.12f));
+        g.drawLine (bounds.getX() + radius, bounds.getY() + 0.5f,
+                    bounds.getRight() - radius, bounds.getY() + 0.5f, 0.7f);
+    }
     g.setColour (border());
     g.drawRoundedRectangle (bounds, radius, 1.0f);
 }

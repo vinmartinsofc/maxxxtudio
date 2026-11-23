@@ -1423,6 +1423,8 @@ MainComponent::MainComponent()
     createFadesOnClipEdges = loadCreateFadesOnClipEdges();
     arrangementRatio = loadArrangementRatio();
     arrangementHeight = loadArrangementHeight();
+    addAndMakeVisible (themeBackground);
+    themeBackground.toBack();
     addAndMakeVisible (taskStatusBar);
     addAndMakeVisible (transport);
     transport.onProjectMenu = [this] { showProjectMenu(); };
@@ -3069,13 +3071,60 @@ void MainComponent::updatePluginWindowZOrder()
 void MainComponent::paint (juce::Graphics& g)
 {
     g.fillAll (theme::background());
-    g.setColour (theme::border());
-    g.fillRoundedRectangle (splitterRect.toFloat().reduced (static_cast<float> (splitterRect.getWidth()) * 0.45f, 2.0f), 2.0f);
+    const auto drawResizeHandle = [&g] (juce::Rectangle<int> handle, bool horizontal, bool hovered)
+    {
+        if (handle.isEmpty())
+            return;
+
+        const auto bounds = handle.toFloat();
+        const auto accent = theme::accent();
+        g.setColour (theme::panel());
+        g.fillRoundedRectangle (bounds, 2.0f);
+        g.setColour (accent.withAlpha (hovered ? 0.13f : 0.06f));
+        g.fillRoundedRectangle (bounds.reduced (0.5f), 2.0f);
+
+        const auto drawNeonLine = [&g, &accent, hovered] (
+            float startX, float startY, float endX, float endY)
+        {
+            g.setColour (accent.withAlpha (hovered ? 0.20f : 0.08f));
+            g.drawLine (startX, startY, endX, endY, 4.0f);
+            g.setColour (accent.withAlpha (hovered ? 0.42f : 0.22f));
+            g.drawLine (startX, startY, endX, endY, 2.0f);
+            g.setColour (accent.withAlpha (hovered ? 1.0f : 0.68f));
+            g.drawLine (startX, startY, endX, endY, 1.0f);
+        };
+        if (horizontal)
+        {
+            drawNeonLine (bounds.getX(), bounds.getY() + 0.5f, bounds.getRight(), bounds.getY() + 0.5f);
+            drawNeonLine (bounds.getX(), bounds.getBottom() - 0.5f, bounds.getRight(), bounds.getBottom() - 0.5f);
+        }
+        else
+        {
+            drawNeonLine (bounds.getX() + 0.5f, bounds.getY(), bounds.getX() + 0.5f, bounds.getBottom());
+            drawNeonLine (bounds.getRight() - 0.5f, bounds.getY(), bounds.getRight() - 0.5f, bounds.getBottom());
+        }
+
+        const auto grip = horizontal
+            ? juce::Rectangle<float> (bounds.getCentreX() - 18.0f, bounds.getCentreY() - 1.0f, 36.0f, 2.0f)
+            : juce::Rectangle<float> (bounds.getCentreX() - 1.0f, bounds.getCentreY() - 18.0f, 2.0f, 36.0f);
+        if (hovered)
+        {
+            g.setColour (accent.withAlpha (0.20f));
+            g.fillRoundedRectangle (grip.expanded (2.0f), 2.0f);
+        }
+        g.setColour (accent.withAlpha (hovered ? 1.0f : 0.78f));
+        g.fillRoundedRectangle (grip, 1.0f);
+    };
+
+    drawResizeHandle (splitterRect, true, hoveringSplitter);
+    drawResizeHandle (browserSplitterRect, false, hoveringBrowserSplitter);
 }
 
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
+    themeBackground.setBounds (area);
+    themeBackground.toBack();
     transport.setBounds (area.removeFromTop (44));
     taskStatusBar.setBounds (area.removeFromBottom (30));
     if (actionIndicator != nullptr)
@@ -3265,12 +3314,31 @@ void MainComponent::mouseUp (const juce::MouseEvent&)
 
 void MainComponent::mouseMove (const juce::MouseEvent& e)
 {
-    if (browserSplitterRect.expanded (4, 0).contains (e.getPosition()))
+    const bool overBrowserSplitter = browserSplitterRect.expanded (4, 0).contains (e.getPosition());
+    const bool overSplitter = splitterRect.expanded (0, 4).contains (e.getPosition());
+    if (hoveringBrowserSplitter != overBrowserSplitter || hoveringSplitter != overSplitter)
+    {
+        hoveringBrowserSplitter = overBrowserSplitter;
+        hoveringSplitter = overSplitter;
+        repaint();
+    }
+
+    if (overBrowserSplitter)
         setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
-    else if (splitterRect.expanded (0, 4).contains (e.getPosition()))
+    else if (overSplitter)
         setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
     else
         setMouseCursor (juce::MouseCursor::NormalCursor);
+}
+
+void MainComponent::mouseExit (const juce::MouseEvent&)
+{
+    if (! hoveringSplitter && ! hoveringBrowserSplitter)
+        return;
+
+    hoveringSplitter = hoveringBrowserSplitter = false;
+    setMouseCursor (juce::MouseCursor::NormalCursor);
+    repaint();
 }
 
 void MainComponent::showDetail (bool devices)

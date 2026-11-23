@@ -77,6 +77,15 @@ void drawThemeKnob (juce::Graphics& g, juce::Rectangle<float> bounds,
         valueArc.addCentredArc (centre.x, centre.y, arcRadius, arcRadius, 0.0f,
                                 std::min (toPathAngle (activeStart), toPathAngle (topAngle)),
                                 std::max (toPathAngle (activeStart), toPathAngle (topAngle)), true);
+        if (highlighted && enabled)
+        {
+            g.setColour (activeColour.withAlpha (0.05f));
+            g.strokePath (valueArc, juce::PathStrokeType (activeThickness + 5.0f));
+            g.setColour (activeColour.withAlpha (0.10f));
+            g.strokePath (valueArc, juce::PathStrokeType (activeThickness + 3.0f));
+            g.setColour (activeColour.withAlpha (0.20f));
+            g.strokePath (valueArc, juce::PathStrokeType (activeThickness + 1.5f));
+        }
         g.setColour (activeColour);
         g.strokePath (valueArc, juce::PathStrokeType (
             activeThickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
@@ -132,9 +141,18 @@ void ThemeKnobLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button
                     : active ? theme::panelLight()
                     : highlighted ? theme::hover() : theme::control();
     theme::drawChromeSurface (g, bounds, 5.0f, fill);
+    if (active || down)
+    {
+        g.setColour (theme::accent().withAlpha (0.05f));
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 5.0f, 4.0f);
+        g.setColour (theme::accent().withAlpha (0.10f));
+        g.drawRoundedRectangle (bounds.reduced (1.25f), 4.0f, 2.5f);
+        g.setColour (theme::accent().withAlpha (0.20f));
+        g.drawRoundedRectangle (bounds.reduced (2.0f), 3.0f, 1.5f);
+    }
     g.setColour (active || down ? theme::accent()
                 : highlighted ? theme::accentHover() : theme::controlBorder());
-    g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
+    g.drawRoundedRectangle (bounds, 5.0f, 1.5f);
     if (active)
     {
         g.setColour (theme::accent());
