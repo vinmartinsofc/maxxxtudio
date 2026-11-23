@@ -123,6 +123,41 @@ void drawHighTechTickBox (juce::Graphics& g, juce::Rectangle<float> bounds,
 }
 }
 
+juce::MouseCursor ThemeKnobLookAndFeel::getMouseCursorFor (juce::Component& component)
+{
+    if (dynamic_cast<juce::Button*> (&component) != nullptr
+        || dynamic_cast<juce::ComboBox*> (&component) != nullptr)
+        return juce::MouseCursor::PointingHandCursor;
+
+    if (auto* slider = dynamic_cast<juce::Slider*> (&component))
+    {
+        switch (slider->getSliderStyle())
+        {
+            case juce::Slider::Rotary:
+            case juce::Slider::RotaryHorizontalDrag:
+            case juce::Slider::RotaryVerticalDrag:
+            case juce::Slider::RotaryHorizontalVerticalDrag:
+                return juce::MouseCursor::DraggingHandCursor;
+            case juce::Slider::LinearVertical:
+            case juce::Slider::LinearBarVertical:
+                return juce::MouseCursor::UpDownResizeCursor;
+            case juce::Slider::LinearHorizontal:
+            case juce::Slider::LinearBar:
+                return juce::MouseCursor::LeftRightResizeCursor;
+            default:
+                break;
+        }
+    }
+
+    if (dynamic_cast<juce::TextEditor*> (&component) != nullptr)
+        return juce::MouseCursor::IBeamCursor;
+
+    if (dynamic_cast<juce::ScrollBar*> (&component) != nullptr)
+        return juce::MouseCursor::DraggingHandCursor;
+
+    return juce::LookAndFeel_V4::getMouseCursorFor (component);
+}
+
 void ThemeKnobLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button,
                                                 const juce::Colour& backgroundColour,
                                                 bool highlighted, bool down)
@@ -141,6 +176,13 @@ void ThemeKnobLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button
                     : active ? theme::panelLight()
                     : highlighted ? theme::hover() : theme::control();
     theme::drawChromeSurface (g, bounds, 5.0f, fill);
+    if (highlighted && ! active && ! down)
+    {
+        g.setColour (theme::accent().withAlpha (0.06f));
+        g.drawRoundedRectangle (bounds.expanded (1.0f), 6.0f, 4.0f);
+        g.setColour (theme::accent().withAlpha (0.12f));
+        g.drawRoundedRectangle (bounds.expanded (0.5f), 5.5f, 2.0f);
+    }
     if (active || down)
     {
         g.setColour (theme::accent().withAlpha (0.05f));
@@ -213,8 +255,15 @@ void ThemeKnobLookAndFeel::drawComboBox (juce::Graphics& g, int width, int heigh
     const auto bounds = juce::Rectangle<float> (0.5f, 0.5f,
         static_cast<float> (width) - 1.0f, static_cast<float> (height) - 1.0f);
     theme::drawChromeSurface (g, bounds, 4.0f, down ? theme::pressed() : theme::control());
-    g.setColour (box.hasKeyboardFocus (false) || down ? theme::accent() : theme::controlBorder());
+    const bool highlighted = box.isMouseOverOrDragging();
+    g.setColour (box.hasKeyboardFocus (false) || down ? theme::accent()
+                : highlighted ? theme::accentHover() : theme::controlBorder());
     g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
+    if (highlighted && ! down)
+    {
+        g.setColour (theme::accent().withAlpha (0.12f));
+        g.drawRoundedRectangle (bounds.expanded (0.5f), 4.5f, 2.0f);
+    }
 
     const float centreX = static_cast<float> (buttonX) + static_cast<float> (buttonWidth) * 0.5f;
     const float centreY = static_cast<float> (buttonY) + static_cast<float> (buttonHeight) * 0.5f;
@@ -251,7 +300,7 @@ void ThemeKnobLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, in
         return;
     }
 
-    const float thickness = bar ? 4.0f : 2.5f;
+    const float thickness = bar ? 4.0f : vertical ? 4.0f : 2.5f;
     juce::Rectangle<float> track;
     juce::Rectangle<float> active;
     if (vertical)
@@ -273,22 +322,61 @@ void ThemeKnobLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, in
                    std::clamp (sliderPosition - left, 0.0f, track.getWidth()), thickness };
     }
 
+    const bool highlighted = slider.isMouseOverOrDragging();
     g.setColour (theme::border());
-    g.fillRoundedRectangle (track, thickness * 0.5f);
-    g.setColour (slider.isEnabled() ? theme::accent() : theme::textDim());
+    g.fillRoundedRectangle (vertical ? track.expanded (1.5f, 0.0f) : track,
+                            thickness * 0.5f);
+    if (vertical && ! bar)
+    {
+        for (int tick = 0; tick <= 10; ++tick)
+        {
+            const float tickY = track.getY() + track.getHeight() * static_cast<float> (tick) / 10.0f;
+            const float tickWidth = tick % 5 == 0 ? 4.0f : 2.0f;
+            g.setColour (theme::textDim().withAlpha (tick % 5 == 0 ? 0.55f : 0.28f));
+            g.drawHorizontalLine (juce::roundToInt (tickY),
+                                  track.getCentreX() - tickWidth - 3.0f,
+                                  track.getCentreX() - 3.0f);
+        }
+    }
+
+    const auto activeColour = slider.isEnabled() ? theme::accent() : theme::textDim();
+    g.setColour (activeColour);
     g.fillRoundedRectangle (active, thickness * 0.5f);
     if (! bar)
     {
-        const float thumbSize = 9.0f;
-        const auto thumb = vertical
-            ? juce::Rectangle<float> (track.getCentreX() - thumbSize * 0.5f,
-                                      sliderPosition - thumbSize * 0.5f, thumbSize, thumbSize)
-            : juce::Rectangle<float> (sliderPosition - thumbSize * 0.5f,
-                                      track.getCentreY() - thumbSize * 0.5f, thumbSize, thumbSize);
-        theme::drawChromeSurface (g, thumb, thumbSize * 0.5f,
-                                  slider.isEnabled() ? theme::panelLight() : theme::control());
-        g.setColour (theme::accent());
-        g.drawEllipse (thumb, 1.0f);
+        if (vertical)
+        {
+            const float thumbWidth = std::max (
+                1.0f, std::min (24.0f, static_cast<float> (width) - 2.0f));
+            const auto thumb = juce::Rectangle<float> (
+                track.getCentreX() - thumbWidth * 0.5f, sliderPosition - 4.0f,
+                thumbWidth, 8.0f);
+            if (highlighted && slider.isEnabled())
+            {
+                g.setColour (activeColour.withAlpha (0.08f));
+                g.fillRoundedRectangle (thumb.expanded (5.0f, 4.0f), 5.0f);
+                g.setColour (activeColour.withAlpha (0.18f));
+                g.drawRoundedRectangle (thumb.expanded (2.0f, 1.5f), 4.0f, 2.0f);
+            }
+            theme::drawChromeSurface (g, thumb, 3.0f,
+                                      slider.isEnabled() ? theme::panelLight() : theme::control());
+            g.setColour (highlighted ? theme::accentHover() : activeColour);
+            g.drawRoundedRectangle (thumb, 3.0f, 1.2f);
+            g.setColour (theme::text().withAlpha (0.8f));
+            g.drawHorizontalLine (juce::roundToInt (thumb.getCentreY()),
+                                  thumb.getX() + 4.0f, thumb.getRight() - 4.0f);
+        }
+        else
+        {
+            const float thumbSize = 9.0f;
+            const auto thumb = juce::Rectangle<float> (
+                sliderPosition - thumbSize * 0.5f, track.getCentreY() - thumbSize * 0.5f,
+                thumbSize, thumbSize);
+            theme::drawChromeSurface (g, thumb, thumbSize * 0.5f,
+                                      slider.isEnabled() ? theme::panelLight() : theme::control());
+            g.setColour (highlighted ? theme::accentHover() : activeColour);
+            g.drawEllipse (thumb, 1.0f);
+        }
     }
 }
 
@@ -301,7 +389,9 @@ void ThemeKnobLookAndFeel::drawTextEditorOutline (juce::Graphics& g, int width, 
         return;
     }
 
-    g.setColour (editor.hasKeyboardFocus (true) ? theme::accent() : theme::controlBorder());
+    const bool hovered = editor.isMouseOverOrDragging();
+    g.setColour (editor.hasKeyboardFocus (true) ? theme::accent()
+                : hovered ? theme::accentHover() : theme::controlBorder());
     g.drawRoundedRectangle (juce::Rectangle<float> (0.5f, 0.5f,
         static_cast<float> (width) - 1.0f, static_cast<float> (height) - 1.0f), 4.0f, 1.0f);
 }

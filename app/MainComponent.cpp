@@ -3080,17 +3080,17 @@ void MainComponent::paint (juce::Graphics& g)
         const auto accent = theme::accent();
         g.setColour (theme::panel());
         g.fillRoundedRectangle (bounds, 2.0f);
-        g.setColour (accent.withAlpha (hovered ? 0.13f : 0.06f));
+        g.setColour (accent.withAlpha (hovered ? 0.18f : 0.10f));
         g.fillRoundedRectangle (bounds.reduced (0.5f), 2.0f);
 
         const auto drawNeonLine = [&g, &accent, hovered] (
             float startX, float startY, float endX, float endY)
         {
-            g.setColour (accent.withAlpha (hovered ? 0.20f : 0.08f));
+            g.setColour (accent.withAlpha (hovered ? 0.30f : 0.14f));
             g.drawLine (startX, startY, endX, endY, 4.0f);
-            g.setColour (accent.withAlpha (hovered ? 0.42f : 0.22f));
+            g.setColour (accent.withAlpha (hovered ? 0.52f : 0.32f));
             g.drawLine (startX, startY, endX, endY, 2.0f);
-            g.setColour (accent.withAlpha (hovered ? 1.0f : 0.68f));
+            g.setColour (accent.withAlpha (hovered ? 1.0f : 0.90f));
             g.drawLine (startX, startY, endX, endY, 1.0f);
         };
         if (horizontal)

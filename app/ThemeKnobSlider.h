@@ -13,6 +13,7 @@ public:
 class ThemeKnobLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
+    juce::MouseCursor getMouseCursorFor (juce::Component&) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&,
                                bool highlighted, bool down) override;
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&,
