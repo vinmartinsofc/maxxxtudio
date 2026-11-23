@@ -4,26 +4,17 @@
   Estação de trabalho de áudio digital para criar, organizar, editar e mixar música.
 </p>
 
-MaXXXtudio é um DAW open source desenvolvido em C++20 e JUCE 8.0.15. A plataforma principal
-é Windows 10/11, com verificações automáticas também realizadas em Linux. O projeto combina
-um view Arrangement, edição MIDI, hospedagem de VST3, mixer, automação e ferramentas nativas
-em uma interface própria.
-
-## Interface atual
+MaXXXtudio is an open source DAW (Digital Audio Workstation) developed in C++20 and JUCE 8.0.15. At first, it was supposed to be multiplatform (Windows/Linux  — Linux specially. But, as I'm the only developer of this project, it became extremelly difficult test and implement features on both platforms. So I'm wasting all my energy on Windows right now and hoping to have a Linux version sooner.  It combines arrangement view, MIDI edition, VST3 Hosting (only VST3), mixer, native tools, automation and a modern interface.
+## Actual interface
 
 <p align="center">
   <img src="app/assets/readme/interface-overview.png" alt="Interface atual do MaXXXtudio com Arrangement, mixer, faders por canal e painel Master" width="1000">
 </p>
 
-A captura mostra o Arrangement, o navegador de plugins e o Mixer, com faders, pan e meters L/R
-por canal. A tela principal também oferece o Piano Roll, o navegador de áudio e a cadeia de
-dispositivos. Pressione `F11` para entrar ou sair do modo tela cheia.
+Here we got the Arrangement view, the plugin navigation and the mixer. The main window offers a piano roll too. The audio navigator and device chain  — VST3 that are opened in the selected channel.
+### Repositioning a plugin window
 
-### Reposicionando uma janela de plugin
-
-Este trecho curto mostra apenas como arrastar a janela de um plugin para a direita,
-mantendo o Arrangement visível; não é uma demonstração completa do MaXXXtudio.
-O GIF é uma prévia; clique nele para abrir o vídeo original.
+This part shows how to navigate through more than one opened plugin at the same time when the user monitor is small. It's possible to minimize, of course, but, as I prefer keep the plugin window visible as I configure it's parameters, it was designed this way.
 
 <p align="center">
   <a href="app/assets/readme/demo.mp4">
@@ -31,111 +22,102 @@ O GIF é uma prévia; clique nele para abrir o vídeo original.
   </a>
 </p>
 
-## Recursos implementados
+## Implemented resources
 
-- **Arrangement:** trilhas MIDI e áudio, múltiplos clips, mover/copiar/duplicar, divisão,
-  grade adaptativa, locators, loop, visão geral, recolhimento de trilhas e transporte.
-- **Piano Roll:** criar e editar notas, velocidade, quantização, seleção, escala, Fold,
-  Highlight, grooves MIDI, teclado do computador e zoom horizontal/vertical.
-- **Edição de áudio:** dividir e mesclar clips, ajustar bordas, fades, análise de transientes,
-  BPM de origem e alternância Warp. O stretch permanece limitado ao modo Re-Pitch atual.
-- **Seleção e atalhos:** seleção de clip inteiro, intervalos, seleção múltipla de clips/faixas,
-  copiar/recortar/colar, duplicar, agrupar e desagrupar trilhas.
-- **Mixer:** volume, pan, mute, solo, medidores de pico, Master e barramentos/grupos.
-- **Automação:** volume, pan, mute e parâmetros VST3 em envelopes globais no Arrangement.
-- **Plugins VST3:** scanner em segundo plano, favoritos, pastas personalizadas, execução em
-  worker isolado e estado salvo no projeto.
-- **Navegadores:** plugins por pasta/fabricante e tipo, arquivos de áudio, favoritos por cor,
-  busca, pré-escuta, histórico e localização no File Explorer.
-- **Grooves MIDI:** importação de `.agr`, biblioteca, pré-escuta, aplicação e persistência.
-- **Ferramentas nativas:** Drum Rack e Volume Master, além dos efeitos Comp Master,
-  EQ Master e Reference Master.
-- **Projetos:** salvar/abrir `.std`, autosave com recuperação, desfazer/refazer do estado
-  suportado e exportação offline do Master em WAV 24-bit.
-- **Identidade visual:** tema grafite próprio, estados ativo/hover/disabled, tooltips,
-  ícones vetoriais e paleta azul/verde/amarela/vermelha conforme a especificação atual.
+- **Arrangement:** MIDI and Audio tracks, multiple clips, move/copy/duplicate, division, adaptative grid, locators, loop, overview, minimize hide/expand a channel.
+- **Piano Roll:** create and edit notes, velocity, quantize, select, scale, Fold,
+  Highlight, grooves MIDI, computer keyboard and horizontal/vertical zoom.
+- **Audio Edition:** divide and merge clips, adjust edges, fades, transient analysis. The stretch remain limited  at the current Re-Pitch mode.
+- **Selection and shortcuts:** entire clip selection, intervals, multiple track selection,
+  copy/cut/paste, duplicate, group and ungroup tracks.
+- **Mixer:** volume, pan, mute, solo, peak analyzer, master and groups.
+- **Automation:** volume, pan, mute and VST3 parameters in global envelopes at the arrangement.
+- **VST3 Plugins:** background scanner, favorites, custom folders, isolated worker execution and project crash/close recovery.
+- **Navigation:** plugins by folder/label and type, audio files, favorite by colour,
+  search, preview, history and localization in the File Explorer.
+- **MIDI Grooves:** `.agr` import, library, preview, persistance and application.
+- **Native tools:** Drum Master, Volume Master, Comp Master, EQ Master and Reference Master.
+- **Projects:** save/open `.std`, autosave with recovery, undo/redo supported and offline master export — WAV 24-bit.
+- **Visual identity:** custom themes, active state/hover/disabled, tooltips, vetorial icons, color palete blue/green/red/magenta/cyan and others.
 
-## Ferramentas nativas
+## Native tools
 
-A aba **MaXXXtudio** do navegador reúne os instrumentos e efeitos desenvolvidos diretamente
-no projeto.
+The **MaXXXtudio** navigation tab reunite the instruments and effects developed directly in the project.
 
 <p align="center">
   <img src="app/assets/readme/native-tools.png" alt="Aba MaXXXtudio no navegador de ferramentas nativas" width="420">
 </p>
 
-### Plugins nativos
+### Native tools
 
 <table>
   <tr>
     <td align="center" width="50%">
       <img src="app/assets/readme/drum-master.png" alt="Interface do Drum Master" width="400"><br>
       <strong>Drum Master</strong><br>
-      Sampler de 15 pads MIDI, com One-Shot/Classic, ajuste de pitch e volume,
-      recorte de início/fim, reverse, loop e efeitos por pad.
+      15 MIDI Sampler pads, with One-Shot/Classic, pitch and volume adjustment,
+      end to end cut, reverse, loop and effects per pad.
     </td>
     <td align="center" width="50%">
       <img src="app/assets/readme/volume-master.png" alt="Interface do Volume Master" width="400"><br>
       <strong>Volume Master</strong><br>
-      Controle de ganho e imagem estéreo, balanço, modos de entrada, mono,
-      inversão de fase, Bass Mono e Auto Pan.
+      Stereo image and gain control, balance, input modes, mono,
+      phase invertion, Bass Mono and Auto Pan.
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
       <img src="app/assets/readme/comp-master.png" alt="Interface do Comp Master" width="400"><br>
       <strong>Comp Master</strong><br>
-      Compressor com roteamento sidechain, osciloscópio, medidores de entrada/saída
-      e redução de ganho, além de threshold, ratio, ataque, release, knee e mix.
+      Compressor with sidechain routing, osciloscope, input/output meters
+      and gain reduction, threshold, ratio, atack, release, knee and mix.
     </td>
     <td align="center" width="50%">
       <img src="app/assets/readme/eq-master.png" alt="Interface do EQ Master" width="400"><br>
       <strong>EQ Master</strong><br>
-      Equalizador paramétrico de oito bandas com analisador de espectro,
-      filtros ajustáveis e modos Stereo, Mid e Side.
+      Parametrical eight bands equalizer with spectrum analyzer,
+      adjustable filter and Stereo/Midi/Side modes.
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
       <img src="app/assets/readme/reference-master.png" alt="Interface do Reference Master" width="400"><br>
       <strong>Reference Master</strong><br>
-      Analisador para faixas de referência: forma de onda, espectro, BPM/tom estimados,
-      reprodução, busca e zoom.
+      Track frequency analyzer: waveform, spectrum, BPM/Estimated key,
+      reproduction, search and zoom.
     </td>
     <td width="50%"></td>
   </tr>
 </table>
 
-## Compilar no Windows
+## To compile on Windows
 
-Requisitos: Windows 10/11, CMake 3.22+ e Visual Studio com a carga
-**Desenvolvimento para desktop com C++**.
+Requisites: Windows 10/11, CMake 3.22+ and Visual Studio with **Desktop development with C++**.
 
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-Executável:
+Runner:
 
 ```text
 build\app\MaXXXtudio_artefacts\Release\MaXXXtudio.exe
 ```
 
-Executar os testes:
+To run tests:
 
 ```powershell
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-No navegador de plugins, **Folders** permite adicionar ou remover diretórios de busca VST3.
-Os caminhos são persistidos nas configurações do usuário.
+In the plugins navigator, **Folders** allows add or remove search VST3 directories. The folders are persisted in the user configuration.
 
-## Estrutura do projeto
+## Project structure
 
 ```text
-core/    modelo musical puro e sequenciador
-tests/   testes automáticos
-app/     aplicação JUCE, interface, áudio, plugins e ferramentas de produção
-docs/    especificação e estado detalhado do projeto
+core/    sequencer and pure musical mode
+tests/   automatic tests
+app/     JUCE aplication, interface, audio, plugins and production tools
+docs/    detailed project specification
 ```
