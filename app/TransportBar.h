@@ -60,6 +60,7 @@ public:
     void setFavoritesVisible (bool);
     void setPianoRollVisible (bool);
     void setComputerMidiKeyboardEnabled (bool);
+    juce::Rectangle<int> computerMidiIndicatorBounds() const noexcept { return midiStatusBounds; }
     void setBpm (double);
     void setMetronomeState (bool enabled, float gain);
 
@@ -96,6 +97,7 @@ private:
                      computerKeyboardButton { icons::Icon::ComputerKeyboard, "Computer MIDI Keyboard" };
     juce::Label bpmLabel, positionLabel, bpmCaption { {}, "BPM" };
     juce::Rectangle<int> cpuMeterBounds;
+    juce::Rectangle<int> midiStatusBounds;
     CpuTooltipButton cpuTooltipArea;
     double displayedCpuAverage = 0.0;
     double lastPosition = -1.0, lastBpm = -1.0;

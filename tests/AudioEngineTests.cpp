@@ -2103,6 +2103,7 @@ TEST_CASE ("Remote VST3 processing runs outside the host process", "[integration
     buffer.clear();
     juce::MidiBuffer midi;
     processor->prepareToPlay (44100.0, 256);
+    CHECK (processor->getLatencySamples() == 256);
     processor->processBlock (buffer, midi);
     REQUIRE_FALSE (processor->hasFailed());
     for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
@@ -2218,7 +2219,9 @@ TEST_CASE ("A saved VST3 preset can be restored by a plugin worker",
         constexpr double twoPi = 6.283185307179586;
         juce::AudioBuffer<float> buffer (2, blockSize);
         juce::MidiBuffer midi;
+        std::array<float, blockSize> previousInputSamples {};
         double maximumDifference = 0.0;
+        CHECK (effectProcessor->getLatencySamples() == blockSize);
         for (int block = 0; block < blocksToProcess; ++block)
         {
             transport.setSamplePosition (static_cast<std::int64_t> (block) * blockSize);
@@ -2233,10 +2236,12 @@ TEST_CASE ("A saved VST3 preset can be restored by a plugin worker",
             }
             effectProcessor->processBlock (buffer, midi);
             REQUIRE_FALSE (effectProcessor->hasFailed());
-            for (int sample = 0; sample < blockSize; ++sample)
-                maximumDifference = std::max (maximumDifference, std::abs (
-                    static_cast<double> (buffer.getSample (0, sample)
-                                         - inputSamples[static_cast<std::size_t> (sample)])));
+            if (block > 0)
+                for (int sample = 0; sample < blockSize; ++sample)
+                    maximumDifference = std::max (maximumDifference, std::abs (
+                        static_cast<double> (buffer.getSample (0, sample)
+                                             - previousInputSamples[static_cast<std::size_t> (sample)])));
+            previousInputSamples = inputSamples;
         }
         INFO ("Maximum processed-signal difference: " << maximumDifference);
         CHECK (maximumDifference > 1.0e-5);

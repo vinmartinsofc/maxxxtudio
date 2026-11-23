@@ -1065,8 +1065,6 @@ public:
         auto bounds = getLocalBounds().toFloat();
         g.setColour (theme::panel().withAlpha (0.97f));
         g.fillRoundedRectangle (bounds, 7.0f);
-        g.setColour (theme::accent());
-        g.drawRoundedRectangle (bounds.reduced (0.5f), 7.0f, 1.2f);
 
         auto textBounds = getLocalBounds().reduced (12, 4);
         g.setColour (theme::text());
@@ -3083,7 +3081,8 @@ void MainComponent::resized()
     if (actionIndicator != nullptr)
         actionIndicator->setBounds ((getWidth() - 320) / 2, 50, 320, 52);
     if (computerMidiIndicator != nullptr)
-        computerMidiIndicator->setBounds (std::max (8, getWidth() - 240), 50, 224, 44);
+        computerMidiIndicator->setBounds (
+            transport.computerMidiIndicatorBounds().translated (transport.getX(), transport.getY()));
 
     auto workspace = area.reduced (8);
     monitorPanelWidth = std::clamp (workspace.getWidth() / 5, 220, 280);

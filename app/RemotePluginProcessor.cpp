@@ -181,6 +181,8 @@ RemotePluginProcessor::RemotePluginProcessor (const juce::PluginDescription& des
       sampleBlockSize (std::clamp (blockSize, 1, pluginworker::maxSamples)),
       sampleRate (rate)
 {
+    inputBlockBuffer.setSize (2, pluginworker::maxSamples);
+    setLatencySamples (sampleBlockSize);
 }
 
 bool RemotePluginProcessor::showEditor (int x, int y)
@@ -419,6 +421,7 @@ void RemotePluginProcessor::prepareToPlay (double rate, int maximumBlockSize)
 
     sampleRate = rate;
     sampleBlockSize = maximumBlockSize;
+    setLatencySamples (sampleBlockSize);
     shared->sampleRate = rate;
     shared->blockSize = maximumBlockSize;
     resourcesPrepared = sendCommand (pluginworker::Command::prepare, 10000);
@@ -561,36 +564,68 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         return;
     }
 
+    const int samples = std::min (buffer.getNumSamples(), pluginworker::maxSamples);
+    for (int channel = 0; channel < inputBlockBuffer.getNumChannels(); ++channel)
+    {
+        if (channel < buffer.getNumChannels())
+            inputBlockBuffer.copyFrom (channel, 0, buffer, channel, 0, samples);
+        else
+            inputBlockBuffer.clear (channel, 0, samples);
+    }
+
     if (processRequestPending)
     {
-        auto pendingResult = WaitForSingleObject (responseEvent, 0);
-        if (pendingResult == WAIT_TIMEOUT && offline)
-        {
-            HANDLE handles[] { responseEvent, workerProcess };
-            pendingResult = WaitForMultipleObjects (2, handles, FALSE, offlineProcessTimeoutMs);
-        }
+        const double blockDurationMs = sampleRate > 0.0
+            ? 1000.0 * samples / sampleRate : 20.0;
+        const auto timeoutMs = offline ? offlineProcessTimeoutMs
+            : static_cast<DWORD> (std::clamp (
+                  static_cast<int> (std::ceil (blockDurationMs)), 1, 50));
+        HANDLE handles[] { responseEvent, workerProcess };
+        const auto pendingResult = WaitForMultipleObjects (2, handles, FALSE, timeoutMs);
         if (pendingResult == WAIT_TIMEOUT)
         {
             if (offline || juce::Time::getMillisecondCounter() - processRequestStartTime
                                >= stalledProcessTimeoutMs)
                 failWorker (offline ? "Offline plugin processing exceeded 30 seconds."
                                     : "Plugin processing was unresponsive for 5 seconds.");
-            if (instrument)
-                buffer.clear();
+            buffer.clear();
             return;
         }
         if (pendingResult != WAIT_OBJECT_0
             || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
         {
             failWorker ("The plugin worker returned an unsuccessful audio block.");
-            if (instrument)
-                buffer.clear();
+            buffer.clear();
             return;
         }
         processRequestPending = false;
-    }
 
-    const int samples = std::min (buffer.getNumSamples(), pluginworker::maxSamples);
+        const int touchedParameter = InterlockedExchange (&shared->parameterGestureStarted, -1);
+        if (touchedParameter >= 0 && touchedParameter < getParameters().size())
+            lastParameterGestureStarted.store (touchedParameter, std::memory_order_release);
+        const int releasedParameter = InterlockedExchange (&shared->parameterGestureEnded, -1);
+        if (releasedParameter >= 0 && releasedParameter < getParameters().size())
+            lastParameterGestureEnded.store (releasedParameter, std::memory_order_release);
+
+        buffer.clear();
+        const int outputSamples = std::min (
+            { pendingAudioSamples, samples, pluginworker::maxSamples });
+        const int outputChannels = std::min (static_cast<int> (shared->numOutputs),
+                                             pluginworker::maxChannels);
+        if (outputChannels == 1)
+        {
+            for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+                buffer.copyFrom (channel, 0, shared->audio[0], outputSamples);
+        }
+        else
+        {
+            for (int channel = 0; channel < std::min (buffer.getNumChannels(), outputChannels); ++channel)
+                buffer.copyFrom (channel, 0, shared->audio[channel], outputSamples);
+        }
+    }
+    else
+        buffer.clear();
+
     shared->audioSamples = samples;
     const auto* hostPlayHead = getPlayHead();
     const auto hostPosition = hostPlayHead != nullptr ? hostPlayHead->getPosition()
@@ -627,8 +662,10 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     {
         for (int sample = 0; sample < samples; ++sample)
         {
-            const float left = buffer.getNumChannels() > 0 ? buffer.getSample (0, sample) : 0.0f;
-            const float right = buffer.getNumChannels() > 1 ? buffer.getSample (1, sample) : left;
+            const float left = buffer.getNumChannels() > 0
+                ? inputBlockBuffer.getSample (0, sample) : 0.0f;
+            const float right = buffer.getNumChannels() > 1
+                ? inputBlockBuffer.getSample (1, sample) : left;
             shared->audio[0][sample] = 0.5f * (left + right);
         }
     }
@@ -636,8 +673,8 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     {
         for (int channel = 0; channel < shared->numInputs; ++channel)
             for (int sample = 0; sample < samples; ++sample)
-                shared->audio[channel][sample] = channel < buffer.getNumChannels()
-                    ? buffer.getSample (channel, sample) : 0.0f;
+                shared->audio[channel][sample] = channel < inputBlockBuffer.getNumChannels()
+                    ? inputBlockBuffer.getSample (channel, sample) : 0.0f;
     }
 
     shared->midiCount = 0;
@@ -655,60 +692,12 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         std::memcpy (event.data, message.getRawData(), static_cast<std::size_t> (size));
     }
 
-    const double blockDurationMs = sampleRate > 0.0
-        ? 1000.0 * samples / sampleRate : 20.0;
-    // Offline rendering must not advance until the worker has produced this block.
-    const DWORD timeoutMs = offline ? offlineProcessTimeoutMs
-        : static_cast<DWORD> (std::clamp (static_cast<int> (std::ceil (blockDurationMs)), 1, 50));
     ResetEvent (responseEvent);
     InterlockedExchange (&shared->command, static_cast<LONG> (pluginworker::Command::process));
     SetEvent (requestEvent);
-    HANDLE handles[] { responseEvent, workerProcess };
-    const auto processResult = WaitForMultipleObjects (
-        2, handles, FALSE, timeoutMs);
-    if (processResult == WAIT_TIMEOUT)
-    {
-        if (offline)
-            failWorker ("Offline plugin processing exceeded 30 seconds.");
-        else
-        {
-            processRequestPending = true;
-            processRequestStartTime = juce::Time::getMillisecondCounter();
-        }
-        if (instrument)
-            buffer.clear();
-        return;
-    }
-    if (processResult != WAIT_OBJECT_0
-        || InterlockedCompareExchange (&shared->result, 0, 0) == 0)
-    {
-        failWorker ("The plugin worker exited or returned an unsuccessful audio block.");
-        if (instrument)
-            buffer.clear();
-        return;
-    }
-
-    const int touchedParameter = InterlockedExchange (&shared->parameterGestureStarted, -1);
-    if (touchedParameter >= 0 && touchedParameter < getParameters().size())
-        lastParameterGestureStarted.store (touchedParameter, std::memory_order_release);
-    const int releasedParameter = InterlockedExchange (&shared->parameterGestureEnded, -1);
-    if (releasedParameter >= 0 && releasedParameter < getParameters().size())
-        lastParameterGestureEnded.store (releasedParameter, std::memory_order_release);
-
-    const int outputChannels = std::min (static_cast<int> (shared->numOutputs),
-                                         pluginworker::maxChannels);
-    if (outputChannels == 1)
-    {
-        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
-            buffer.copyFrom (channel, 0, shared->audio[0], samples);
-    }
-    else
-    {
-        for (int channel = 0; channel < std::min (buffer.getNumChannels(), outputChannels); ++channel)
-            buffer.copyFrom (channel, 0, shared->audio[channel], samples);
-        for (int channel = outputChannels; channel < buffer.getNumChannels(); ++channel)
-            buffer.clear (channel, 0, samples);
-    }
+    processRequestPending = true;
+    pendingAudioSamples = samples;
+    processRequestStartTime = juce::Time::getMillisecondCounter();
 #else
     juce::ignoreUnused (midi);
     if (instrument)

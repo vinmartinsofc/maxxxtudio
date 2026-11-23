@@ -4808,7 +4808,7 @@ public:
         {
             leftPeak = left;
             rightPeak = right;
-            repaint (10, getHeight() - 10, getWidth() - 20, 8);
+            repaint (10, getHeight() - 13, getWidth() - 20, 10);
         }
     }
     void refreshText()
@@ -5391,7 +5391,12 @@ public:
         peak = p;
         peakHold = std::max (peakHold, p);
         updatePeakDbText (peakHold);
-        if (std::abs (p - previousPeak) > 0.003f || peakHold != previousHold)
+        const auto activeSegments = [] (float level)
+        {
+            const auto amount = theme::meterAmount (level);
+            return amount > 0.0f ? static_cast<int> (std::ceil (amount * 24.0f)) : 0;
+        };
+        if (activeSegments (p) != activeSegments (previousPeak) || peakHold != previousHold)
         {
             repaint();
         }
@@ -5399,8 +5404,13 @@ public:
 
     void setStereoPeaks (float left, float right)
     {
-        const bool changed = std::abs (left - leftPeak) > 0.003f
-                          || std::abs (right - rightPeak) > 0.003f
+        const auto activeSegments = [] (float level)
+        {
+            const auto amount = theme::meterAmount (level);
+            return amount > 0.0f ? static_cast<int> (std::ceil (amount * 18.0f)) : 0;
+        };
+        const bool changed = activeSegments (left) != activeSegments (leftPeak)
+                          || activeSegments (right) != activeSegments (rightPeak)
                           || left > leftPeakHold || right > rightPeakHold;
         leftPeak = left;
         rightPeak = right;

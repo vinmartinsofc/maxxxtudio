@@ -76,8 +76,10 @@ private:
     juce::CriticalSection requestLock;
     juce::CriticalSection stateLock;
     juce::MemoryBlock cachedState;
+    juce::AudioBuffer<float> inputBlockBuffer;
     std::function<void (const juce::String&, const juce::String&)> onFailure;
     bool processRequestPending = false;
+    int pendingAudioSamples = 0;
     std::uint32_t processRequestStartTime = 0;
     HANDLE mapping = nullptr, requestEvent = nullptr, responseEvent = nullptr;
     HANDLE workerProcess = nullptr, workerJob = nullptr;

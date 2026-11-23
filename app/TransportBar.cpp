@@ -436,7 +436,7 @@ void TransportBar::resized()
     const int spacing = compact ? 4 : 6;
     const int rightControlsWidth = 7 * 40 + 6 * spacing;
     const int availableWidth = std::max (0, area.getWidth() - rightControlsWidth);
-    int cpuWidth = std::min (150, std::max (0, availableWidth - 192));
+    int cpuWidth = std::min (150, std::max (0, availableWidth - 270));
     if (cpuWidth < 72)
         cpuWidth = 0;
     if (cpuWidth >= 72)
@@ -453,10 +453,20 @@ void TransportBar::resized()
         cpuTooltipArea.setVisible (false);
     }
     const int clockAreaWidth = std::max (0, area.getWidth() - rightControlsWidth);
-    const int clockWidth = std::min (190, clockAreaWidth);
+    constexpr int statusWidth = 128;
+    constexpr int statusGap = 6;
+    constexpr int minimumClockWidth = 120;
+    const int reservedStatusWidth = clockAreaWidth >= statusWidth + statusGap + minimumClockWidth
+        ? statusWidth + statusGap : 0;
+    const int availableClockWidth = clockAreaWidth - reservedStatusWidth;
+    const int clockWidth = std::min (190, availableClockWidth);
+    midiStatusBounds = reservedStatusWidth > 0
+        ? juce::Rectangle<int> (area.getX(), 4, statusWidth, getHeight() - 8)
+        : juce::Rectangle<int>();
     positionLabel.setVisible (clockWidth >= 96);
     positionLabel.setBounds (clockWidth >= 96
-        ? juce::Rectangle<int> (area.getX() + (clockAreaWidth - clockWidth) / 2,
+        ? juce::Rectangle<int> (area.getX() + reservedStatusWidth
+                                  + (availableClockWidth - clockWidth) / 2,
                                 3, clockWidth, getHeight() - 6)
         : juce::Rectangle<int>());
     browserButton.setBounds (area.removeFromRight (40));
