@@ -44,7 +44,8 @@ enum class Icon
     Favorites,
     Plugins,
     Vst,
-    Cpu
+    Cpu,
+    Follow
 };
 
 const juce::Drawable* get (Icon icon, juce::Colour colour, int size = 24);

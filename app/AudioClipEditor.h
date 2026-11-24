@@ -58,6 +58,7 @@ private:
     juce::ToggleButton reverseButton { "Reverse" };
     juce::ComboBox warpModeBox;
     AudioClipKnobSlider pitchSlider, centsSlider, gainSlider;
+    juce::TextButton autoWarpButton { "Auto-Warp" };
     juce::TextButton doubleBpmButton { "x2" }, halveBpmButton { "/2" };
     juce::TextButton splitButton { "Split" }, joinButton { "Merge" };
     juce::Label fadeInLabel { {}, "Fade In" }, fadeOutLabel { {}, "Fade Out" };

@@ -58,7 +58,7 @@ inline Palette& selectedPalette()
 
 inline AccentStyle& selectedAccentStyle()
 {
-    static AccentStyle selected = AccentStyle::NeonCyan;
+    static AccentStyle selected = AccentStyle::SynthwavePurple;
     return selected;
 }
 
@@ -162,7 +162,7 @@ inline void load()
     selectedWaveformStyle() = waveformStyle == "ultraviolet" || waveformStyle == "reference"
         ? WaveformStyle::Ultraviolet
         : waveformStyle == "spectrum" ? WaveformStyle::Spectrum : WaveformStyle::Classic;
-    const auto accent = xml->getStringAttribute ("interfaceAccent", "neon-cyan").toLowerCase();
+    const auto accent = xml->getStringAttribute ("interfaceAccent", "synthwave-purple").toLowerCase();
     selectedAccentStyle() = accent == "cyberpunk-yellow" ? AccentStyle::CyberpunkYellow
         : accent == "synthwave-purple" ? AccentStyle::SynthwavePurple
         : accent == "neon-magenta" ? AccentStyle::NeonMagenta

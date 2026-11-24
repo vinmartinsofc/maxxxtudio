@@ -148,6 +148,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     favoritesButton.setMouseClickGrabsKeyboardFocus (false);
     pianoRollButton.setMouseClickGrabsKeyboardFocus (false);
     computerKeyboardButton.setMouseClickGrabsKeyboardFocus (false);
+    followButton.setMouseClickGrabsKeyboardFocus (false);
     startButton.setTooltip ("Return to the start of the timeline");
     startButton.onClick = [this] { if (onGoToStart) onGoToStart(); };
     endButton.setTooltip ("Go to the end of the timeline");
@@ -158,6 +159,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     addAndMakeVisible (favoritesButton);
     addAndMakeVisible (pianoRollButton);
     addAndMakeVisible (computerKeyboardButton);
+    addAndMakeVisible (followButton);
     addAndMakeVisible (bpmLabel);
     addAndMakeVisible (bpmCaption);
     addAndMakeVisible (positionLabel);
@@ -212,6 +214,15 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     {
         if (onComputerMidiKeyboardToggled)
             onComputerMidiKeyboardToggled (computerKeyboardButton.getToggleState());
+    };
+
+    followButton.setTooltip ("Follow Arrangement: keep the playhead in view (Ctrl+Shift+F)");
+    followButton.setClickingTogglesState (true);
+    followButton.setToggleState (false, juce::dontSendNotification);
+    followButton.onClick = [this]
+    {
+        if (onFollowToggled)
+            onFollowToggled (followButton.getToggleState());
     };
 
     bpmLabel.setEditable (false, true, false);
@@ -315,6 +326,11 @@ void TransportBar::setPianoRollVisible (bool visible)
 void TransportBar::setComputerMidiKeyboardEnabled (bool enabled)
 {
     computerKeyboardButton.setToggleState (enabled, juce::dontSendNotification);
+}
+
+void TransportBar::setFollowEnabled (bool enabled)
+{
+    followButton.setToggleState (enabled, juce::dontSendNotification);
 }
 
 void TransportBar::setBpm (double bpm)
@@ -434,7 +450,7 @@ void TransportBar::resized()
     metronomeVolumeSlider.setBounds (area.removeFromLeft (68).reduced (0, 8));
     area.removeFromLeft (12);
     const int spacing = compact ? 4 : 6;
-    const int rightControlsWidth = 7 * 40 + 6 * spacing;
+    const int rightControlsWidth = 8 * 40 + 7 * spacing;
     const int availableWidth = std::max (0, area.getWidth() - rightControlsWidth);
     int cpuWidth = std::min (150, std::max (0, availableWidth - 270));
     if (cpuWidth < 72)
@@ -478,6 +494,8 @@ void TransportBar::resized()
     pianoRollButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
     computerKeyboardButton.setBounds (area.removeFromRight (40));
+    area.removeFromRight (compact ? 4 : 6);
+    followButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);
     optionsButton.setBounds (area.removeFromRight (40));
     area.removeFromRight (compact ? 4 : 6);

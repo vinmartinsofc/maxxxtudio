@@ -50,6 +50,7 @@ public:
     std::function<void (bool)> onFavoritesToggled;
     std::function<void (bool)> onPianoRollToggled;
     std::function<void (bool)> onComputerMidiKeyboardToggled;
+    std::function<void (bool)> onFollowToggled;
     std::function<void (double beats)> onPosition;   // Called about 30 times per second with the playhead.
     std::function<void()> onGoToStart, onGoToEnd;
     std::function<void (double bpm)> onBpmChanged;
@@ -60,6 +61,7 @@ public:
     void setFavoritesVisible (bool);
     void setPianoRollVisible (bool);
     void setComputerMidiKeyboardEnabled (bool);
+    void setFollowEnabled (bool);
     juce::Rectangle<int> computerMidiIndicatorBounds() const noexcept { return midiStatusBounds; }
     void setBpm (double);
     void setMetronomeState (bool enabled, float gain);
@@ -95,6 +97,7 @@ private:
     IconToggleButton favoritesButton { icons::Icon::Favorites, "Favorites" };
     IconToggleButton pianoRollButton { icons::Icon::PianoRoll, "Piano Roll" },
                      computerKeyboardButton { icons::Icon::ComputerKeyboard, "Computer MIDI Keyboard" };
+    IconToggleButton followButton { icons::Icon::Follow, "Follow Arrangement" };
     juce::Label bpmLabel, positionLabel, bpmCaption { {}, "BPM" };
     juce::Rectangle<int> cpuMeterBounds;
     juce::Rectangle<int> midiStatusBounds;

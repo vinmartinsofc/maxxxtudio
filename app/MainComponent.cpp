@@ -1426,6 +1426,7 @@ MainComponent::MainComponent()
     themeBackground.toBack();
     addAndMakeVisible (taskStatusBar);
     addAndMakeVisible (transport);
+    transport.onFollowToggled = [this] (bool enabled) { setFollowArrangementEnabled (enabled); };
     transport.onProjectMenu = [this] { showProjectMenu(); };
     transport.onOptionsMenu = [this] { showOptionsWindow(); };
     transport.onBpmChanged = [this] (double bpm)
@@ -2149,6 +2150,8 @@ MainComponent::MainComponent()
             refreshAudioClipEditor();
         }
         arrangement.setPlayhead (beats);
+        if (followArrangement)
+            arrangement.scrollToBeat (beats);
         editor.setPlayhead (beats - model.clipStartBeats);
     };
     transport.onGoToStart = [this] { seekTransport (0.0); };
@@ -3455,12 +3458,20 @@ void MainComponent::loadAudioFile (const juce::File& file, int trackId, double s
 
         const auto path = file.getFullPathName().toStdString();
         audioAssets[path] = data;
-        const double projectBpm = engine.graph().getBpm();
-        const double sourceBpm = data->estimatedBpm >= 20.0
-            ? data->estimatedBpm : projectBpm;
-        if (data->estimatedBpm >= 20.0
-            && std::abs (projectBpm - sourceBpm) > 1.0e-6)
+        const bool hasAudioClips = std::any_of (
+            project.tracks.begin(), project.tracks.end(),
+            [] (const auto& candidate)
+            {
+                return candidate != nullptr && candidate->type == roll::TrackType::Audio
+                    && (! candidate->audioClips.empty() || candidate->frozenAudioClip != nullptr);
+            });
+        const bool hasUsableBpmEstimate = std::isfinite (data->estimatedBpm)
+            && data->estimatedBpm >= 20.0 && data->estimatedBpm <= 300.0;
+        const double sourceBpm = hasUsableBpmEstimate
+            ? data->estimatedBpm : engine.graph().getBpm();
+        if (! hasAudioClips && hasUsableBpmEstimate)
             transport.setBpm (sourceBpm);
+        const double projectBpm = engine.graph().getBpm();
         const double lengthBeats = data->durationSeconds * sourceBpm / 60.0;
         const double edgeFadeBeats = createFadesOnClipEdges
             ? projectBpm * 0.004 / 60.0 : 0.0;
@@ -4240,6 +4251,30 @@ double MainComponent::projectEndBeat() const
     return endBeat;
 }
 
+bool MainComponent::handleFollowKeyPress (const juce::KeyPress& key)
+{
+    const auto modifiers = key.getModifiers();
+    const bool ctrl = modifiers.isCtrlDown() || modifiers.isCommandDown();
+    const auto keyCode = juce::CharacterFunctions::toUpperCase (
+        static_cast<juce::juce_wchar> (key.getKeyCode()));
+    if (! ctrl || ! modifiers.isShiftDown() || modifiers.isAltDown()
+        || keyCode != 'F' || isTextEditorFocused())
+        return false;
+
+    setFollowArrangementEnabled (! followArrangement);
+    return true;
+}
+
+void MainComponent::setFollowArrangementEnabled (bool enabled)
+{
+    followArrangement = enabled;
+    transport.setFollowEnabled (enabled);
+    if (enabled)
+        arrangement.scrollToBeat (transportPosition);
+    setProjectStatus (enabled ? "Arrangement Follow enabled (Ctrl+Shift+F)."
+                              : "Arrangement Follow disabled.");
+}
+
 bool MainComponent::handleTransportKeyPress (const juce::KeyPress& key)
 {
     if (audioRenderInProgress)
@@ -4311,6 +4346,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
 
     if (isTextEditorFocused())
         return false;
+    if (handleFollowKeyPress (key))
+        return true;
 
     const auto modifiers = key.getModifiers();
     const bool ctrl = modifiers.isCtrlDown() || modifiers.isCommandDown();
@@ -4346,6 +4383,8 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     }
 
     if (audioRenderInProgress)
+        return true;
+    if (handleFollowKeyPress (k))
         return true;
 
 #if JUCE_DEBUG
@@ -5634,8 +5673,11 @@ void MainComponent::onSelectionChanged()
             canUseGroove && p->clip.groove()
                 ? juce::String (p->clip.groove()->name) : juce::String());
     }
-    showDetail (showingDevices);
-    refreshDeviceView();
+    if (! showingMixer)
+    {
+        showDetail (showingDevices);
+        refreshDeviceView();
+    }
 }
 
 void MainComponent::openAudioClipEditor (int trackId, int clipId)

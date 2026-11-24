@@ -16,6 +16,7 @@ AudioClipEditor::AudioClipEditor()
     addAndMakeVisible (pitchSlider);
     addAndMakeVisible (centsSlider);
     addAndMakeVisible (gainSlider);
+    addAndMakeVisible (autoWarpButton);
     addAndMakeVisible (doubleBpmButton);
     addAndMakeVisible (halveBpmButton);
     addAndMakeVisible (splitButton);
@@ -51,6 +52,7 @@ AudioClipEditor::AudioClipEditor()
     closeButton.setMouseClickGrabsKeyboardFocus (false);
     splitButton.setMouseClickGrabsKeyboardFocus (false);
     joinButton.setMouseClickGrabsKeyboardFocus (false);
+    autoWarpButton.setMouseClickGrabsKeyboardFocus (false);
     reverseButton.setMouseClickGrabsKeyboardFocus (false);
     doubleBpmButton.setMouseClickGrabsKeyboardFocus (false);
     halveBpmButton.setMouseClickGrabsKeyboardFocus (false);
@@ -69,6 +71,40 @@ AudioClipEditor::AudioClipEditor()
             return;
         const double bpm = std::clamp (clip->sourceBpm * 0.5, 20.0, 300.0);
         sourceBpm.setValue (bpm, juce::sendNotification);
+    };
+    autoWarpButton.setTooltip (
+        "Use the detected source BPM to sync this clip to the project tempo; playback changes pitch.");
+    autoWarpButton.onClick = [this]
+    {
+        if (clip == nullptr || source == nullptr
+            || ! std::isfinite (source->estimatedBpm)
+            || source->estimatedBpm < 20.0 || source->estimatedBpm > 300.0)
+        {
+            tempoInfo.setText ("Auto-Warp unavailable: no reliable BPM estimate.",
+                               juce::dontSendNotification);
+            return;
+        }
+
+        const double estimatedBpm = source->estimatedBpm;
+        if (! onSourceBpmChanged || ! onWarpChanged)
+        {
+            tempoInfo.setText ("Auto-Warp unavailable: the clip editor is not connected.",
+                               juce::dontSendNotification);
+            return;
+        }
+        if (std::abs (clip->sourceBpm - estimatedBpm) > 1.0e-6
+            && ! onSourceBpmChanged (estimatedBpm))
+        {
+            tempoInfo.setText ("Auto-Warp failed: the clip would overlap another clip.",
+                               juce::dontSendNotification);
+            return;
+        }
+
+        sourceBpm.setValue (estimatedBpm, juce::dontSendNotification);
+        warpButton.setToggleState (true, juce::dontSendNotification);
+        onWarpChanged (true);
+        tempoInfo.setText ("Auto-Warp applied at " + juce::String (estimatedBpm, 1) + " BPM.",
+                           juce::dontSendNotification);
     };
     warpButton.setTooltip ("Sync this clip to the project BPM; changing speed also changes pitch.");
     warpButton.onClick = [this]
@@ -304,6 +340,9 @@ void AudioClipEditor::setClip (const roll::AudioPlacement* selected,
     sourceBpm.setEnabled (clip != nullptr && clip->durationSeconds > 0.0);
     warpButton.setToggleState (clip != nullptr && clip->warpEnabled, juce::dontSendNotification);
     warpButton.setEnabled (clip != nullptr);
+    autoWarpButton.setEnabled (clip != nullptr && source != nullptr
+        && std::isfinite (source->estimatedBpm)
+        && source->estimatedBpm >= 20.0 && source->estimatedBpm <= 300.0);
     reverseButton.setToggleState (clip != nullptr && clip->reverse, juce::dontSendNotification);
     reverseButton.setEnabled (clip != nullptr);
     warpModeBox.setSelectedId (clip != nullptr
@@ -761,6 +800,8 @@ void AudioClipEditor::resized()
     splitButton.setBounds (controls.removeFromLeft (84));
     controls.removeFromLeft (8);
     joinButton.setBounds (controls.removeFromLeft (84));
+    controls.removeFromLeft (8);
+    autoWarpButton.setBounds (controls.removeFromLeft (96));
     controls.removeFromLeft (12);
     constexpr int fadeKnobWidth = 56;
     const int fadeControlsX = controls.getX();

@@ -91,6 +91,8 @@ private:
     void resumeFromPausedPosition();
     void seekTransport (double beats);
     double projectEndBeat() const;
+    bool handleFollowKeyPress (const juce::KeyPress&);
+    void setFollowArrangementEnabled (bool);
     bool handleTransportKeyPress (const juce::KeyPress&);
     void loopSelectedTrack();
     void closeWindowsOfTrack (int trackId);
@@ -242,6 +244,7 @@ private:
 
     bool showingDevices = false;
     bool showingMixer = false;
+    bool followArrangement = false;
     bool createFadesOnClipEdges = false;
     bool audioClipEditorOpen = false;
     bool pianoRollVisible = true;

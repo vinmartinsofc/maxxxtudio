@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/MAXXXTUDIO_SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.50 (histórico do Drum Rack, transporte em foco e autoplay de grooves)
+- **Versão do documento:** 1.66 (teclado ampliado e assinatura MX)
 - **⚠️ Ordem de trabalho vigente:** fila de pendências do usuário no §4.3. O documento `PLANO_DE_ACAO_FASE_4.md`, citado em versões antigas, não está presente no repositório. O §4.3 prevalece sobre o roadmap legado do §14.
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -30,7 +30,7 @@
 - **Não invente APIs do JUCE.** A versão fixada é **JUCE 8.0.15**. Confira a assinatura no código-fonte em `build/_deps/juce-src/modules/` antes de usar.
 - **O thread de áudio é sagrado** (§10): nada de alocação, locks bloqueantes, I/O nem `std::function` pesado dentro de `processBlock`.
 - **Lógica musical pura vai no `core/`** (sem JUCE, testável). A UI e o áudio ficam em `app/`.
-- **Sem acentos** em nomes de arquivos, pastas e **nomes de testes Catch2** (quebra o `ctest` no Windows). Acentos só dentro de strings de UI, sempre via `theme::ui("...")` ou `juce::String::fromUTF8` (§12).
+- **Sem acentos** em nomes de arquivos, pastas e **nomes de testes Catch2** (quebra o `ctest` no Windows).
 
 ### 0.3 Manutenção deste arquivo
 
@@ -40,7 +40,7 @@ Ao concluir uma tarefa: troque `- [ ]` por `- [x]` em §14, atualize a matriz de
 
 ```text
 Você vai continuar o desenvolvimento do "MaXXXtudio", um DAW open source em C++20 + JUCE 8 + CMake,
-inspirado no fluxo do Ableton Live 10/11 (somente Arrangement View). O documento docs/MAXXXTUDIO_SPEC.md é a fonte
+com fluxos familiares a usuários de DAWs, identidade e interface próprias (somente Arrangement View). O documento docs/MAXXXTUDIO_SPEC.md é a fonte
 da verdade: leia-o inteiro antes de qualquer coisa. Siga o fluxo SDD da seção 0.1.
 Trabalhe UMA tarefa por vez, começando pela primeira pendência aberta em §4.3, a menos que o dono indique outra.
 Responda em português (Brasil), em linguagem simples: o dono está aprendendo C++ (vem de Java/OOP).
@@ -54,7 +54,7 @@ Antes de codar, me mostre um plano curto (arquivos que vai tocar + testes que va
 
 ### 1.1 O que é
 
-**MaXXXtudio** é um DAW (Digital Audio Workstation) minimalista, gratuito e open source, focado em **produção MIDI com instrumentos/efeitos VST3 de terceiros**. É um **"Live-like"**: reproduz o *fluxo de trabalho*, os *atalhos* e o *comportamento* do Ableton Live 10/11, mas com **identidade visual e código próprios**.
+**MaXXXtudio** é um DAW (Digital Audio Workstation) minimalista, gratuito e open source, focado em **produção MIDI com instrumentos/efeitos VST3 de terceiros**. Tem **interface, identidade visual e implementação próprias** e adota convenções familiares de DAWs de produção. O Ableton Live 10/11 pode servir como referência pontual para verificar comportamentos funcionais, sem objetivo de reproduzir sua apresentação visual ou seus materiais.
 
 ### 1.2 Por que existe
 
@@ -63,7 +63,7 @@ O dono do projeto produz música há 13+ anos no Ableton Live e estuda programa�
 ### 1.3 Escopo — o que o dono realmente usa (e portanto é prioridade)
 
 - **Somente Arrangement View** (nunca usa Session View).
-- **Piano roll** com: inserção/edição de notas, **atalhos idênticos ao Live**, navegação fácil.
+- **Piano roll** com: inserção/edição de notas, atalhos consistentes e navegação fácil; convenções conhecidas podem ser adotadas quando fizerem sentido, sem exigir equivalência exata com outro produto.
 - **Técnica de escala:** escolher a escala/campo harmônico, **Fold** para mostrar só as linhas da escala, destaque das notas da escala. (Foi elogiada como "espetacular": **preservar**.)
 - **Hospedar plugins VST3 de terceiros** (instrumentos e efeitos). **Não usa** sons, bibliotecas, instrumentos ou efeitos nativos do Live.
 - Várias trilhas, vários plugins por trilha, mixer básico.
@@ -80,7 +80,7 @@ Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch d
 | Framework | JUCE **8.0.15** (fixado em `CMakeLists.txt`) + Catch2 **v3.16.1** |
 | Plataforma-alvo | **Windows 10/11 (MSVC, Visual Studio 2026)** primeiro; Linux compila e roda (usado para verificação automatizada) |
 | Custo | O projeto deve ser compilável **só com ferramentas gratuitas** |
-| Legal | Ver §16. Reproduzir *comportamento*, nunca *assets/código/texto/nome* do Live |
+| Legal | Ver §16. Implementação, interface e identidade próprias; observar direitos autorais, marcas e licenças de terceiros |
 | UI | Tema próprio, escuro, **cinza grafite (não preto puro)**. Hoje `app/Theme.h` usa uma paleta provisória (acento verde-água); a paleta oficial está em §19 e deve substituí-la (tarefa V2) |
 
 ---
@@ -91,10 +91,10 @@ Session View, instrumentos/efeitos nativos, Max for Live, warping/time-stretch d
 - Vem de **Java / POO**; **não conhece C++** — explique conceitos novos quando aparecerem e evite jargão sem definição.
 - Trabalha no **Windows** (PowerShell). Já tem Visual Studio 2026 Community com a carga "Desenvolvimento para desktop com C++".
 - Prefere receber **o projeto completo como `.zip`** para sobrescrever a pasta, com instruções exatas de build.
-- Dá feedback em listas curtas após testar; valorize **fidelidade ao Live** e **usabilidade**.
-- Cuida **pessoalmente da identidade visual**: a marca MaXXXtudio usa a assinatura `MX`, o domínio `DAW` no ícone e preto/laranja elétrico; tratar a especificação vigente como **requisito**.
-- Tem acesso ao **Ableton Live** instalado, então pode **conferir comportamentos duvidosos** lá — quando houver ambiguidade, peça para ele testar e relatar.
-- Possui o **manual de referência do Live em PDF** (na verdade é o **Live 12**, mesmo com nome de arquivo "live11"). Use-o para validar atalhos/comportamentos, mas lembre: o alvo é **Live 10/11**; algumas coisas do 12 podem não existir no 11.
+- Dá feedback em listas curtas após testar; valorize **usabilidade** e consistência dos comportamentos funcionais.
+- Cuida **pessoalmente da identidade visual**: o ícone usa o monograma `MX` e um teclado MIDI frontal, centralizado, com fundo escuro e acento ciano; a imagem fornecida é referência de estilo, não deve ser recortada como fotografia.
+- Tem acesso ao **Ableton Live** instalado, então pode conferir comportamentos funcionais duvidosos por conta própria — quando houver ambiguidade, peça para ele testar e relatar; não reproduza a interface nem materiais do produto.
+- Possui uma cópia pessoal do **manual do Live 12** (mesmo com nome de arquivo "live11"). Pode consultá-la como referência funcional, sem copiar conteúdo para o projeto; diferenças em relação ao Live 10/11 devem ser confirmadas com o dono.
 - Tem uso limitado de modelos de IA (limites de uso), por isso este documento existe: **cada sessão deve render o máximo possível** — seja objetivo, entregue incrementos compiláveis.
 
 ---
@@ -182,7 +182,8 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Plugins | Pastas de busca customizadas VST3, persistidas e editáveis pelo navegador | 🟡 |
 | Áudio | Grafo (`AudioProcessorGraph`): TrackSource → dispositivos → TrackMixer → saída | 🟡 |
 | Sampler | Drum Rack com 15 pads mapeados às teclas A/W/S/E/D/F/T/G/Y/H/U/J/K/O/L; arrastar samples do navegador/favoritos e arrastar o card nativo para um canal MIDI; feedback visual dos pads, Delete limpa somente o selecionado, undo/redo e confirmação para limpar o rack; Espaço controla play/pause/resume do Arrangement mesmo com a janela do rack ativa | 🟡 (build/testes; faltam slicing, envelopes ADSR, cadeias de dispositivos por pad e QA manual) |
-| Áudio | Editor de clip com BPM de origem e Warp ligado/desligado; o playback atual equivale a Re-Pitch e não preserva formantes | 🟡 (controles e integração presentes; pitch independente e modos Beats/Tones/Texture/Complex/Complex Pro pendentes) |
+| Áudio | O primeiro sample com BPM estimado define o BPM do projeto; samples posteriores mantêm o BPM master e são sincronizados pelo Warp. O editor também oferece Auto-Warp manual com o BPM estimado | 🟡 (Auto-Warp e controles integrados; playback atual equivale a Re-Pitch e altera o pitch) |
+| Arranjo | Follow alternável por `Ctrl+Shift+F`; durante o playback, o Arrangement acompanha o playhead quando ele alcança a borda visível | Implementado; inicia desligado |
 | Áudio | Mixer por trilha: volume, pan, mute, medidor; Solo exclusivo, por seleção múltipla e Ctrl+clique aditivo | 🟡 (build/testes; falta validação manual na UI) |
 | Áudio | Grupos planos como barramentos reais: faixas-filhas → mixer/efeitos do grupo → Master ou Ext. Out; Solo respeita grupo e filhos | 🟡 (build/testes; falta validação manual com plugins) |
 | Automação | Modo `A`, escolha de volume/pan/mute ou parâmetro VST3 por slot, edição de breakpoints no Arrangement, atualização dos controles de mixer durante playback e persistência `.std` | Implementado; falta QA manual com plugins reais |
@@ -473,16 +474,15 @@ Project
 
 ---
 
-## 9. Referência de fidelidade ao Live
+## 9. Referência funcional para validação
 
-- **Fonte oficial para validar comportamento:** o manual de referência do Live (PDF do dono; capítulo **"Editing MIDI Notes and Velocities"** e o apêndice **"Computer Keyboard Shortcuts"**).
-  - ⚠️ É o manual do **Live 12**. O alvo é **10/11**. Se algo parecer exclusivo do 12, **confirme com o dono** (ele tem o Live).
-  - ⚠️ **Não copie texto do manual** para o repositório (direitos autorais). Descreva comportamentos com suas próprias palavras.
+- Para investigar comportamentos funcionais, o dono pode consultar sua cópia do manual do Live (Live 12) ou testar no Live 10/11. O produto não busca equivalência exata; confirme com o dono quando uma diferença de versão afetar um requisito.
+  - ⚠️ Não copie texto, imagens ou outros materiais do manual para o repositório. Registre requisitos e resultados com palavras e exemplos próprios.
 - **Ambiguidades do manual que só o Live real resolve** (peça ao dono para testar e relatar):
   1. `Alt + ← →`: o texto diz "nudge sem snap"; a tabela de atalhos diz "selecionar nota anterior/seguinte na mesma linha".
   2. Atalhos com `Ctrl + setas` para navegar entre notas: texto e tabela divergem.
   3. Modo desenho: o manual descreve "pincel melódico" (várias notas acompanhando o mouse); o projeto hoje só **estica** a nota.
-- **Itens do manual ainda não implementados:** ver §14 (M7/M8): grade adaptativa (Ctrl+5), diálogo de quantização, edição de velocity (Alt+arrastar, digitar valor), seleção por intervalo de tempo e comandos "…Time", seleção entre notas por teclado, botões da seção **Notes** do clip (÷2, ×2, Reverse, Invert, Legato, Duplicate Loop), **Follow** (Ctrl+Shift+F), *loop selection* (Ctrl+L), dividir/consolidar (Ctrl+E/Ctrl+J), renomear (Ctrl+R).
+- **Itens do manual ainda não implementados:** ver §14 (M7/M8): grade adaptativa (Ctrl+5), diálogo de quantização, edição de velocity (Alt+arrastar, digitar valor), seleção por intervalo de tempo e comandos "…Time", seleção entre notas por teclado, botões da seção **Notes** do clip (÷2, ×2, Reverse, Invert, Legato, Duplicate Loop), *loop selection* (Ctrl+L), dividir/consolidar (Ctrl+E/Ctrl+J), renomear (Ctrl+R).
 
 ---
 
@@ -655,7 +655,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 - [ ] **T7.5 — Velocity:** Alt+arrastar a nota para mudar velocity; digitar valor + Enter; rampas arrastando linha; Ctrl+↑/↓ ±10 (confirmar no Live).
 - [ ] **T7.6 — Modo desenho melódico** (pincel que cria notas ao arrastar). **Confirmar comportamento no Live 10/11 com o dono antes de implementar.**
 - [ ] **T7.7 — Seleção por teclado entre notas** e por intervalo de tempo. **Resolver a ambiguidade de `Alt+←→` (§9) com o dono antes.**
-- [ ] **T7.8 — Auto-scroll "Follow"** (Ctrl+Shift+F) seguindo o playhead.
+- [x] **T7.8 — Auto-scroll "Follow"** (`Ctrl+Shift+F` alterna o acompanhamento do playhead no Arrangement; inicia desligado).
 - **Aceite geral:** cada item com testes de `core/` quando aplicável e comparação manual com o Live feita pelo dono.
 
 ### Marco 8 — Paridade do arranjo
@@ -693,7 +693,7 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 - [ ] **T11.2 — Instalador** (Inno Setup, instalador `.exe`): ícone, atalhos, desinstalador; versão vinda do CMake. Publicar na aba **Releases**.
 - [ ] **T11.3 — Licenciamento:** **verificar os termos atuais do JUCE** (há licença livre com condições e opção comercial; projetos open source normalmente usam GPL/AGPL) e escolher a licença do repositório de forma compatível; adicionar `LICENSE`, `THIRD_PARTY_NOTICES.md` (JUCE, Catch2, nlohmann/json, SDK do VST3 usado pelo JUCE).
 - [ ] **T11.4 — Documentação de portfólio:** README com GIF/captura, arquitetura resumida, decisões técnicas (por que `core` separado, regras de tempo real), `CHANGELOG.md`, `CONTRIBUTING.md`.
-- [ ] **T11.5 — Ícone e *branding* próprio** (sem semelhança com o Live).
+- [x] **T11.5 — Ícone e *branding* próprio**: ícone frontal de controlador escuro, teclado ampliado e assinatura `MX` no canto superior esquerdo; cinco teclas completas e sem fundo branco externo.
 - [ ] **T11.6 — Assinatura de código** (opcional, quando houver certificado; **nunca** commitar certificados/chaves — já cobertos pelo `.gitignore`).
 
 ### Backlog legado (sem prioridade definida)
@@ -745,8 +745,9 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 ## 16. Legal e licenças
 
-- **Funcionalidade, fluxo de trabalho e atalhos** de um programa **não** são protegidos por direitos autorais; **código, texto do manual, ícones, imagens, skins e nome/marca** são. O projeto reimplementa comportamento **do zero**.
-- **Nunca** incluir no repositório: trechos do manual do Live, capturas de tela do Live, ícones/fontes/temas do Live, ou o nome "Live"/"Ableton" em produto/UI (mencionar como inspiração em texto de README é aceitável, sem logotipos).
+- Ideias, métodos de operação e funcionalidades, em geral, não são protegidos por direito autoral **como tais**; isso não significa que qualquer forma de reprodução seja automaticamente permitida. Código, textos, imagens, ícones e outros materiais originais podem ser protegidos, e marcas, apresentação visual distintiva, concorrência desleal e outros direitos podem depender dos fatos e da jurisdição. Esta especificação não substitui aconselhamento jurídico.
+- Implementar requisitos funcionais de forma independente. Criar e manter próprios o código, a interface, a identidade, os textos, os ícones e os materiais promocionais; não copiar nem adaptar elementos distintivos do Live. O objetivo é compatibilidade de conceitos funcionais úteis, não imitação visual ou equivalência integral.
+- Não incluir no repositório trechos do manual, capturas de tela, ícones, fontes, temas ou outros materiais do Live. Não usar "Live"/"Ableton" como nome, marca ou elemento de identidade do produto. Menções factuais e limitadas em documentação podem ser necessárias para contextualizar uma referência ou compatibilidade; não usar logotipos nem sugerir afiliação, endosso ou parceria.
 - **Dependências:** JUCE (verificar licença vigente — §14 T11.3), Catch2 (BSL-1.0), nlohmann/json (MIT, quando adicionado). O suporte a VST3 do JUCE traz o SDK da Steinberg — conferir os termos ao distribuir.
 - **ASIO:** o SDK é da Steinberg e tem licença própria; **não** incluir sem verificar. Usar WASAPI/DirectSound ou drivers genéricos (ex.: FlexASIO) como alternativa.
 - Certificados, chaves e `.env` **nunca** vão para o Git (`.gitignore` já cobre).
@@ -757,6 +758,12 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.66** | Teclado ampliado e assinatura `MX` reposicionada no canto superior esquerdo do ícone |
+| **Doc 1.65** | Ícone redesenhado de frente e centralizado; substitui o recorte fotográfico e mantém as duas teclas pretas completas |
+| **Doc 1.64** | Ícone do aplicativo alinhado à referência fornecida, com fundo branco removido e cores ciano preservadas em todos os temas |
+| **Doc 1.63** | Ícone refinado: assinatura `MX` + `Studio`, símbolo de teclas branca/preta/branca com sustenido e formas nítidas |
+| **Doc 1.62** | Follow alternável no Arrangement; primeiro sample pode definir o BPM e os seguintes sincronizam ao master; Auto-Warp manual; corrige a aba Mixer e atualiza README e ícone Neonwave |
+| **Doc 1.61** | Esclarece a referência funcional ao Live e reforça a implementação, interface e identidade próprias, com cautelas sobre direitos e marcas |
 | **Doc 1.60** | Marca atualizada para MaXXXtudio; identidade do ícone `MX` + `DAW` em preto/laranja; nome exibido e executáveis atualizados, preservando IDs e dados legados |
 | **Doc 1.59** | Seleção múltipla de favoritos para aplicar cores/remover em lote; restauração da expansão e seleção da árvore após alterações |
 | **Doc 1.58** | Favoritos de plugins usam a mesma paleta e árvore de categorias coloridas do navegador de arquivos |
@@ -868,7 +875,7 @@ maxxxtudio/                   (raiz do repositório)
 
 ## 19. Identidade visual (especificação do dono)
 
-> Fonte: README da biblioteca de ícones e logo fornecidos pelo dono. **Tratar como requisito.**
+> Fonte: imagem de referência do ícone fornecida pelo dono. **Tratar como requisito.**
 
 ### 19.1 Paleta de referência
 
@@ -910,10 +917,10 @@ Observações de acessibilidade: o **vermelho** passa no mínimo de 3:1 para **�
 
 1. 24 px é o tamanho-base; 16–18 px em botões compactos; 28–32 px em destaque.
 2. Área clicável maior que o desenho (botão de 36–40 px).
-3. No ícone do aplicativo, `MX` fica pequeno no canto superior esquerdo e `DAW` maior no canto inferior direito; a hierarquia diagonal identifica a família visual.
-4. Preto absoluto e laranja elétrico são a direção da marca do ícone; os temas da interface podem variar por produto.
+3. O controlador deve ser visto de frente, sem perspectiva lateral, e ficar centralizado no canvas quadrado. O teclado deve ocupar a maior parte do ícone; `MX` é uma assinatura pequena no canto superior esquerdo. Manter três teclas brancas e as duas pretas completas e visíveis, com contorno ciano luminoso na primeira tecla preta.
+4. Usar a imagem fornecida como referência de estilo, não como recorte fotográfico. Manter a silhueta escura e fundo transparente; não acrescentar a palavra `Studio`.
 5. Se o renderizador não herdar cor: gerar variantes com `stroke`/`fill` explícitos (é o caso do JUCE — ver §12.13).
 
 ### 19.5 Logo
 
-**MaXXXtudio** combina “Max” e “Studio” e é pronunciado “maks-túdio”. A assinatura visual curta é `MX`; para este DAW, o ícone associa `MX` a `DAW`. A grafia da marca não deve ser confundida com seus identificadores internos legados (`MaXXXtudio`).
+**MaXXXtudio** combina “Max” e “Studio” e é pronunciado “maks-túdio”. A assinatura visual curta é `MX`; o ícone do DAW combina essa assinatura com o teclado MIDI frontal. A grafia da marca não deve ser confundida com seus identificadores internos legados (`MaXXXtudio`).

@@ -1,5 +1,4 @@
 #include "Icons.h"
-#include "Theme.h"
 #include <BinaryData.h>
 #include <algorithm>
 #include <array>
@@ -13,7 +12,7 @@ namespace icons
 {
 namespace
 {
-constexpr std::array<const char*, 39> resourceNames
+constexpr std::array<const char*, 40> resourceNames
 {
     "play_svg", "pause_svg", "stop_svg", "record_svg", "rewind_svg", "fastforward_svg",
     "loop_svg", "metronome_svg", "pointer_svg", "pencil_svg", "eraser_svg", "cut_svg",
@@ -21,7 +20,7 @@ constexpr std::array<const char*, 39> resourceNames
     "mute_svg", "pan_svg", "levelmeter_svg", "automation_svg", "keyboard_svg", "waveform_svg",
     "fadein_svg", "fadeout_svg", "resize_svg", "computerkeyboard_svg", "pianoroll_svg",
     "openwindow_svg", "power_svg", "close_svg", "folder_svg", "settings_svg",
-    "audiofile_svg", "favorites_svg", "plugins_svg", "vst_svg", "cpu_svg"
+    "audiofile_svg", "favorites_svg", "plugins_svg", "vst_svg", "cpu_svg", "follow_svg"
 };
 
 using CacheKey = std::tuple<Icon, std::uint32_t, int>;
@@ -78,20 +77,6 @@ juce::Image appIcon()
         return {};
 
     auto image = juce::ImageFileFormat::loadFrom (data, static_cast<std::size_t> (dataSize));
-    if (! image.isValid())
-        return image;
-
-    const auto accent = theme::accent();
-    juce::Image::BitmapData pixels (image, juce::Image::BitmapData::readWrite);
-    for (int y = 0; y < pixels.height; ++y)
-        for (int x = 0; x < pixels.width; ++x)
-        {
-            const auto pixel = pixels.getPixelColour (x, y);
-            if (pixel.getRed() > pixel.getGreen() * 1.35f
-                && pixel.getGreen() > pixel.getBlue() * 1.3f
-                && pixel.getRed() > 80)
-                pixels.setPixelColour (x, y, accent.withAlpha (pixel.getFloatAlpha()));
-        }
     return image;
 }
 }
