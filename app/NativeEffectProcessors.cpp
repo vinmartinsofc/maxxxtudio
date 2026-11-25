@@ -1256,6 +1256,8 @@ public:
         const int sidechainWidth = 80;
         const int gap = 8;
         const int count = static_cast<int> (controls.size());
+        if (count <= 0)
+            return;
         const int controlWidth = (controlsRow.getWidth() - sidechainWidth * 2
                                   - gap * (count + 1)) / count;
         for (int index = 0; index < count; ++index)

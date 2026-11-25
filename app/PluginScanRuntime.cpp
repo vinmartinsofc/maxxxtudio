@@ -1,9 +1,12 @@
 #include "PluginScanRuntime.h"
 
-#if defined(_WIN32)
-
 #include <algorithm>
 #include <cmath>
+#if defined(__unix__)
+#include <cerrno>
+#include <signal.h>
+#include <sys/types.h>
+#endif
 
 namespace
 {
@@ -13,13 +16,19 @@ void writeProgress (const juce::File& file, double progress, const juce::String&
 }
 }
 
-PluginScanRuntime::PluginScanRuntime (const juce::String& id, DWORD parentProcessId)
-    : juce::Thread ("Isolated plugin scanner"), sessionId (id)
+PluginScanRuntime::PluginScanRuntime (const juce::String& id, std::int64_t parentId)
+    : juce::Thread ("Isolated plugin scanner"), sessionId (id), parentProcessId (parentId)
 {
-    parentProcess = OpenProcess (SYNCHRONIZE, FALSE, parentProcessId);
+#if defined(_WIN32)
+    parentProcess = OpenProcess (SYNCHRONIZE, FALSE, static_cast<DWORD> (parentId));
     const auto configXml = juce::XmlDocument::parse (fileFor ("input.xml"));
     if (parentProcess == nullptr || configXml == nullptr || ! configXml->hasTagName ("PLUGIN_SCAN"))
         return;
+#else
+    const auto configXml = juce::XmlDocument::parse (fileFor ("input.xml"));
+    if (! isParentRunning() || configXml == nullptr || ! configXml->hasTagName ("PLUGIN_SCAN"))
+        return;
+#endif
 
     const auto* pluginListXml = configXml->getChildByName ("KNOWNPLUGINS");
     if (pluginListXml == nullptr)
@@ -41,14 +50,29 @@ PluginScanRuntime::~PluginScanRuntime()
 {
     signalThreadShouldExit();
     stopThread (2000);
+#if defined(_WIN32)
     if (parentProcess != nullptr)
         CloseHandle (parentProcess);
+#endif
 }
 
 juce::File PluginScanRuntime::fileFor (const juce::String& suffix) const
 {
     return juce::File::getSpecialLocation (juce::File::tempDirectory)
         .getChildFile ("maxxx-tudio-scan-" + sessionId + "-" + suffix);
+}
+
+bool PluginScanRuntime::isParentRunning() const noexcept
+{
+#if defined(_WIN32)
+    return parentProcess != nullptr && WaitForSingleObject (parentProcess, 0) == WAIT_TIMEOUT;
+#elif defined(__unix__)
+    if (parentProcessId <= 0)
+        return false;
+    return ::kill (static_cast<pid_t> (parentProcessId), 0) == 0 || errno == EPERM;
+#else
+    return true;
+#endif
 }
 
 void PluginScanRuntime::run()
@@ -60,7 +84,7 @@ void PluginScanRuntime::run()
 
     for (int formatIndex = 0; formatIndex < formatCount && ! threadShouldExit(); ++formatIndex)
     {
-        if (WaitForSingleObject (parentProcess, 0) != WAIT_TIMEOUT)
+        if (! isParentRunning())
         {
             juce::MessageManager::callAsync ([] { juce::JUCEApplication::getInstance()->quit(); });
             return;
@@ -71,7 +95,7 @@ void PluginScanRuntime::run()
         juce::String currentName;
         bool hasMoreFiles = true;
         while (hasMoreFiles && ! threadShouldExit()
-               && WaitForSingleObject (parentProcess, 0) == WAIT_TIMEOUT)
+               && isParentRunning())
         {
             currentName.clear();
             hasMoreFiles = scanner.scanNextFile (true, currentName);
@@ -84,7 +108,7 @@ void PluginScanRuntime::run()
         }
     }
 
-    cancelled = threadShouldExit() || WaitForSingleObject (parentProcess, 0) != WAIT_TIMEOUT;
+    cancelled = threadShouldExit() || ! isParentRunning();
     if (cancelled)
     {
         juce::MessageManager::callAsync ([] { juce::JUCEApplication::getInstance()->quit(); });
@@ -130,5 +154,3 @@ void PluginScanRuntime::run()
 
     juce::MessageManager::callAsync ([] { juce::JUCEApplication::getInstance()->quit(); });
 }
-
-#endif

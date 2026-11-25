@@ -1,9 +1,12 @@
 #pragma once
 
-#include "PluginWorkerProtocol.h"
+#if defined(_WIN32)
+ #include "PluginWorkerProtocol.h"
+#endif
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -55,13 +58,17 @@ public:
     void setStateInformation (const void*, int) override;
 
 private:
+#if defined(_WIN32)
     class RemoteEditor;
+#endif
     friend class RemoteParameter;
 
     RemotePluginProcessor (const juce::PluginDescription&, double, int);
+    void failWorker (const juce::String& reason);
+#if defined(_WIN32)
     bool startWorker (const juce::PluginDescription&, juce::String& error);
     bool sendCommand (pluginworker::Command, int timeoutMs, int editorX = -1, int editorY = -1);
-    void failWorker (const juce::String& reason);
+#endif
     void updateParameter (int index, float value) noexcept;
     float readParameter (int index) const noexcept;
 
@@ -73,11 +80,12 @@ private:
     bool resourcesPrepared = true;
     std::atomic<bool> failed { false };
     std::atomic<int> lastParameterGestureStarted { -1 }, lastParameterGestureEnded { -1 };
+    std::function<void (const juce::String&, const juce::String&)> onFailure;
+#if defined(_WIN32)
     juce::CriticalSection requestLock;
     juce::CriticalSection stateLock;
     juce::MemoryBlock cachedState;
     juce::AudioBuffer<float> inputBlockBuffer;
-    std::function<void (const juce::String&, const juce::String&)> onFailure;
     bool processRequestPending = false;
     int pendingAudioSamples = 0;
     std::uint32_t processRequestStartTime = 0;
@@ -85,4 +93,8 @@ private:
     HANDLE workerProcess = nullptr, workerJob = nullptr;
     DWORD workerProcessId = 0;
     pluginworker::SharedData* shared = nullptr;
+#else
+    std::unique_ptr<juce::AudioPluginInstance> nativePlugin;
+    std::vector<std::unique_ptr<juce::AudioProcessorParameter::Listener>> nativeParameterListeners;
+#endif
 };

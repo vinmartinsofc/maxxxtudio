@@ -99,6 +99,8 @@ private:
     void closeWindowsOfRack (int trackId, int rackDeviceId);
     void closeWindowsOfPad (int trackId, int rackDeviceId, int pad);
     void showProjectMenu();
+    void confirmCreateNewProject();
+    void createNewProject();
     void showOptionsWindow();
     void showMixer();
     void chooseProjectFile (bool open, std::function<void (bool)> onSaveComplete = {});

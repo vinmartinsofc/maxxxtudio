@@ -3344,6 +3344,7 @@ bool AudioEngine::restorePluginState (int trackId, int deviceId, const juce::Mem
 AudioEngine::IsolatedEditorResult AudioEngine::showIsolatedDeviceEditor (
     int trackId, int deviceId, int editorX, int editorY)
 {
+#if defined(_WIN32)
     auto* track = find (trackId);
     if (track == nullptr)
         return IsolatedEditorResult::notIsolated;
@@ -3357,6 +3358,9 @@ AudioEngine::IsolatedEditorResult AudioEngine::showIsolatedDeviceEditor (
                 return remote->showEditor (editorX, editorY) ? IsolatedEditorResult::opened
                                                               : IsolatedEditorResult::failed;
             }
+#else
+    juce::ignoreUnused (trackId, deviceId, editorX, editorY);
+#endif
 
     return IsolatedEditorResult::notIsolated;
 }
@@ -3364,6 +3368,7 @@ AudioEngine::IsolatedEditorResult AudioEngine::showIsolatedDeviceEditor (
 AudioEngine::IsolatedEditorResult AudioEngine::showIsolatedPadEffectEditor (
     int trackId, int rackDeviceId, int pad, int effectIndex, int editorX, int editorY)
 {
+#if defined(_WIN32)
     auto* track = find (trackId);
     if (track == nullptr)
         return IsolatedEditorResult::notIsolated;
@@ -3379,6 +3384,9 @@ AudioEngine::IsolatedEditorResult AudioEngine::showIsolatedPadEffectEditor (
                         return remote->showEditor (editorX, editorY) ? IsolatedEditorResult::opened
                                                                       : IsolatedEditorResult::failed;
                     }
+#else
+    juce::ignoreUnused (trackId, rackDeviceId, pad, effectIndex, editorX, editorY);
+#endif
 
     return IsolatedEditorResult::notIsolated;
 }

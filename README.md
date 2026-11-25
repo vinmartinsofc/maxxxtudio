@@ -4,7 +4,7 @@
   A digital audio workstation for creating, arranging, editing, and mixing music.
 </p>
 
-MaXXXtudio is a free, open-source DAW built with C++20 and JUCE 8.0.15. It focuses on Windows because maintaining and testing both Windows and Linux as a solo developer became difficult; Linux support may return in the future. The application combines an arrangement view, MIDI editing, VST3 hosting, a mixer, native tools, automation, and a custom interface.
+MaXXXtudio is a free, open-source, cross-platform DAW built with C++20 and JUCE 8.0.15. Windows and Linux are supported targets, with VST3 hosting on both platforms. macOS has not been validated yet. The application combines an arrangement view, MIDI editing, a mixer, native tools, automation, and a custom interface.
 
 ## Current interface
 
@@ -111,6 +111,36 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 In the plugin browser, use **Folders** to add or remove VST3 search paths. These paths are saved in the user configuration.
+
+## Build on Linux
+
+Requirements: a C++20 compiler, CMake 3.22 or later, and the system development libraries required by JUCE.
+
+MaXXXtudio running on Linux Mint with the Vital VST3 plugin detected:
+
+<p align="center">
+  <img src="app/assets/readme/linux-vital.png" alt="MaXXXtudio running on Linux Mint with Vital VST3 detected" width="1000">
+</p>
+
+```bash
+cmake -S . -B build -DROLL_BUILD_APP=ON -DROLL_BUILD_TESTS=ON
+cmake --build build --config Release --target MaXXXtudio MaXXXtudioPluginWorker
+ctest --test-dir build -C Release --output-on-failure
+```
+
+The executable is created at:
+
+```text
+build/app/MaXXXtudio_artefacts/Release/MaXXXtudio
+```
+
+To install the application, plugin worker, desktop launcher, and application icon under `~/.local`:
+
+```bash
+cmake --install build --prefix "$HOME/.local" --component Runtime
+```
+
+VST3 plugins are searched in the standard Linux locations, including `~/.vst3`, `/usr/lib/vst3`, and `/usr/local/lib/vst3`. Use **Preferences → Plugins VST3** to add another search folder.
 
 ## Project structure
 

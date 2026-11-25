@@ -2,10 +2,25 @@
 #include "DrumRackProcessor.h"
 #include "FavoriteColorPalette.h"
 #include "PluginFolderGrouping.h"
+#include "Icons.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <vector>
+
+void BrowserPanel::VstTabButton::paintButton (juce::Graphics& g,
+                                               bool isMouseOverButton,
+                                               bool isButtonDown)
+{
+    juce::TextButton::paintButton (g, isMouseOverButton, isButtonDown);
+
+    if (const auto* vstIcon = icons::get (
+            icons::Icon::Vst, getToggleState() ? theme::accent() : theme::textDim(), 16))
+    {
+        vstIcon->drawWithin (g, getLocalBounds().reduced (5, 5).removeFromLeft (22).toFloat(),
+                             juce::RectanglePlacement::centred, 1.0f);
+    }
+}
 
 class BrowserPanel::TreeItem : public juce::TreeViewItem
 {
@@ -281,7 +296,7 @@ BrowserPanel::BrowserPanel (PluginScanner& s)
     title.setJustificationType (juce::Justification::centredLeft);
     addAndMakeVisible (title);
 
-    for (auto* tab : { &vstTab, &maXXXtudioTab })
+    for (auto* tab : std::array<juce::TextButton*, 2> { &vstTab, &maXXXtudioTab })
     {
         tab->setClickingTogglesState (true);
         tab->setRadioGroupId (4710);
@@ -952,7 +967,7 @@ void BrowserPanel::resized()
     title.setBounds (head);
     area.removeFromTop (6);
     auto tabs = area.removeFromTop (26);
-    vstTab.setBounds (tabs.removeFromLeft (62));
+    vstTab.setBounds (tabs.removeFromLeft (80));
     tabs.removeFromLeft (4);
     maXXXtudioTab.setBounds (tabs.removeFromLeft (144));
 

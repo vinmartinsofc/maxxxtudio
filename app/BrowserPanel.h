@@ -35,6 +35,13 @@ private:
     class TreeItem;
     class PluginTree;
     enum class Filter { All, Instruments, Effects, Favorites };
+    class VstTabButton final : public juce::TextButton
+    {
+    public:
+        VstTabButton() : juce::TextButton ("VST") {}
+        void paintButton (juce::Graphics&, bool isMouseOverButton, bool isButtonDown) override;
+    };
+
     class NativeToolCard final : public juce::TextButton
     {
     public:
@@ -78,7 +85,8 @@ private:
     std::unique_ptr<PluginTree> tree;
     juce::Viewport toolsViewport;
     juce::Component toolsContent;
-    juce::TextButton vstTab { "VST" }, maXXXtudioTab { "MaXXXtudio" };
+    VstTabButton vstTab;
+    juce::TextButton maXXXtudioTab { "MaXXXtudio" };
     NativeToolCard drumRackCard;
     NativeToolCard utilityCard;
     NativeToolCard compMasterCard;

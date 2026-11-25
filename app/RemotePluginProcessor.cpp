@@ -12,6 +12,151 @@
  #define MAXXXTUDIO_PLUGIN_WORKER_PATH ""
 #endif
 
+#if 0
+
+bool RemotePluginProcessor::isPluginEditorForeground()
+{
+    return false;
+}
+
+std::vector<juce::Rectangle<int>> RemotePluginProcessor::pluginEditorWindowBounds()
+{
+    return {};
+}
+
+void RemotePluginProcessor::movePluginEditorWindows (int deltaX)
+{
+    juce::ignoreUnused (deltaX);
+}
+
+RemotePluginProcessor::RemotePluginProcessor (const juce::PluginDescription& description,
+                                              double rate, int blockSize)
+    : AudioProcessor (BusesProperties()
+                          .withInput ("Input", juce::AudioChannelSet::stereo(), ! description.isInstrument)
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      pluginName (description.name),
+      instrument (description.isInstrument),
+      sampleBlockSize (blockSize),
+      sampleRate (rate)
+{
+}
+
+std::unique_ptr<RemotePluginProcessor> RemotePluginProcessor::create (
+    const juce::PluginDescription& description, double sampleRate, int blockSize,
+    juce::String& error)
+{
+    juce::AudioPluginFormatManager formats;
+    formats.addFormat (std::make_unique<juce::VST3PluginFormat>());
+
+    auto native = formats.createPluginInstance (description, sampleRate, blockSize, error);
+    if (native == nullptr)
+        return nullptr;
+
+    auto processor = std::unique_ptr<RemotePluginProcessor> (
+        new RemotePluginProcessor (description, sampleRate, blockSize));
+    processor->nativePlugin = std::move (native);
+    processor->pluginName = processor->nativePlugin->getName();
+    processor->hasEditorFlag = processor->nativePlugin->hasEditor();
+    processor->acceptsMidiFlag = processor->nativePlugin->acceptsMidi();
+    processor->producesMidiFlag = processor->nativePlugin->producesMidi();
+    processor->midiEffectFlag = processor->nativePlugin->isMidiEffect();
+    return processor;
+}
+
+RemotePluginProcessor::~RemotePluginProcessor() = default;
+
+void RemotePluginProcessor::prepareToPlay (double rate, int maximumBlockSize)
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->prepareToPlay (rate, maximumBlockSize);
+}
+
+void RemotePluginProcessor::releaseResources()
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->releaseResources();
+}
+
+void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+                                          juce::MidiBuffer& midi)
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->processBlock (buffer, midi);
+    else
+    {
+        buffer.clear();
+        midi.clear();
+    }
+}
+
+void RemotePluginProcessor::failWorker (const juce::String& reason)
+{
+    if (failed.exchange (true, std::memory_order_acq_rel))
+        return;
+    if (onFailure)
+    {
+        const auto callback = onFailure;
+        const auto name = pluginName;
+        juce::MessageManager::callAsync (
+            [callback, name, reason] { callback (name, reason); });
+    }
+}
+
+void RemotePluginProcessor::updateParameter (int index, float value) noexcept
+{
+    if (nativePlugin == nullptr)
+        return;
+    const auto& parameters = nativePlugin->getParameters();
+    if (index >= 0 && index < parameters.size())
+        parameters[index]->setValueNotifyingHost (
+            juce::jlimit (0.0f, 1.0f, value));
+}
+
+float RemotePluginProcessor::readParameter (int index) const noexcept
+{
+    if (nativePlugin == nullptr)
+        return 0.0f;
+    const auto& parameters = nativePlugin->getParameters();
+    return index >= 0 && index < parameters.size()
+        ? parameters[index]->getValue()
+        : 0.0f;
+}
+
+bool RemotePluginProcessor::showEditor (int, int)
+{
+    if (nativePlugin == nullptr)
+        return false;
+    if (nativePlugin->hasEditor())
+    {
+        (void) nativePlugin->createEditorIfNeeded();
+        return true;
+    }
+    return false;
+}
+
+juce::AudioProcessorEditor* RemotePluginProcessor::createEditor()
+{
+    if (nativePlugin == nullptr || ! nativePlugin->hasEditor())
+        return nullptr;
+    return nativePlugin->createEditorIfNeeded();
+}
+
+void RemotePluginProcessor::getStateInformation (juce::MemoryBlock& destination)
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->getStateInformation (destination);
+    else
+        destination.reset();
+}
+
+void RemotePluginProcessor::setStateInformation (const void* data, int size)
+{
+    if (nativePlugin != nullptr && size >= 0)
+        nativePlugin->setStateInformation (data, size);
+}
+
+#endif
+
 namespace
 {
 constexpr std::uint32_t stalledProcessTimeoutMs = 5000;
@@ -763,6 +908,150 @@ void RemotePluginProcessor::setStateInformation (const void* data, int size)
 #else
     juce::ignoreUnused (data, size);
 #endif
+}
+
+#endif
+
+#if ! defined(_WIN32)
+
+bool RemotePluginProcessor::isPluginEditorForeground()
+{
+    return false;
+}
+
+std::vector<juce::Rectangle<int>> RemotePluginProcessor::pluginEditorWindowBounds()
+{
+    return {};
+}
+
+void RemotePluginProcessor::movePluginEditorWindows (int deltaX)
+{
+    juce::ignoreUnused (deltaX);
+}
+
+RemotePluginProcessor::RemotePluginProcessor (const juce::PluginDescription& description,
+                                              double rate, int blockSize)
+    : AudioProcessor (BusesProperties()
+                          .withInput ("Input", juce::AudioChannelSet::stereo(), ! description.isInstrument)
+                          .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+      pluginName (description.name),
+      instrument (description.isInstrument),
+      sampleBlockSize (blockSize),
+      sampleRate (rate)
+{
+}
+
+std::unique_ptr<RemotePluginProcessor> RemotePluginProcessor::create (
+    const juce::PluginDescription& description, double sampleRate, int blockSize,
+    juce::String& error)
+{
+    juce::AudioPluginFormatManager formats;
+    formats.addFormat (std::make_unique<juce::VST3PluginFormat>());
+    auto native = formats.createPluginInstance (description, sampleRate, blockSize, error);
+    if (native == nullptr)
+        return nullptr;
+
+    auto processor = std::unique_ptr<RemotePluginProcessor> (
+        new RemotePluginProcessor (description, sampleRate, blockSize));
+    processor->nativePlugin = std::move (native);
+    processor->pluginName = processor->nativePlugin->getName();
+    processor->hasEditorFlag = processor->nativePlugin->hasEditor();
+    processor->acceptsMidiFlag = processor->nativePlugin->acceptsMidi();
+    processor->producesMidiFlag = processor->nativePlugin->producesMidi();
+    processor->midiEffectFlag = processor->nativePlugin->isMidiEffect();
+    return processor;
+}
+
+RemotePluginProcessor::~RemotePluginProcessor() = default;
+
+void RemotePluginProcessor::prepareToPlay (double rate, int maximumBlockSize)
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->prepareToPlay (rate, maximumBlockSize);
+}
+
+void RemotePluginProcessor::releaseResources()
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->releaseResources();
+}
+
+void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer,
+                                          juce::MidiBuffer& midi)
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->processBlock (buffer, midi);
+    else
+    {
+        buffer.clear();
+        midi.clear();
+    }
+}
+
+void RemotePluginProcessor::failWorker (const juce::String& reason)
+{
+    if (failed.exchange (true, std::memory_order_acq_rel))
+        return;
+    if (onFailure)
+    {
+        const auto callback = onFailure;
+        const auto name = pluginName;
+        juce::MessageManager::callAsync (
+            [callback, name, reason] { callback (name, reason); });
+    }
+}
+
+void RemotePluginProcessor::updateParameter (int index, float value) noexcept
+{
+    if (nativePlugin == nullptr)
+        return;
+    const auto& parameters = nativePlugin->getParameters();
+    if (index >= 0 && index < parameters.size())
+        parameters[index]->setValueNotifyingHost (
+            juce::jlimit (0.0f, 1.0f, value));
+}
+
+float RemotePluginProcessor::readParameter (int index) const noexcept
+{
+    if (nativePlugin == nullptr)
+        return 0.0f;
+    const auto& parameters = nativePlugin->getParameters();
+    return index >= 0 && index < parameters.size()
+        ? parameters[index]->getValue()
+        : 0.0f;
+}
+
+bool RemotePluginProcessor::showEditor (int, int)
+{
+    if (nativePlugin == nullptr)
+        return false;
+    if (nativePlugin->hasEditor())
+    {
+        (void) nativePlugin->createEditorIfNeeded();
+        return true;
+    }
+    return false;
+}
+
+juce::AudioProcessorEditor* RemotePluginProcessor::createEditor()
+{
+    if (nativePlugin == nullptr || ! nativePlugin->hasEditor())
+        return nullptr;
+    return nativePlugin->createEditorIfNeeded();
+}
+
+void RemotePluginProcessor::getStateInformation (juce::MemoryBlock& destination)
+{
+    if (nativePlugin != nullptr)
+        nativePlugin->getStateInformation (destination);
+    else
+        destination.reset();
+}
+
+void RemotePluginProcessor::setStateInformation (const void* data, int size)
+{
+    if (nativePlugin != nullptr && size >= 0)
+        nativePlugin->setStateInformation (data, size);
 }
 
 #endif

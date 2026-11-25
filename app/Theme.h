@@ -47,7 +47,11 @@ enum class AccentStyle
 
 inline juce::FontOptions fontOptions (float size, int style = juce::Font::plain)
 {
+#if defined(_WIN32)
     return juce::FontOptions ("Aptos", size, style);
+#else
+    return juce::FontOptions ("DejaVu Sans", size, style);
+#endif
 }
 
 inline Palette& selectedPalette()

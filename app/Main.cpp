@@ -83,7 +83,11 @@ public:
 
         if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
         {
+#if defined(_WIN32)
             laf->setDefaultSansSerifTypefaceName ("Aptos");
+#else
+            laf->setDefaultSansSerifTypefaceName ("DejaVu Sans");
+#endif
             laf->setColourScheme ({ theme::background(), theme::panel(), theme::panel(),
                                     theme::border(), theme::text(), theme::control(),
                                     theme::text(), theme::accent(), theme::text() });

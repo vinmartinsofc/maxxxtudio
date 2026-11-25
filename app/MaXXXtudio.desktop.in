@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MaXXXtudio
+Comment=Digital audio workstation
+Exec=MaXXXtudio
+Icon=maxxx-tudio
+Terminal=false
+Categories=AudioVideo;Audio;
+StartupWMClass=MaXXXtudio

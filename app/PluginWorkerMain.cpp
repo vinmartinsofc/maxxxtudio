@@ -1,8 +1,6 @@
 #include "PluginWorkerRuntime.h"
 #include "PluginScanRuntime.h"
 
-#if defined(_WIN32)
-
 class PluginWorkerApplication final : public juce::JUCEApplication
 {
 public:
@@ -14,6 +12,7 @@ public:
     {
         juce::StringArray arguments;
         arguments.addTokens (commandLine, " \t", "\"");
+#if defined(_WIN32)
         if (arguments.size() == 3 && arguments[0] == "--plugin-worker")
         {
             const auto parentId = static_cast<DWORD> (arguments[2].getLargeIntValue());
@@ -22,10 +21,11 @@ public:
                 quit();
             return;
         }
+#endif
 
         if (arguments.size() == 3 && arguments[0] == "--plugin-scan-worker")
         {
-            const auto parentId = static_cast<DWORD> (arguments[2].getLargeIntValue());
+            const auto parentId = arguments[2].getLargeIntValue();
             scanRuntime = std::make_unique<PluginScanRuntime> (arguments[1], parentId);
             if (! scanRuntime->isReady())
                 quit();
@@ -38,17 +38,17 @@ public:
     void shutdown() override
     {
         scanRuntime.reset();
+#if defined(_WIN32)
         runtime.reset();
+#endif
     }
     void systemRequestedQuit() override { quit(); }
 
 private:
+#if defined(_WIN32)
     std::unique_ptr<PluginWorkerRuntime> runtime;
+#endif
     std::unique_ptr<PluginScanRuntime> scanRuntime;
 };
 
 START_JUCE_APPLICATION (PluginWorkerApplication)
-
-#else
-int main() { return 1; }
-#endif

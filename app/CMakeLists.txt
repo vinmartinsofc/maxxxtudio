@@ -123,6 +123,17 @@ endif()
 set_target_properties(MaXXXtudioPluginWorker PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/app/MaXXXtudio_artefacts/$<CONFIG>")
 
+if(UNIX AND NOT APPLE)
+    configure_file(MaXXXtudio.desktop.in
+                   "${CMAKE_CURRENT_BINARY_DIR}/MaXXXtudio.desktop" @ONLY)
+    install(TARGETS MaXXXtudio MaXXXtudioPluginWorker
+            RUNTIME DESTINATION bin COMPONENT Runtime)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/MaXXXtudio.desktop"
+            DESTINATION share/applications COMPONENT Runtime)
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/app/maxxx-tudio.png"
+            DESTINATION share/icons/hicolor/256x256/apps COMPONENT Runtime)
+endif()
+
 target_compile_definitions(MaXXXtudio PRIVATE
     MAXXXTUDIO_PLUGIN_WORKER_PATH="$<TARGET_FILE:MaXXXtudioPluginWorker>")
 

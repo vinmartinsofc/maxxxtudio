@@ -28,6 +28,16 @@
 
 namespace
 {
+bool isPianoRollToggleShortcut (const juce::KeyPress& key)
+{
+    const bool ctrl = key.getModifiers().isCtrlDown() || key.getModifiers().isCommandDown();
+    if (! ctrl)
+        return false;
+    return key.getTextCharacter() == '`'
+        || key.getKeyCode() == '`'
+        || key.getKeyCode() == 96;
+}
+
 void replaceAccentColour (juce::Component& component, int colourId,
                           juce::Colour previousAccent, juce::Colour accent,
                           juce::Colour previousHover, juce::Colour hover)
@@ -4353,7 +4363,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& key, juce::Component*)
     const bool ctrl = modifiers.isCtrlDown() || modifiers.isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (
         static_cast<juce::juce_wchar> (key.getKeyCode()));
-    if (ctrl && keyCode == '\'' && ! isTextEditorFocused())
+    if (isPianoRollToggleShortcut (key) && ! isTextEditorFocused())
     {
         setPianoRollVisible (! pianoRollVisible);
         return true;
@@ -4399,7 +4409,7 @@ bool MainComponent::keyPressed (const juce::KeyPress& k)
     const bool ctrl = k.getModifiers().isCtrlDown() || k.getModifiers().isCommandDown();
     const auto keyCode = juce::CharacterFunctions::toUpperCase (
         static_cast<juce::juce_wchar> (k.getKeyCode()));
-    if (ctrl && keyCode == '\'' && ! isTextEditorFocused())
+    if (isPianoRollToggleShortcut (k) && ! isTextEditorFocused())
     {
         setPianoRollVisible (! pianoRollVisible);
         return true;
@@ -4815,23 +4825,72 @@ void MainComponent::handlePluginParameterGesture (
 
 void MainComponent::showProjectMenu()
 {
-    juce::PopupMenu menu;
-    menu.addItem (1, "Open Project...");
-    menu.addItem (2, "Save", currentProjectFile.existsAsFile());
-    menu.addItem (3, "Save As...");
-    menu.addSeparator();
-    menu.addItem (5, "Export Master as WAV...", ! audioRenderInProgress);
-    menu.addSeparator();
-    menu.addItem (6, "Preferences... (Ctrl+,)");
-    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&transport),
-        [this] (int result)
+    std::vector<AppModalDialog::Action> actions
+    {
+        { "New Project", 7, AppModalDialog::ButtonStyle::Secondary },
+        { "Open Project", 1, AppModalDialog::ButtonStyle::Secondary }
+    };
+    if (currentProjectFile.existsAsFile())
+        actions.push_back ({ "Save", 2, AppModalDialog::ButtonStyle::Primary });
+    actions.push_back ({ "Save As", 3, AppModalDialog::ButtonStyle::Secondary });
+    actions.push_back ({ "Export WAV", 5, AppModalDialog::ButtonStyle::Secondary });
+    actions.push_back ({ "Preferences", 6, AppModalDialog::ButtonStyle::Secondary });
+    actions.push_back ({ "Cancel", 0, AppModalDialog::ButtonStyle::Tertiary });
+
+    const juce::Component::SafePointer<MainComponent> safeThis (this);
+    AppModalDialog::show (*this, "Project", "Open, create or save a project.",
+                          AppModalDialog::Icon::None, std::move (actions),
+        [safeThis] (int result)
         {
-            if (result == 1) chooseProjectFile (true);
-            else if (result == 2) saveProject (currentProjectFile);
-            else if (result == 3) chooseProjectFile (false);
-            else if (result == 5) chooseWavExportFile();
-            else if (result == 6) showOptionsWindow();
+            if (safeThis == nullptr)
+                return;
+
+            if (result == 1) safeThis->chooseProjectFile (true);
+            else if (result == 2) safeThis->saveProject (safeThis->currentProjectFile);
+            else if (result == 3) safeThis->chooseProjectFile (false);
+            else if (result == 7) safeThis->confirmCreateNewProject();
+            else if (result == 5) safeThis->chooseWavExportFile();
+            else if (result == 6) safeThis->showOptionsWindow();
         });
+}
+
+void MainComponent::confirmCreateNewProject()
+{
+    const juce::Component::SafePointer<MainComponent> safeThis (this);
+    AppModalDialog::show (
+        *this, "Create New Project",
+        "This will replace the current session with an empty project. Save anything you want to keep first.",
+        AppModalDialog::Icon::Question,
+        { { "Create", 1, AppModalDialog::ButtonStyle::Primary },
+          { "Cancel", 0, AppModalDialog::ButtonStyle::Tertiary } },
+        [safeThis] (int result)
+        {
+            if (safeThis != nullptr && result == 1)
+                safeThis->createNewProject();
+        });
+}
+
+void MainComponent::createNewProject()
+{
+    if (! taskRegistry.tasksForTarget ("track").empty() || restoringProjectPlugins
+        || pendingAudioLoads > 0 || projectFileOperationInProgress || audioRenderInProgress)
+    {
+        setProjectStatus ("Wait for the current operation to finish before creating a project.");
+        return;
+    }
+
+    ProjectModel blankProject;
+    const auto* midiTrack = blankProject.addTrack();
+    blankProject.addTrack (roll::TrackType::Audio);
+    if (midiTrack != nullptr)
+        blankProject.selectTrack (midiTrack->id);
+
+    ProjectFileData data;
+    data.project = blankProject.createState();
+    auto task = std::make_shared<TaskScope> (
+        taskRegistry, "Creating new project", "global", 0.0);
+    projectFileOperationInProgress = true;
+    applyLoadedProject ({}, std::move (data), task, false);
 }
 
 void MainComponent::showOptionsWindow()
@@ -4931,8 +4990,15 @@ void MainComponent::showWavRenderOptions (const juce::File& file)
                 return;
 
             tailText = tailText.trim().replaceCharacter (',', '.');
-            const bool hasDigit = std::any_of (tailText.begin(), tailText.end(),
-                [] (juce::juce_wchar character) { return juce::CharacterFunctions::isDigit (character); });
+            bool hasDigit = false;
+            for (int index = 0; index < tailText.length(); ++index)
+            {
+                if (juce::CharacterFunctions::isDigit (tailText[index]))
+                {
+                    hasDigit = true;
+                    break;
+                }
+            }
             const double tailSeconds = tailText.getDoubleValue();
             if (! hasDigit || ! std::isfinite (tailSeconds) || tailSeconds < 0.0 || tailSeconds > 60.0)
             {
@@ -5392,7 +5458,8 @@ void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData 
     pendingProjectPlugins = std::move (data.plugins);
     loadProjectAudio (data);
     setProjectStatus (recovering ? "Session recovered. Use Save As to save the project."
-                                 : "Project opened: " + file.getFileName());
+        : file == juce::File() ? "New project created."
+                               : "Project opened: " + file.getFileName());
     if (scanningPlugins && ! pendingProjectPlugins.empty())
         waitingForProjectPluginScan = true;
     else

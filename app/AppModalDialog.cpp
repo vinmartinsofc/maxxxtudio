@@ -180,8 +180,8 @@ void AppModalDialog::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff101012).withAlpha (0.58f));
 
-    const juce::DropShadow (juce::Colours::black.withAlpha (0.60f), 24, { 0, 10 })
-        .drawForRectangle (g, dialogBounds);
+    juce::DropShadow shadow (juce::Colours::black.withAlpha (0.60f), 24, { 0, 10 });
+    shadow.drawForRectangle (g, dialogBounds);
 
     const auto panel = dialogBounds.toFloat();
     g.setColour (theme::panel());
@@ -234,7 +234,10 @@ void AppModalDialog::paint (juce::Graphics& g)
 
 void AppModalDialog::resized()
 {
-    const int width = std::max (280, std::min (520, getWidth() - 32));
+    const auto buttonCount = static_cast<int> (buttons.size());
+    const int desiredWidth = std::max (520, 48 + buttonCount * 104
+                                               + std::max (0, buttonCount - 1) * 8);
+    const int width = std::max (280, std::min (desiredWidth, getWidth() - 32));
     const int height = std::max (180, std::min (244, getHeight() - 32));
     dialogBounds = juce::Rectangle<int> (width, height).withCentre (getLocalBounds().getCentre());
     if (inputVisible)

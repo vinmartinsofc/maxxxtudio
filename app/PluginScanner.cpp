@@ -4,6 +4,9 @@
 #include <algorithm>
 #include <cmath>
 #include <mutex>
+#if defined(__unix__)
+ #include <unistd.h>
+#endif
 
 #ifndef MAXXXTUDIO_PLUGIN_WORKER_PATH
  #define MAXXXTUDIO_PLUGIN_WORKER_PATH ""
@@ -301,7 +304,11 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
     std::shared_ptr<juce::XmlElement> resultXml;
     juce::ChildProcess child;
     auto workerExecutable = juce::File::getSpecialLocation (juce::File::currentApplicationFile)
+#if defined(_WIN32)
                                 .getSiblingFile ("MaXXXtudio Plugin Worker.exe");
+#else
+                                .getSiblingFile ("MaXXXtudio Plugin Worker");
+#endif
     if (! workerExecutable.existsAsFile())
         workerExecutable = juce::File (MAXXXTUDIO_PLUGIN_WORKER_PATH);
     if (workerExecutable.existsAsFile() && config->writeTo (inputFile))
@@ -310,7 +317,11 @@ void PluginScanner::runScan (const std::shared_ptr<ScanState>& scan,
         arguments.add (workerExecutable.getFullPathName());
         arguments.add ("--plugin-scan-worker");
         arguments.add (sessionId);
+#if defined(_WIN32)
         arguments.add (juce::String (GetCurrentProcessId()));
+#elif defined(__unix__)
+        arguments.add (juce::String (static_cast<juce::int64> (::getpid())));
+#endif
         if (child.start (arguments, 0))
         {
             {
