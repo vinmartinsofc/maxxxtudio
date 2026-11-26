@@ -14,7 +14,6 @@ TEST_CASE ("Piano Roll locators move independently and remain ordered")
     REQUIRE_FALSE (clip.movePianoRollLocator (first, 9.0));
     REQUIRE_FALSE (clip.movePianoRollLocator (-1, 2.0));
 }
-
 TEST_CASE ("Zero key mutes and restores selected Piano Roll notes")
 {
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
@@ -60,4 +59,33 @@ TEST_CASE ("Piano keys select notes by pitch and Ctrl+D duplicates the selection
     const juce::KeyPress duplicate ('D', juce::ModifierKeys::ctrlModifier, 'D');
     REQUIRE (grid.keyPressed (duplicate));
     REQUIRE (clip.notes().size() == 6);
+}
+
+TEST_CASE ("Shift arrow transposes every selected MIDI note by an octave")
+{
+    juce::ScopedJuceInitialiser_GUI juceInitialiser;
+    roll::Clip clip (4.0);
+    clip.setNotes ({
+        { 60, 0.0, 0.5, 100 },
+        { 64, 1.0, 0.5, 100 },
+        { 67, 2.0, 0.5, 100 }
+    });
+
+    RollModel model;
+    model.setClip (&clip);
+    model.selectAll();
+    REQUIRE (model.selection.size() == 3);
+
+    NoteGrid grid (model);
+    const juce::KeyPress octaveUp (juce::KeyPress::upKey, juce::ModifierKeys::shiftModifier, 0);
+    REQUIRE (grid.keyPressed (octaveUp));
+    CHECK (clip.notes()[0].pitch == 72);
+    CHECK (clip.notes()[1].pitch == 76);
+    CHECK (clip.notes()[2].pitch == 79);
+
+    const juce::KeyPress octaveDown (juce::KeyPress::downKey, juce::ModifierKeys::shiftModifier, 0);
+    REQUIRE (grid.keyPressed (octaveDown));
+    CHECK (clip.notes()[0].pitch == 60);
+    CHECK (clip.notes()[1].pitch == 64);
+    CHECK (clip.notes()[2].pitch == 67);
 }

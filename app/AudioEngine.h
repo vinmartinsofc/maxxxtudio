@@ -377,10 +377,11 @@ public:
     // Track devices (plugins): the instrument always comes first, followed by effects.
     void addDevice (int trackId, const juce::PluginDescription&,
                     std::function<void (const juce::String& error, int deviceId)> onDone,
-                    int insertionIndex = -1);
+                    int insertionIndex = -1, bool allowDuplicate = false);
     int addDrumRack (int trackId);
     int addUtility (int trackId);
-    int addNativeEffect (int trackId, const juce::String& identifier, int insertionIndex = -1);
+    int addNativeEffect (int trackId, const juce::String& identifier, int insertionIndex = -1,
+                         bool allowDuplicate = false);
     void addPadEffect (int trackId, int rackDeviceId, int pad,
                        const juce::PluginDescription&, std::function<void (const juce::String&)> onDone);
     std::unique_ptr<juce::AudioProcessorEditor> createPadEffectEditor (int trackId, int rackDeviceId,
@@ -428,7 +429,9 @@ public:
     std::vector<PluginParameterGesture> consumePluginParameterGestures();
     std::vector<PluginState> getPluginStates (
         const std::vector<int>& trackIds = {},
-        const std::vector<PluginState>& reusableStates = {});
+        const std::vector<PluginState>& reusableStates = {},
+        bool* stateCaptureSucceeded = nullptr,
+        juce::String* stateCaptureError = nullptr);
     bool restorePluginState (int trackId, int deviceId, const juce::MemoryBlock&);
     IsolatedEditorResult showIsolatedDeviceEditor (int trackId, int deviceId,
                                                     int editorX = -1, int editorY = -1);

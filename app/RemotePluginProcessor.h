@@ -55,6 +55,7 @@ public:
     const juce::String getProgramName (int) override { return {}; }
     void changeProgramName (int, const juce::String&) override {}
     void getStateInformation (juce::MemoryBlock&) override;
+    bool captureLatestStateInformation (juce::MemoryBlock&, juce::String* error = nullptr);
     void setStateInformation (const void*, int) override;
 
 private:

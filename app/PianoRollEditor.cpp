@@ -215,12 +215,23 @@ void NoteGrid::paint (juce::Graphics& g)
         const int pitch = model.rowToPitch (r);
         juce::Colour bg = isBlackKey (pitch) ? theme::rowBlack() : theme::rowWhite();
         const bool showScale = model.scaleOn && model.highlight;
-        if (showScale && ! model.foldScale && model.scale.contains (pitch))
-            bg = theme::rowInScale().withMultipliedBrightness (isBlackKey (pitch) ? 0.85f : 1.0f);
-        if (showScale && pitch % 12 == model.scale.root())
-            bg = bg.brighter (0.12f);                       // Highlight the tonic.
+        const bool inScale = model.scale.contains (pitch);
+        const bool tonic = pitch % 12 == model.scale.root();
+        if (showScale)
+        {
+            if (inScale)
+                bg = bg.interpolatedWith (theme::accent(), tonic ? 0.30f : 0.19f);
+            else
+                bg = bg.darker (0.30f);
+        }
         g.setColour (bg);
         g.fillRect (clipBox.getX(), r * model.rowHeight, clipBox.getWidth(), model.rowHeight);
+
+        if (showScale && tonic)
+        {
+            g.setColour (theme::accent());
+            g.fillRect (clipBox.getX(), r * model.rowHeight, 3, model.rowHeight - 1);
+        }
 
         g.setColour (pitch % 12 == 0 ? theme::gridLine().brighter (0.3f) : theme::gridLine().withAlpha (0.45f));
         g.drawHorizontalLine ((r + 1) * model.rowHeight - 1, static_cast<float> (clipBox.getX()), static_cast<float> (clipBox.getRight()));
@@ -247,8 +258,12 @@ void NoteGrid::paint (juce::Graphics& g)
         const bool sel = model.isSelected (n.id);
         const float vel = static_cast<float> (n.velocity) / 127.0f;
         juce::Colour c = sel ? theme::noteSelected() : theme::noteFill();
-        c = c.withMultipliedBrightness (0.55f + 0.45f * vel);
-        if (n.muted) c = theme::textDim();
+        if (! sel)
+        {
+            c = c.withMultipliedBrightness (0.55f + 0.45f * vel);
+            if (n.muted)
+                c = theme::textDim();
+        }
 
         g.setColour (c);
         g.fillRoundedRectangle (r, 2.0f);
@@ -709,20 +724,30 @@ void KeyColumn::paint (juce::Graphics& g)
         const int pitch = model.rowToPitch (r);
         const int y = r * model.rowHeight;
         const bool black = isBlackKey (pitch);
-
+        const bool showScale = model.scaleOn && model.highlight;
+        const bool inScale = model.scale.contains (pitch);
+        const bool tonic = pitch % 12 == model.scale.root();
         const bool lit = model.isKeyLit (pitch);
-        g.setColour (lit ? theme::accent()
-                         : black ? juce::Colours::black : juce::Colours::white);
+        auto keyColour = black ? juce::Colours::black : juce::Colours::white;
+        if (showScale)
+        {
+            keyColour = inScale
+                ? keyColour.interpolatedWith (theme::accent(), tonic ? 0.48f : 0.30f)
+                : keyColour.interpolatedWith (black ? theme::rowBlack() : theme::rowWhite(), 0.32f);
+        }
+        g.setColour (lit ? theme::accent() : keyColour);
         g.fillRect (0, y, getWidth(), model.rowHeight - 1);
 
-        if (model.scaleOn && model.highlight && model.scale.contains (pitch))
+        if (showScale && inScale)
         {
-            g.setColour (theme::accent().withAlpha (0.55f));
-            g.fillRect (getWidth() - zoomStripWidth - 5, y, 5, model.rowHeight - 1);
+            g.setColour (theme::accent().withAlpha (tonic ? 1.0f : 0.72f));
+            g.fillRect (getWidth() - zoomStripWidth - 6, y, 6, model.rowHeight - 1);
         }
 
         const float fontSize = std::min (11.0f, std::max (7.0f, static_cast<float> (model.rowHeight - 1)));
-        g.setColour (lit ? theme::text() : black ? theme::textDim() : juce::Colours::black);
+        g.setColour (lit || (showScale && tonic) ? theme::text()
+            : showScale && ! inScale ? theme::textDim()
+            : black ? theme::textDim() : juce::Colours::black);
         g.setFont (theme::fontOptions (fontSize, pitch % 12 == 0 ? juce::Font::bold : juce::Font::plain));
         g.drawFittedText (pitchName (pitch, model.noteSpelling, model.scale.root(), model.scaleOn),
                           juce::Rectangle<int> (4, y, getWidth() - zoomStripWidth - 10, model.rowHeight),
@@ -1148,7 +1173,7 @@ void PianoRollOverview::paint (juce::Graphics& g)
             const float y = bounds.getY() + (127.0f - static_cast<float> (note.pitch)) * pitchHeight;
             const float height = std::max (1.0f, pitchHeight);
             auto colour = model.isSelected (note.id) ? theme::noteSelected() : theme::noteFill();
-            if (note.muted)
+            if (note.muted && ! model.isSelected (note.id))
                 colour = theme::textDim();
             g.setColour (colour);
             g.fillRect (x, y, width, height);
@@ -1315,7 +1340,7 @@ void VelocityLane::paint (juce::Graphics& g)
 
         const float h = static_cast<float> (getHeight() - 6) * static_cast<float> (n.velocity) / 127.0f;
         juce::Colour c = model.isSelected (n.id) ? theme::noteSelected() : theme::noteFill();
-        if (n.muted) c = theme::textDim();
+        if (n.muted && ! model.isSelected (n.id)) c = theme::textDim();
         g.setColour (c);
         g.fillRect (static_cast<float> (x), static_cast<float> (getHeight()) - 3.0f - h, 3.0f, h);
         g.fillEllipse (static_cast<float> (x) - 2.0f, static_cast<float> (getHeight()) - 3.0f - h - 2.0f, 7.0f, 7.0f);

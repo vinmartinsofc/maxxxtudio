@@ -778,12 +778,40 @@ TEST_CASE ("EQ Master applies its eight parametric bands and restores their stat
     REQUIRE (devices[0].automatableParameters.size() == 11);
     REQUIRE (devices[1].name == "EQ Master");
     REQUIRE (devices[1].automatableParameters.size() == EqMasterProcessor::bandCount * 6 + 3);
-    const auto states = engine.getPluginStates();
+    bool stateCaptureSucceeded = false;
+    const auto states = engine.getPluginStates ({}, {}, &stateCaptureSucceeded);
+    REQUIRE (stateCaptureSucceeded);
     REQUIRE (states.size() == 2);
     REQUIRE (states[0].identifier == AudioEngine::compMasterPluginIdentifier);
     REQUIRE (states[1].identifier == AudioEngine::eqMasterPluginIdentifier);
     REQUIRE (states[0].state.getSize() > 0);
     REQUIRE (states[1].state.getSize() > 0);
+}
+
+TEST_CASE ("Native effects can be duplicated with their saved state")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+    const int sourceId = engine.addNativeEffect (1, AudioEngine::compMasterPluginIdentifier);
+    REQUIRE (sourceId > 0);
+
+    const auto sourceStates = engine.getPluginStates ({ 1 });
+    REQUIRE (sourceStates.size() == 1);
+    const int copyId = engine.addNativeEffect (
+        1, AudioEngine::compMasterPluginIdentifier, -1, true);
+    REQUIRE (copyId > 0);
+    REQUIRE (copyId != sourceId);
+    REQUIRE (engine.restorePluginState (1, copyId, sourceStates.front().state));
+
+    const auto devices = engine.devices (1);
+    REQUIRE (devices.size() == 2);
+    REQUIRE (devices[0].id == sourceId);
+    REQUIRE (devices[1].id == copyId);
+    REQUIRE (devices[0].automatableParameters.size()
+             == devices[1].automatableParameters.size());
+    for (std::size_t i = 0; i < devices[0].automatableParameters.size(); ++i)
+        REQUIRE (devices[0].automatableParameters[i].value
+                 == devices[1].automatableParameters[i].value);
 }
 
 TEST_CASE ("EQ Master supports filter slopes and global Mid/Side processing")
@@ -840,6 +868,17 @@ TEST_CASE ("EQ Master supports filter slopes and global Mid/Side processing")
     sideRms = std::sqrt (sideRms / 2048.0);
     REQUIRE (sideRms > 0.4);
     REQUIRE (std::abs (sideTone.getSample (0, 4095) + sideTone.getSample (1, 4095)) < 0.001f);
+}
+
+TEST_CASE ("Preview notes ignore tracks without a MIDI source")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+    engine.addTrack (2, roll::TrackType::Group);
+
+    engine.previewNote (1, 60, true);
+    engine.previewNote (2, 60, true);
+    engine.previewNote (999, 60, true);
 }
 
 TEST_CASE ("Comp Master sidechain routes reject feedback and restore valid sources")

@@ -27,6 +27,10 @@ public:
     std::function<void (int trackId, const std::vector<int>& deviceIds)> onCopyDevices;
     std::function<void (int trackId)> onPasteDevices;
     std::function<bool()> canPasteDevices;
+    std::function<bool (int sourceTrackId, int sourceDeviceId, int targetTrackId, bool copy)>
+        canAcceptDeviceTransfer;
+    std::function<void (int sourceTrackId, int sourceDeviceId, int targetTrackId,
+                        int insertionIndex, bool copy)> onDeviceTransferRequested;
     std::function<bool (int trackId, const juce::String& pluginIdentifier)> canAcceptPluginDrop;
     std::function<void (int trackId, const juce::String& pluginIdentifier, int insertionIndex)> onPluginDropped;
 
@@ -47,6 +51,8 @@ public:
 private:
     class Box;
     int insertionIndexAt (int x) const;
+    bool draggedDevice (const SourceDetails&, int& sourceTrackId, int& sourceDeviceId,
+                        bool& copy) const;
     void updatePluginDrop (const SourceDetails&);
     void selectDevice (const DeviceInfo&, juce::ModifierKeys);
     std::vector<int> selectedDevicesInOrder() const;

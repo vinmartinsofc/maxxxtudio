@@ -69,6 +69,8 @@ private:
         int trackId, const juce::String& identifier = AudioEngine::utilityPluginIdentifier,
         int insertionIndex = -1);
     void duplicateSelectedTrack (int trackId);
+    void transferDeviceToTrack (int sourceTrackId, int sourceDeviceId, int targetTrackId,
+                                int insertionIndex, bool copy);
     void openDeviceEditor (int trackId, int deviceId);
     void updateActionIndicator();
     void setBrowserVisible (bool);
@@ -107,6 +109,7 @@ private:
     void showMixer();
     void chooseProjectFile (bool open, std::function<void (bool)> onSaveComplete = {});
     void chooseWavExportFile();
+    void chooseMidiClipExportFile (int trackId, int clipId);
     void showWavRenderOptions (const juce::File&);
     void startWavRender (const juce::File&, double tailSeconds);
     void setAudioRenderUiEnabled (bool);
@@ -217,6 +220,7 @@ private:
     std::map<std::string, std::shared_ptr<const AudioFileData>> audioAssets;
     std::unique_ptr<juce::FileChooser> projectFileChooser;
     std::unique_ptr<juce::FileChooser> audioExportChooser;
+    std::unique_ptr<juce::FileChooser> midiExportChooser;
     std::unique_ptr<class OptionsWindow> optionsWindow;
     std::unique_ptr<GrooveBrowserWindow> grooveBrowserWindow;
     std::unique_ptr<ReferenceMasterWindow> referenceMasterWindow;

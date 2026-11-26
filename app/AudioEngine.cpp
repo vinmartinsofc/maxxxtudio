@@ -2334,7 +2334,8 @@ void AudioEngine::setPluginAutomationOverride (
 
 void AudioEngine::previewNote (int trackId, int pitch, bool on, float velocity)
 {
-    if (auto* t = find (trackId)) t->sourcePtr->preview (pitch, on, velocity);
+    if (auto* t = find (trackId); t != nullptr && t->sourcePtr != nullptr)
+        t->sourcePtr->preview (pitch, on, velocity);
 }
 
 void AudioEngine::activeMask (int trackId, std::uint64_t& lo, std::uint64_t& hi) const
@@ -2782,7 +2783,8 @@ bool AudioEngine::canAcceptPlugin (int trackId, const juce::PluginDescription& d
 }
 
 void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
-                             std::function<void (const juce::String&, int)> onDone, int insertionIndex)
+                             std::function<void (const juce::String&, int)> onDone,
+                             int insertionIndex, bool allowDuplicate)
 {
     auto* track = find (trackId);
     if (track == nullptr) { onDone ("Track does not exist.", 0); return; }
@@ -2790,12 +2792,13 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
     if (track->audioTrack && desc.isInstrument) { onDone ("Audio channels only accept effects.", 0); return; }
 
     const auto pluginIdentifier = desc.createIdentifierString();
-    for (const auto& device : find (trackId)->devices)
-        if (device.pluginIdentifier == pluginIdentifier)
-        {
-            onDone ({}, device.id);
-            return;
-        }
+    if (! allowDuplicate)
+        for (const auto& device : find (trackId)->devices)
+            if (device.pluginIdentifier == pluginIdentifier)
+            {
+                onDone ({}, device.id);
+                return;
+            }
 
     const auto pendingKey = std::make_pair (trackId, pluginIdentifier.toStdString());
     if (! pendingPluginLoads.insert (pendingKey).second)
@@ -2815,11 +2818,12 @@ void AudioEngine::addDevice (int trackId, const juce::PluginDescription& desc,
     auto instance = std::make_shared<std::unique_ptr<RemotePluginProcessor>>();
     auto loadError = std::make_shared<juce::String>();
     audioLoadPool.addJob ([this, desc, sampleRate, blockSize, trackId, pluginIdentifier,
-                           pendingKey, onDone, insertionIndex, instance, loadError]
+                           pendingKey, onDone, insertionIndex, allowDuplicate, instance, loadError]
     {
         *instance = RemotePluginProcessor::create (desc, sampleRate, blockSize, *loadError);
         if (! juce::MessageManager::callAsync (
-            [this, trackId, pluginIdentifier, pendingKey, onDone, insertionIndex, instance, loadError]
+            [this, trackId, pluginIdentifier, pendingKey, onDone, insertionIndex, allowDuplicate,
+             instance, loadError]
         {
             pendingPluginLoads.erase (pendingKey);
             auto* t = find (trackId);
@@ -2918,14 +2922,16 @@ int AudioEngine::addUtility (int trackId)
     return addNativeEffect (trackId, utilityPluginIdentifier);
 }
 
-int AudioEngine::addNativeEffect (int trackId, const juce::String& identifier, int insertionIndex)
+int AudioEngine::addNativeEffect (int trackId, const juce::String& identifier, int insertionIndex,
+                                  bool allowDuplicate)
 {
     auto* track = find (trackId);
     if (track == nullptr || ! isNativeEffectIdentifier (identifier))
         return 0;
-    for (const auto& device : track->devices)
-        if (device.pluginIdentifier == identifier)
-            return device.id;
+    if (! allowDuplicate)
+        for (const auto& device : track->devices)
+            if (device.pluginIdentifier == identifier)
+                return device.id;
 
     Device device;
     device.id = nextDeviceId++;
@@ -3307,8 +3313,14 @@ std::vector<PluginParameterGesture> AudioEngine::consumePluginParameterGestures(
 }
 
 std::vector<PluginState> AudioEngine::getPluginStates (
-    const std::vector<int>& trackIds, const std::vector<PluginState>& reusableStates)
+    const std::vector<int>& trackIds, const std::vector<PluginState>& reusableStates,
+    bool* stateCaptureSucceeded, juce::String* stateCaptureError)
 {
+    if (stateCaptureSucceeded != nullptr)
+        *stateCaptureSucceeded = true;
+    if (stateCaptureError != nullptr)
+        stateCaptureError->clear();
+
     std::vector<PluginState> states;
     for (auto& [trackId, track] : tracks)
     {
@@ -3334,7 +3346,26 @@ std::vector<PluginState> AudioEngine::getPluginStates (
             if (reusable != reusableStates.end())
                 state.state = reusable->state;
             else if (auto* processor = device.node->getProcessor())
-                processor->getStateInformation (state.state);
+            {
+                if (stateCaptureSucceeded != nullptr)
+                {
+                    if (auto* remote = dynamic_cast<RemotePluginProcessor*> (processor))
+                    {
+                        juce::String error;
+                        if (! remote->captureLatestStateInformation (state.state, &error))
+                        {
+                            *stateCaptureSucceeded = false;
+                            if (stateCaptureError != nullptr)
+                                *stateCaptureError = device.name + ": " + error;
+                            return states;
+                        }
+                    }
+                    else
+                        processor->getStateInformation (state.state);
+                }
+                else
+                    processor->getStateInformation (state.state);
+            }
             states.push_back (std::move (state));
         }
     }

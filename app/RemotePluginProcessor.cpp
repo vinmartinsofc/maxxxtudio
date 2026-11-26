@@ -858,28 +858,67 @@ juce::AudioProcessorEditor* RemotePluginProcessor::createEditor()
     return new RemoteEditor (*this);
 }
 
+bool RemotePluginProcessor::captureLatestStateInformation (juce::MemoryBlock& destination,
+                                                           juce::String* error)
+{
+    destination.reset();
+#if defined(_WIN32)
+    if (shared != nullptr)
+        shared->error[0] = '\0';
+    if (! sendCommand (pluginworker::Command::getState, 30000))
+    {
+        if (error != nullptr)
+        {
+            const auto* workerError = shared != nullptr ? shared->error : "";
+            *error = workerError[0] != '\0'
+                ? juce::String::fromUTF8 (workerError)
+                : "The plugin worker timed out or failed while capturing state.";
+        }
+        return false;
+    }
+
+    const auto stateFile = juce::File::createFileWithoutCheckingPath (
+        juce::String::fromUTF8 (shared->stateFilePath));
+    if (! stateFile.loadFileAsData (destination)
+        || shared->stateBytes < 0
+        || destination.getSize() != static_cast<std::size_t> (shared->stateBytes))
+    {
+        juce::Logger::writeToLog ("RemotePluginProcessor: Could not read plugin state.");
+        if (error != nullptr)
+            *error = "The worker returned an invalid or incomplete state file.";
+        destination.reset();
+        return false;
+    }
+
+    const juce::ScopedLock lock (stateLock);
+    cachedState.replaceAll (destination.getData(), destination.getSize());
+    return true;
+#else
+    juce::ignoreUnused (error);
+    if (nativePlugin == nullptr)
+    {
+        destination.reset();
+        return false;
+    }
+
+    nativePlugin->getStateInformation (destination);
+    return true;
+#endif
+}
+
 void RemotePluginProcessor::getStateInformation (juce::MemoryBlock& destination)
 {
 #if defined(_WIN32)
-    if (! sendCommand (pluginworker::Command::getState, 30000))
+    if (! captureLatestStateInformation (destination))
     {
         const juce::ScopedLock lock (stateLock);
         destination.replaceAll (cachedState.getData(), cachedState.getSize());
-        return;
     }
-    const auto stateFile = juce::File::createFileWithoutCheckingPath (
-        juce::String::fromUTF8 (shared->stateFilePath));
-    if (! stateFile.loadFileAsData (destination))
-    {
-        juce::Logger::writeToLog ("RemotePluginProcessor: Could not read plugin state.");
-        const juce::ScopedLock lock (stateLock);
-        destination.replaceAll (cachedState.getData(), cachedState.getSize());
-        return;
-    }
-    const juce::ScopedLock lock (stateLock);
-    cachedState.replaceAll (destination.getData(), destination.getSize());
 #else
-    juce::ignoreUnused (destination);
+    if (nativePlugin != nullptr)
+        nativePlugin->getStateInformation (destination);
+    else
+        destination.reset();
 #endif
 }
 
@@ -888,13 +927,13 @@ void RemotePluginProcessor::setStateInformation (const void* data, int size)
 #if defined(_WIN32)
     if (size < 0 || shared == nullptr)
         return;
-    {
-        const juce::ScopedLock lock (stateLock);
-        cachedState.replaceAll (data, static_cast<std::size_t> (size));
-    }
-    shared->stateBytes = size;
     const auto stateFile = juce::File::createFileWithoutCheckingPath (
         juce::String::fromUTF8 (shared->stateFilePath));
+    if (stateFile.existsAsFile() && ! stateFile.deleteFile())
+    {
+        juce::Logger::writeToLog ("RemotePluginProcessor: Could not replace plugin state file.");
+        return;
+    }
     {
         juce::FileOutputStream stream (stateFile);
         if (! stream.openedOk() || (size > 0 && ! stream.write (data, static_cast<std::size_t> (size))))
@@ -903,6 +942,16 @@ void RemotePluginProcessor::setStateInformation (const void* data, int size)
             return;
         }
         stream.flush();
+        if (stateFile.getSize() != size)
+        {
+            juce::Logger::writeToLog ("RemotePluginProcessor: Plugin state file was not written completely.");
+            return;
+        }
+    }
+    shared->stateBytes = size;
+    {
+        const juce::ScopedLock lock (stateLock);
+        cachedState.replaceAll (data, static_cast<std::size_t> (size));
     }
     sendCommand (pluginworker::Command::setState, 30000);
 #else
@@ -1046,6 +1095,20 @@ void RemotePluginProcessor::getStateInformation (juce::MemoryBlock& destination)
         nativePlugin->getStateInformation (destination);
     else
         destination.reset();
+}
+
+bool RemotePluginProcessor::captureLatestStateInformation (juce::MemoryBlock& destination,
+                                                           juce::String* error)
+{
+    juce::ignoreUnused (error);
+    if (nativePlugin == nullptr)
+    {
+        destination.reset();
+        return false;
+    }
+
+    nativePlugin->getStateInformation (destination);
+    return true;
 }
 
 void RemotePluginProcessor::setStateInformation (const void* data, int size)

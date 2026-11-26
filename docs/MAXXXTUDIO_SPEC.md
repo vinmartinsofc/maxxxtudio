@@ -5,7 +5,7 @@
 > Tudo que importa está aqui: objetivo, restrições, arquitetura, o que já existe, o que falta, e tarefas com critérios de aceite.
 > Salve como `docs/MAXXXTUDIO_SPEC.md` na raiz do repositório e mantenha-o atualizado (ver §0.3).
 
-- **Versão do documento:** 1.66 (teclado ampliado e assinatura MX)
+- **Versão do documento:** 1.68 (IDs únicos em notas MIDI importadas)
 - **⚠️ Ordem de trabalho vigente:** fila de pendências do usuário no §4.3. O documento `PLANO_DE_ACAO_FASE_4.md`, citado em versões antigas, não está presente no repositório. O §4.3 prevalece sobre o roadmap legado do §14.
 - **Código-fonte:** ~4.800 linhas de C++20 (core + app + testes)
 - **Idioma da conversa com o dono do projeto:** Português (Brasil)
@@ -214,7 +214,8 @@ Legenda: ✅ implementado e verificado (compila + comportamento visto) · 🟡 i
 | Entrada | MIDI de teclado/controlador, gravação | ⬜ |
 | Exportação | Master em WAV 24-bit, offline, com cauda configurável e progresso/cancelamento | ✅ |
 | Arranjo | Consolidar seleção de áudio em WAV 24-bit com os plugins da faixa, sem incluir Master/mixer | 🟡 (build e teste offline; falta validação manual com VST3 real) |
-| Exportação | MIDI (clip/trilha/projeto) | ⬜ |
+| Exportação | Clip MIDI como arquivo Standard MIDI (`.mid`) pelo menu de contexto; andamento do projeto e notas audíveis incluídos | ✅ |
+| Exportação | MIDI de trilha ou projeto inteiro | ⬜ |
 | Config. | Preferências com seleção de dispositivo/canais de entrada e saída, taxa de amostragem e buffer; configurações persistidas | 🟡 (driver real requer QA manual) |
 | Acessibilidade | Anel de foco, F6 alterna painéis, setas selecionam trilha | 🟡 parcial |
 | Tarefas em background | `TaskRegistry`/`TaskScope`, indicador por target e barra global; carregamento por faixa; scan com progresso/cancelamento; progresso ao abrir/salvar projetos | ✅ etapas a–b e d / 🟡 etapa c (falta QA com plugins reais) |
@@ -250,7 +251,7 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | 3 | Popups de pitch/velocity interferindo com atalhos no Arrangement | Teclado MIDI só captura teclas sem modificadores; Ctrl/Cmd+C/V seguem para os atalhos do Arrangement. Indicador continua visual, sem foco de teclado ou mouse. Ainda falta QA manual na UI. |
 | 4 | Mostrar minutos/tempo do projeto na parte inferior do Arrangement | Régua inferior exibe marcações mm:ss conforme BPM/zoom; leitura fixa mostra o tempo atual. |
 | 5 | Auto-scroll/expansão do Arrangement enquanto se arrasta além da borda visível | Ao mover/copiar clips ou selecionar intervalo, aproximar o ponteiro das bordas rola a vista; ao alcançar o fim, a linha do tempo cresce em incrementos visíveis. |
-| 6 | Drag/drop de MIDI/áudio sobre conteúdo existente para substituí-lo | Ao mover/copiar clips e soltar arquivos de áudio em trilhas de áudio, só a região sobreposta é substituída e o restante é preservado. Importar arquivos MIDI continua sendo uma feature futura separada. |
+| 6 | Drag/drop de MIDI/áudio sobre conteúdo existente para substituí-lo | Ao mover/copiar clips e soltar arquivos de áudio em trilhas de áudio, só a região sobreposta é substituída e o restante é preservado. Arquivos `.mid`/`.midi` podem ser arrastados para o Arrangement e importados como clips MIDI. |
 | 7 | Grade sincronizada ao BPM | A grade musical do Arrangement e do editor de áudio já usa beats e o BPM do projeto; falta confirmar se o pedido significa outro comportamento. |
 | 8 | Favoritos de plugins | Implementado no navegador VST; falta QA manual com plugins reais. |
 | 9 | Cores customizáveis para trilhas MIDI/áudio e Master | Implementado com paleta nos menus dos cabeçalhos e persistência no `.std`; falta QA manual. |
@@ -259,7 +260,7 @@ Esta tabela substitui a ordem do roadmap legado do §14. Status considera o pedi
 | 12 | Editor de áudio: BPM, Warp e pitch | Parcial: BPM de origem e Warp on/off existem; playback é atualmente Re-Pitch, sem modos de time-stretch nem transpose independente. |
 | 13 | Groove MIDI (8th/16th e ritmos não quantizados) | **Concluído** no código atual: `GrooveLibrary`/`GrooveBrowser` importam `.agr`, reproduzem automaticamente por padrão ao navegar e aplicam grooves sem alterar as notas originais; qualquer revisão futura deve validar o comportamento manual real em UI. |
 | Nova | Ferramentas de sampler e efeitos nativos | Drum Rack limitado às 15 notas do teclado do computador. Volume Master reúne ganho, largura/balanço, modos de canal, mono, inversão de fase, Auto Pan, Bass Mono, mute e DC; controles expostos à automação. |
-| Futuro | Gravação de áudio em tempo real e importação/exportação MIDI | Pendente; exportação MIDI também aparece no §14. |
+| Futuro | Gravação de áudio em tempo real, importação MIDI por comando de menu e exportação de trilha/projeto | Pendente; a importação por drag/drop e exportação de clip já funcionam. |
 
 **Próxima tarefa sugerida:** iniciar o editor de áudio para alcançar o MVP; não alterar o Piano Roll nesta etapa.
 
@@ -683,7 +684,8 @@ Dentro de qualquer função chamada pelo thread de áudio (`processBlock`, `Sequ
 
 ### Marco 10 — Exportação
 
-- [ ] **T10.1 — Exportar MIDI** (clip/trilha/projeto) com `juce::MidiFile` (PPQ 960).
+- [x] **T10.1a — Exportar clip MIDI** como Standard MIDI (`.mid`) pelo menu de contexto, com PPQ 960, andamento do projeto e notas não silenciadas.
+- [ ] **T10.1b — Exportar trilha ou projeto inteiro** como MIDI.
 - [x] **T10.2 — Renderizar áudio (offline):** processar o grafo em blocos sem tempo real, do início ao fim (+ cauda configurável), escrever WAV 24-bit (`WavAudioFormat`); barra de progresso; respeitar mute/solo.
 - **Aceite:** o WAV exportado soa igual ao tempo real (comparar pico/RMS aproximado).
 
@@ -758,6 +760,8 @@ Obrigatório após qualquer mudança em áudio/plugins (D10). Registre o resulta
 
 | Versão | Conteúdo |
 |---|---|
+| **Doc 1.68** | Corrige IDs de notas sem identidade/duplicados em `Clip::setNotes`, para seleção múltipla e transposição por oitava funcionarem após importação MIDI |
+| **Doc 1.67** | Exportação de clips MIDI pelo menu de contexto, com andamento e notas audíveis; importação de arquivos `.mid`/`.midi` pelo Arrangement |
 | **Doc 1.66** | Teclado ampliado e assinatura `MX` reposicionada no canto superior esquerdo do ícone |
 | **Doc 1.65** | Ícone redesenhado de frente e centralizado; substitui o recorte fotográfico e mantém as duas teclas pretas completas |
 | **Doc 1.64** | Ícone do aplicativo alinhado à referência fornecida, com fundo branco removido e cores ciano preservadas em todos os temas |

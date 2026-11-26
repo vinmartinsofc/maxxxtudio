@@ -50,9 +50,14 @@ public:
     std::function<juce::String (int)>   deviceSummary;
     std::function<bool (const juce::String& pluginIdentifier, int trackId)> canAcceptPluginDrop;
     std::function<void (const juce::String& pluginIdentifier, int trackId, double beats)> onPluginDropped;
+    std::function<bool (int sourceTrackId, int sourceDeviceId, int targetTrackId, bool copy)>
+        canAcceptDeviceDrop;
+    std::function<void (int sourceTrackId, int sourceDeviceId, int targetTrackId, bool copy)>
+        onDeviceDropped;
     std::function<bool (const juce::File&, int trackId)> canAcceptAudioDrop;
     std::function<void (const juce::File&, int trackId, double beats)> onAudioDropped;
     std::function<void (const juce::File&, int trackId, double beats)> onMidiDropped;
+    std::function<void (int trackId, int clipId)> onMidiClipExportRequested;
     std::function<void (const juce::File&)> onLocateAudioFileRequested;
     std::function<void (int trackId, int clipId)> onAudioClipDoubleClicked;
     std::function<void (int trackId)> onTrackDuplicateRequested;

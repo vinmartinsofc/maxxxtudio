@@ -16,6 +16,7 @@
 #include "RemotePluginProcessor.h"
 #include "ThemeKnobSlider.h"
 #include "Recording.h"
+#include "MidiClipExporter.h"
 #include <juce_dsp/juce_dsp.h>
 #include "Icons.h"
 #include <algorithm>
@@ -1206,7 +1207,6 @@ struct MainComponent::PluginCopyOperation
     std::size_t nextDevice = 0;
     int added = 0;
     int failures = 0;
-    std::set<std::string> targetIdentifiers;
     std::map<int, std::vector<int>> copiedGroups;
     std::map<int, std::size_t> expectedGroupSizes;
 };
@@ -2067,6 +2067,53 @@ MainComponent::MainComponent()
             loadDevice (*description);
         }
     };
+    const auto canTransferDevice = [this] (
+        int sourceTrackId, int sourceDeviceId, int targetTrackId, bool)
+    {
+        if (sourceTrackId == targetTrackId || sourceDeviceId <= 0
+            || trackDuplicationInProgress || pluginCopyInProgress
+            || pluginHistoryRestoreInProgress || scanningPlugins || restoringProjectPlugins
+            || projectFileOperationInProgress || audioRenderInProgress || pendingAudioLoads > 0)
+            return false;
+
+        const auto* sourceTrack = sourceTrackId == AudioEngine::masterTrackId
+            ? nullptr : project.track (sourceTrackId);
+        const auto* targetTrack = targetTrackId == AudioEngine::masterTrackId
+            ? nullptr : project.track (targetTrackId);
+        if ((sourceTrackId != AudioEngine::masterTrackId
+             && (sourceTrack == nullptr || sourceTrack->frozen || sourceTrack->type == roll::TrackType::Group))
+            || (targetTrackId != AudioEngine::masterTrackId
+                && (targetTrack == nullptr || targetTrack->frozen
+                    || targetTrack->type == roll::TrackType::Group)))
+            return false;
+
+        const auto sourceDevices = engine.devices (sourceTrackId);
+        const auto sourceDevice = std::find_if (sourceDevices.begin(), sourceDevices.end(),
+            [sourceDeviceId] (const DeviceInfo& device) { return device.id == sourceDeviceId; });
+        if (sourceDevice == sourceDevices.end())
+            return false;
+
+        const auto targetDevices = engine.devices (targetTrackId);
+        if (sourceDevice->isInstrument
+            && std::any_of (targetDevices.begin(), targetDevices.end(),
+                            [] (const DeviceInfo& device) { return device.isInstrument; }))
+            return false;
+        if (sourceDevice->pluginIdentifier == DrumRackProcessor::pluginIdentifier)
+            return targetTrack != nullptr && targetTrack->type == roll::TrackType::Midi;
+        if (AudioEngine::isNativeEffectIdentifier (sourceDevice->pluginIdentifier)
+            || sourceDevice->pluginIdentifier == AudioEngine::autoPanPluginIdentifier)
+            return true;
+
+        const auto description = scanner.list().getTypeForIdentifierString (
+            sourceDevice->pluginIdentifier);
+        return description != nullptr && engine.canAcceptPlugin (targetTrackId, *description);
+    };
+    arrangement.canAcceptDeviceDrop = canTransferDevice;
+    arrangement.onDeviceDropped = [this] (
+        int sourceTrackId, int sourceDeviceId, int targetTrackId, bool copy)
+    {
+        transferDeviceToTrack (sourceTrackId, sourceDeviceId, targetTrackId, -1, copy);
+    };
     arrangement.canAcceptAudioDrop = [] (const juce::File& file, int trackId)
     {
         const auto extension = file.getFileExtension().toLowerCase();
@@ -2156,6 +2203,10 @@ MainComponent::MainComponent()
         setProjectStatus (clip != nullptr
             ? "MIDI imported: " + file.getFileName()
             : "Could not insert the MIDI file at this position.");
+    };
+    arrangement.onMidiClipExportRequested = [this] (int trackId, int clipId)
+    {
+        chooseMidiClipExportFile (trackId, clipId);
     };
     arrangement.onAudioClipDoubleClicked = [this] (int trackId, int clipId)
     {
@@ -2388,6 +2439,12 @@ MainComponent::MainComponent()
     deviceView.canPasteDevices = [this]
     {
         return ! copiedPluginStates.empty() && ! pluginCopyInProgress && ! pluginHistoryRestoreInProgress;
+    };
+    deviceView.canAcceptDeviceTransfer = canTransferDevice;
+    deviceView.onDeviceTransferRequested = [this] (
+        int sourceTrackId, int sourceDeviceId, int targetTrackId, int insertionIndex, bool copy)
+    {
+        transferDeviceToTrack (sourceTrackId, sourceDeviceId, targetTrackId, insertionIndex, copy);
     };
     deviceView.canAcceptPluginDrop = [this] (int trackId, const juce::String& identifier)
     {
@@ -2811,6 +2868,177 @@ void MainComponent::removeKeyListenerRecursively (juce::Component& component)
             removeKeyListenerRecursively (*child);
 }
 
+void MainComponent::transferDeviceToTrack (int sourceTrackId, int sourceDeviceId,
+                                           int targetTrackId, int insertionIndex, bool copy)
+{
+    if (sourceTrackId == targetTrackId || sourceDeviceId <= 0
+        || trackDuplicationInProgress || pluginCopyInProgress || pluginHistoryRestoreInProgress
+        || scanningPlugins || restoringProjectPlugins || projectFileOperationInProgress
+        || audioRenderInProgress || pendingAudioLoads > 0)
+        return;
+
+    const auto sourceDevices = engine.devices (sourceTrackId);
+    const auto sourceDevice = std::find_if (sourceDevices.begin(), sourceDevices.end(),
+        [sourceDeviceId] (const DeviceInfo& device) { return device.id == sourceDeviceId; });
+    if (sourceDevice == sourceDevices.end())
+        return;
+
+    const auto targetDevices = engine.devices (targetTrackId);
+    if (sourceDevice->isInstrument
+        && std::any_of (targetDevices.begin(), targetDevices.end(),
+                        [] (const DeviceInfo& device) { return device.isInstrument; }))
+    {
+        setProjectStatus ("Remove the target channel's instrument before moving or copying another one.");
+        return;
+    }
+
+    const auto* targetTrack = targetTrackId == AudioEngine::masterTrackId
+        ? nullptr : project.track (targetTrackId);
+    if (targetTrackId != AudioEngine::masterTrackId
+        && (targetTrack == nullptr || targetTrack->frozen || targetTrack->type == roll::TrackType::Group))
+    {
+        setProjectStatus ("The target channel is not available for a device transfer.");
+        return;
+    }
+
+    if (sourceDevice->pluginIdentifier == DrumRackProcessor::pluginIdentifier)
+    {
+        if (targetTrack == nullptr || targetTrack->type != roll::TrackType::Midi)
+        {
+            setProjectStatus ("The Drum Master can only be moved or copied to a MIDI channel.");
+            return;
+        }
+    }
+    else if (! AudioEngine::isNativeEffectIdentifier (sourceDevice->pluginIdentifier)
+             && sourceDevice->pluginIdentifier != AudioEngine::autoPanPluginIdentifier)
+    {
+        const auto description = scanner.list().getTypeForIdentifierString (
+            sourceDevice->pluginIdentifier);
+        if (description == nullptr || ! engine.canAcceptPlugin (targetTrackId, *description))
+        {
+            setProjectStatus ("This plugin is not compatible with the target channel.");
+            return;
+        }
+    }
+
+    bool statesCaptured = false;
+    juce::String stateCaptureError;
+    auto states = engine.getPluginStates (
+        { sourceTrackId, targetTrackId }, {}, &statesCaptured, &stateCaptureError);
+    if (! statesCaptured)
+    {
+        setProjectStatus ("Could not read the current plugin state; transfer was cancelled. "
+                          + stateCaptureError);
+        return;
+    }
+
+    const auto sourceOrder = static_cast<int> (sourceDevice - sourceDevices.begin());
+    const auto state = std::find_if (states.begin(), states.end(),
+        [sourceTrackId, sourceOrder] (const PluginState& candidate)
+        {
+            return candidate.trackId == sourceTrackId && candidate.order == sourceOrder;
+        });
+    if (state == states.end())
+    {
+        setProjectStatus ("Could not find the device state; transfer was cancelled.");
+        return;
+    }
+
+    struct TransferOperation
+    {
+        int sourceTrackId = -1;
+        int sourceDeviceId = -1;
+        int targetTrackId = -1;
+        bool copy = false;
+        PluginState state;
+    };
+
+    auto operation = std::make_shared<TransferOperation>();
+    operation->sourceTrackId = sourceTrackId;
+    operation->sourceDeviceId = sourceDeviceId;
+    operation->targetTrackId = targetTrackId;
+    operation->copy = copy;
+    operation->state = *state;
+
+    project.beginExternalEdit ({ sourceTrackId, targetTrackId }, states);
+    pluginCopyInProgress = true;
+    setProjectStatus (copy ? "Copying the configured plugin to the target channel..."
+                           : "Moving the configured plugin to the target channel...");
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    const auto finishTransfer = [this, token, operation] (
+        const juce::String& error, int targetDeviceId)
+    {
+        const auto alive = token.lock();
+        if (alive == nullptr || ! alive->load())
+            return;
+
+        const bool restored = error.isEmpty() && targetDeviceId > 0
+            && engine.restorePluginState (operation->targetTrackId, targetDeviceId,
+                                          operation->state.state);
+        if (! restored)
+        {
+            if (targetDeviceId > 0)
+                engine.removeDevice (operation->targetTrackId, targetDeviceId);
+            pluginCopyInProgress = false;
+            project.cancelEdit();
+            refreshDeviceView();
+            setProjectStatus ("Could not restore the plugin state; the source device was left unchanged.");
+            return;
+        }
+
+        engine.setDeviceBypassed (operation->targetTrackId, targetDeviceId,
+                                  operation->state.bypassed);
+        if (! operation->copy)
+        {
+            windows.erase (operation->sourceDeviceId);
+            closeWindowsOfRack (operation->sourceTrackId, operation->sourceDeviceId);
+            engine.removeDevice (operation->sourceTrackId, operation->sourceDeviceId);
+        }
+
+        pluginCopyInProgress = false;
+        project.endEdit();
+        if (operation->targetTrackId != AudioEngine::masterTrackId)
+            project.selectTrack (operation->targetTrackId);
+        project.sendChangeMessage();
+        refreshDeviceView();
+        setProjectStatus (operation->copy ? "Configured plugin copied to the target channel."
+                                          : "Configured plugin moved to the target channel.");
+    };
+
+    const auto& plugin = operation->state;
+    if (plugin.identifier == DrumRackProcessor::pluginIdentifier)
+    {
+        finishTransfer ({}, engine.addDrumRack (targetTrackId));
+        return;
+    }
+    if (AudioEngine::isNativeEffectIdentifier (plugin.identifier))
+    {
+        finishTransfer ({}, engine.addNativeEffect (targetTrackId, plugin.identifier,
+                                                     insertionIndex, true));
+        return;
+    }
+    if (plugin.identifier == AudioEngine::autoPanPluginIdentifier)
+    {
+        const int deviceId = engine.addNativeEffect (
+            targetTrackId, AudioEngine::utilityPluginIdentifier, insertionIndex, true);
+        finishTransfer ({}, deviceId);
+        return;
+    }
+
+    const auto description = scanner.list().getTypeForIdentifierString (plugin.identifier);
+    if (description == nullptr)
+    {
+        finishTransfer ("The plugin is not installed.", 0);
+        return;
+    }
+
+    engine.addDevice (targetTrackId, *description,
+        [finishTransfer] (const juce::String& error, int targetDeviceId)
+        {
+            finishTransfer (error, targetDeviceId);
+        }, insertionIndex, true);
+}
+
 void MainComponent::copyDevicesToClipboard (int trackId, const std::vector<int>& deviceIds)
 {
     copiedPluginStates.clear();
@@ -2819,7 +3047,15 @@ void MainComponent::copyDevicesToClipboard (int trackId, const std::vector<int>&
 
     const std::set<int> selected (deviceIds.begin(), deviceIds.end());
     const auto devices = engine.devices (trackId);
-    auto states = engine.getPluginStates();
+    bool statesCaptured = false;
+    juce::String stateCaptureError;
+    auto states = engine.getPluginStates ({ trackId }, {}, &statesCaptured, &stateCaptureError);
+    if (! statesCaptured)
+    {
+        setProjectStatus ("Could not read the selected plugin state; copy was cancelled. "
+                          + stateCaptureError);
+        return;
+    }
     for (std::size_t order = 0; order < devices.size(); ++order)
     {
         if (! selected.contains (devices[order].id))
@@ -2858,11 +3094,30 @@ void MainComponent::pasteDevicesToTrack (int trackId)
         return;
     }
 
+    const auto targetDevices = engine.devices (trackId);
+    const bool targetHasInstrument = std::any_of (
+        targetDevices.begin(), targetDevices.end(),
+        [] (const DeviceInfo& device) { return device.isInstrument; });
+    const bool copiesInstrument = std::any_of (
+        copiedPluginStates.begin(), copiedPluginStates.end(), [this] (const PluginState& state)
+        {
+            if (state.identifier == DrumRackProcessor::pluginIdentifier)
+                return true;
+            if (AudioEngine::isNativeEffectIdentifier (state.identifier)
+                || state.identifier == AudioEngine::autoPanPluginIdentifier)
+                return false;
+            const auto description = scanner.list().getTypeForIdentifierString (state.identifier);
+            return description != nullptr && description->isInstrument;
+        });
+    if (targetHasInstrument && copiesInstrument)
+    {
+        setProjectStatus ("Remove the target channel's instrument before pasting another one.");
+        return;
+    }
+
     auto operation = std::make_shared<PluginCopyOperation>();
     operation->targetTrackId = trackId;
     operation->devices = copiedPluginStates;
-    for (const auto& device : engine.devices (trackId))
-        operation->targetIdentifiers.insert (device.pluginIdentifier.toStdString());
     for (const auto& state : operation->devices)
         if (state.groupId > 0)
             ++operation->expectedGroupSizes[state.groupId];
@@ -2883,13 +3138,6 @@ void MainComponent::pasteNextDevice()
     while (operation->nextDevice < operation->devices.size())
     {
         const auto state = operation->devices[operation->nextDevice++];
-        const auto identifier = state.identifier.toStdString();
-        if (operation->targetIdentifiers.contains (identifier))
-        {
-            ++operation->failures;
-            continue;
-        }
-
         int deviceId = 0;
         if (state.identifier == AudioEngine::drumRackPluginIdentifier)
         {
@@ -2897,11 +3145,12 @@ void MainComponent::pasteNextDevice()
         }
         else if (AudioEngine::isNativeEffectIdentifier (state.identifier))
         {
-            deviceId = engine.addNativeEffect (operation->targetTrackId, state.identifier);
+            deviceId = engine.addNativeEffect (operation->targetTrackId, state.identifier, -1, true);
         }
         else if (state.identifier == AudioEngine::autoPanPluginIdentifier)
         {
-            deviceId = engine.addUtility (operation->targetTrackId);
+            deviceId = engine.addNativeEffect (
+                operation->targetTrackId, AudioEngine::utilityPluginIdentifier, -1, true);
         }
         else
         {
@@ -2928,14 +3177,19 @@ void MainComponent::pasteNextDevice()
                     else
                     {
                         if (! engine.restorePluginState (operation->targetTrackId, loadedDeviceId, state.state))
+                        {
+                            engine.removeDevice (operation->targetTrackId, loadedDeviceId);
                             ++operation->failures;
-                        engine.setDeviceBypassed (operation->targetTrackId, loadedDeviceId, state.bypassed);
-                        operation->targetIdentifiers.insert (state.identifier.toStdString());
-                        operation->copiedGroups[state.groupId].push_back (loadedDeviceId);
-                        ++operation->added;
+                        }
+                        else
+                        {
+                            engine.setDeviceBypassed (operation->targetTrackId, loadedDeviceId, state.bypassed);
+                            operation->copiedGroups[state.groupId].push_back (loadedDeviceId);
+                            ++operation->added;
+                        }
                     }
                     pasteNextDevice();
-                }, -1);
+                }, -1, true);
             return;
         }
 
@@ -2945,11 +3199,16 @@ void MainComponent::pasteNextDevice()
             continue;
         }
         if (! engine.restorePluginState (operation->targetTrackId, deviceId, state.state))
+        {
+            engine.removeDevice (operation->targetTrackId, deviceId);
             ++operation->failures;
-        engine.setDeviceBypassed (operation->targetTrackId, deviceId, state.bypassed);
-        operation->targetIdentifiers.insert (state.identifier.toStdString());
-        operation->copiedGroups[state.groupId].push_back (deviceId);
-        ++operation->added;
+        }
+        else
+        {
+            engine.setDeviceBypassed (operation->targetTrackId, deviceId, state.bypassed);
+            operation->copiedGroups[state.groupId].push_back (deviceId);
+            ++operation->added;
+        }
     }
 
     for (const auto& [groupId, deviceIds] : operation->copiedGroups)
@@ -4975,9 +5234,15 @@ void MainComponent::finishRecording (bool discard)
 
 void MainComponent::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
                                                        int numInputChannels,
-                                                       float* const*, int, int numSamples,
+                                                       float* const* outputChannelData,
+                                                       int numOutputChannels, int numSamples,
                                                        const juce::AudioIODeviceCallbackContext&)
 {
+    // AudioDeviceManager mixes outputs from every callback; this input-only callback must add silence.
+    for (int channel = 0; outputChannelData != nullptr && channel < numOutputChannels; ++channel)
+        if (outputChannelData[channel] != nullptr)
+            std::fill_n (outputChannelData[channel], numSamples, 0.0f);
+
     recordingCallbacksInFlight.fetch_add (1, std::memory_order_seq_cst);
     std::array<float, 2> inputPeaks {};
     for (int channel = 0; inputChannelData != nullptr && channel < std::min (2, numInputChannels);
@@ -5412,6 +5677,69 @@ void MainComponent::chooseWavExportFile()
                 return;
 
             showWavRenderOptions (result.withFileExtension (".wav"));
+        });
+}
+
+void MainComponent::chooseMidiClipExportFile (int trackId, int clipId)
+{
+    if (midiExportChooser != nullptr)
+        return;
+
+    const auto* track = project.track (trackId);
+    const auto* placement = track != nullptr && track->type == roll::TrackType::Midi
+        ? track->find (clipId) : nullptr;
+    if (placement == nullptr)
+    {
+        setProjectStatus ("The MIDI clip is no longer available.");
+        return;
+    }
+
+    const auto suggestedName = juce::File::createLegalFileName (
+        placement->name.empty() ? "MIDI Clip" : juce::String (placement->name));
+    const auto suggestedFile = currentProjectFile.existsAsFile()
+        ? currentProjectFile.getParentDirectory().getChildFile (suggestedName + ".mid")
+        : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory)
+              .getChildFile (suggestedName + ".mid");
+    const auto clip = placement->clip;
+    const double bpm = engine.graph().getBpm();
+    midiExportChooser = std::make_unique<juce::FileChooser> (
+        "Export MIDI Clip", suggestedFile, "*.mid");
+
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    midiExportChooser->launchAsync (
+        juce::FileBrowserComponent::saveMode
+            | juce::FileBrowserComponent::canSelectFiles
+            | juce::FileBrowserComponent::warnAboutOverwriting,
+        [this, token, clip, bpm] (const juce::FileChooser& chooser)
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+                return;
+
+            const auto result = chooser.getResult();
+            midiExportChooser.reset();
+            if (result == juce::File())
+                return;
+
+            const auto file = result.withFileExtension (".mid");
+            juce::FileOutputStream output (file);
+            if (! output.openedOk())
+            {
+                setProjectStatus ("Could not create the MIDI file.");
+                return;
+            }
+
+            const auto writeResult = midi_clip_export::write (clip, bpm, output);
+            output.flush();
+            if (writeResult.failed() || output.getStatus().failed())
+            {
+                setProjectStatus ("Could not export MIDI: "
+                    + (writeResult.failed() ? writeResult.getErrorMessage()
+                                            : output.getStatus().getErrorMessage()));
+                return;
+            }
+
+            setProjectStatus ("MIDI clip exported: " + file.getFileName());
         });
 }
 
@@ -6766,7 +7094,17 @@ void MainComponent::duplicateSelectedTrack (int trackId)
         return;
     }
 
-    auto pluginStates = engine.getPluginStates ({ trackId });
+    bool pluginStateCaptured = false;
+    juce::String stateCaptureError;
+    auto pluginStates = engine.getPluginStates (
+        { trackId }, {}, &pluginStateCaptured, &stateCaptureError);
+    if (! pluginStateCaptured)
+    {
+        setProjectStatus ("Could not read the current plugin state; duplication was cancelled. "
+                          + stateCaptureError);
+        return;
+    }
+
     project.beginExternalEdit ({ trackId }, pluginStates);
     const auto duplicateId = project.duplicateTrack (trackId);
     if (duplicateId < 0)

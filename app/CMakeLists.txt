@@ -51,6 +51,7 @@ target_sources(MaXXXtudio PRIVATE
     PianoRollEditor.cpp
     MainComponent.cpp
     ProjectFile.cpp
+    MidiClipExporter.cpp
     GrooveLibrary.cpp
     GrooveBrowser.cpp)
 
@@ -251,6 +252,23 @@ if(ROLL_BUILD_TESTS)
             juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
     add_test(NAME ProjectFileTests COMMAND project_file_tests)
+
+    add_executable(midi_clip_export_tests
+        ../tests/MidiClipExporterTests.cpp
+        MidiClipExporter.cpp)
+    target_include_directories(midi_clip_export_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(midi_clip_export_tests PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0)
+    target_link_libraries(midi_clip_export_tests
+        PRIVATE
+            roll_core
+            Catch2::Catch2WithMain
+            juce::juce_audio_utils
+            juce::juce_recommended_config_flags
+            juce::juce_recommended_warning_flags)
+    add_test(NAME MidiClipExporterTests COMMAND midi_clip_export_tests)
 
     add_executable(groove_library_tests
         ../tests/GrooveLibraryTests.cpp

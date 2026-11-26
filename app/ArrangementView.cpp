@@ -29,6 +29,28 @@ juce::Colour ArrangementView::colourFor (int trackId)
 
 namespace
 {
+bool parseDeviceDragDescription (const juce::String& description, int& sourceTrackId,
+                                 int& sourceDeviceId, bool& copy)
+{
+    copy = false;
+    const auto prefix = description.startsWith ("device-order:") ? juce::String ("device-order:")
+        : description.startsWith ("device-move:") ? juce::String ("device-move:")
+        : description.startsWith ("device-copy:") ? juce::String ("device-copy:")
+        : juce::String();
+    if (prefix.isEmpty())
+        return false;
+
+    const auto payload = description.substring (prefix.length());
+    const int separator = payload.indexOfChar (':');
+    if (separator <= 0)
+        return false;
+
+    sourceTrackId = payload.substring (0, separator).getIntValue();
+    sourceDeviceId = payload.substring (separator + 1).getIntValue();
+    copy = description.startsWith ("device-copy:");
+    return sourceTrackId >= 0 && sourceDeviceId > 0;
+}
+
 constexpr std::array<std::uint32_t, 9> trackColours {
     0xffffd52a, 0xffffec75, 0xffffa23b, 0xffc35cff, 0xffe58aff,
     0xff863bff, 0xffb77a19, 0xff788b9e, 0xffa7b3bd
@@ -963,9 +985,11 @@ public:
 
             const bool masterTarget = dragTrackIndex == static_cast<int> (project.tracks.size());
             const juce::String message = dragDropAllowed
-                ? (masterTarget ? "Drop an effect to add it to Master"
-                                : dragDropIsAudio ? "Drop audio to add it"
-                                : "Drop content to add it")
+                ? (dragDropIsDevice ? dragDropIsCopy ? "Copy plugin to this channel"
+                                                      : "Move plugin to this channel"
+                   : masterTarget ? "Drop an effect to add it to Master"
+                   : dragDropIsAudio ? "Drop audio to add it"
+                   : "Drop content to add it")
                 : (masterTarget ? "The Master track only accepts effects"
                                 : dragDropIsAudio ? "Audio unavailable on this track" : "Plugin unavailable on this track");
             const auto hint = juce::Rectangle<int> (8, y + 6, 220, 22);
@@ -992,7 +1016,14 @@ public:
     {
         // JUCE checks interest before converting localPosition to this target's coordinates.
         const auto description = details.description.toString();
-        return description.startsWith ("plugin:") || description.startsWith ("audio:");
+        const bool midiDrop = description.startsWith ("browser-item:")
+            && juce::File (description.substring (13)).hasFileExtension (".mid;.midi");
+        int sourceTrackId = -1, sourceDeviceId = -1;
+        bool copy = false;
+        const bool deviceDrop = parseDeviceDragDescription (
+            description, sourceTrackId, sourceDeviceId, copy);
+        return description.startsWith ("plugin:") || description.startsWith ("audio:")
+            || midiDrop || (deviceDrop && owner.canAcceptDeviceDrop);
     }
 
     void itemDragEnter (const SourceDetails& details) override
@@ -1000,8 +1031,19 @@ public:
         updateDragTarget (details);
         const auto description = details.description.toString();
         const bool audio = description.startsWith ("audio:");
-        notifyAction (audio ? "Dragging audio into the Arrangement" : "Dragging a plugin into the Arrangement",
-                     audio ? icons::Icon::Waveform : icons::Icon::Mixer, true, 0);
+        const bool midi = description.startsWith ("browser-item:")
+            && juce::File (description.substring (13)).hasFileExtension (".mid;.midi");
+        int sourceTrackId = -1, sourceDeviceId = -1;
+        bool copy = false;
+        const bool device = parseDeviceDragDescription (
+            description, sourceTrackId, sourceDeviceId, copy);
+        notifyAction (device ? copy ? "Copying a plugin to another channel"
+                                   : "Moving a plugin to another channel"
+                            : audio ? "Dragging audio into the Arrangement"
+                            : midi ? "Dragging MIDI into the Arrangement"
+                                   : "Dragging a plugin into the Arrangement",
+                     audio ? icons::Icon::Waveform : midi ? icons::Icon::PianoRoll : icons::Icon::Mixer,
+                     true, 0);
     }
     void itemDragMove (const SourceDetails& details) override  { updateDragTarget (details); }
     void itemDragExit (const SourceDetails&) override
@@ -1009,6 +1051,7 @@ public:
         dragTrackIndex = -1;
         dragDropAllowed = false;
         dragDropIsAudio = false;
+        dragDropIsDevice = dragDropIsCopy = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
         notifyAction (juce::String(), icons::Icon::Pointer, false, 0);
         repaint();
@@ -1024,6 +1067,7 @@ public:
         const bool midiDrop = description.startsWith ("browser-item:")
             && juce::File (description.substring (13)).hasFileExtension (".mid;.midi");
         dragDropIsAudio = false;
+        dragDropIsDevice = dragDropIsCopy = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
         repaint();
         const auto trackId = trackIdAt (trackIndex);
@@ -1051,6 +1095,20 @@ public:
         {
             notifyAction ("Plugin dropped in the Arrangement", icons::Icon::Mixer, false, 650);
             owner.onPluginDropped (description.substring (7), trackId, beat);
+            return;
+        }
+
+        int sourceTrackId = -1, sourceDeviceId = -1;
+        bool copy = false;
+        if (parseDeviceDragDescription (description, sourceTrackId, sourceDeviceId, copy)
+            && owner.canAcceptDeviceDrop
+            && owner.canAcceptDeviceDrop (sourceTrackId, sourceDeviceId, trackId, copy)
+            && owner.onDeviceDropped)
+        {
+            notifyAction (copy ? "Plugin copied to the Arrangement channel"
+                               : "Plugin moved to the Arrangement channel",
+                          icons::Icon::Mixer, false, 650);
+            owner.onDeviceDropped (sourceTrackId, sourceDeviceId, trackId, copy);
         }
     }
 
@@ -1078,6 +1136,7 @@ public:
         dragTrackIndex = -1;
         dragDropAllowed = false;
         dragDropIsAudio = false;
+        dragDropIsDevice = dragDropIsCopy = false;
         setMouseCursor (juce::MouseCursor::NormalCursor);
         notifyAction (juce::String(), icons::Icon::Pointer, false, 0);
         repaint();
@@ -1091,6 +1150,7 @@ public:
             dragTrackIndex = -1;
             dragDropAllowed = false;
             dragDropIsAudio = false;
+            dragDropIsDevice = dragDropIsCopy = false;
             notifyAction ("Drop an audio file", icons::Icon::Waveform, false, 650);
             repaint();
             return;
@@ -1111,6 +1171,7 @@ public:
         dragTrackIndex = -1;
         dragDropAllowed = false;
         dragDropIsAudio = false;
+        dragDropIsDevice = dragDropIsCopy = false;
         repaint();
     }
 
@@ -1394,6 +1455,11 @@ public:
             menu.addItem (4, theme::ui (enabled ? "Disable Clip (0)" : "Enable Clip (0)"));
             if (isAudio)
                 menu.addItem (5, theme::ui ("Locate in Browser"));
+            else
+                menu.addItem (10, theme::ui ("Export MIDI Clip..."),
+                              midiClip != nullptr && std::any_of (
+                                  midiClip->clip.notes().begin(), midiClip->clip.notes().end(),
+                                  [] (const auto& note) { return ! note.muted; }));
             menu.addItem (2, theme::ui ("Delete Clip"));
             const double clipStart = isAudio ? (audioClip != nullptr ? audioClip->start : 0.0)
                                              : (midiClip != nullptr ? midiClip->start : 0.0);
@@ -1483,6 +1549,8 @@ public:
                 safeThis->project.setClipEnabled (trackId, clipId, isAudio, enableClip);
             else if (result == 5 && isAudio && safeThis->owner.onLocateAudioFileRequested)
                 safeThis->owner.onLocateAudioFileRequested (audioFile);
+            else if (result == 10 && ! isAudio && safeThis->owner.onMidiClipExportRequested)
+                safeThis->owner.onMidiClipExportRequested (trackId, clipId);
             else if (result == 1)
             {
                 double start = 0.0, end = 0.0;
@@ -3565,6 +3633,9 @@ private:
         const auto description = details.description.toString();
         const int target = trackIndexAt (details.localPosition.y);
         dragDropIsAudio = description.startsWith ("audio:");
+        int sourceTrackId = -1, sourceDeviceId = -1;
+        dragDropIsDevice = parseDeviceDragDescription (
+            description, sourceTrackId, sourceDeviceId, dragDropIsCopy);
         const bool midiDrop = description.startsWith ("browser-item:")
             && juce::File (description.substring (13)).hasFileExtension (".mid;.midi");
         dragTrackIndex = target;
@@ -3577,14 +3648,19 @@ private:
         else if (midiDrop)
         {
             const auto* track = project.track (trackId);
-            dragDropAllowed = track != nullptr
-                && (track->type == roll::TrackType::Midi || trackId == 0);
+            dragDropAllowed = track != nullptr;
         }
         else if (description.startsWith ("plugin:"))
             dragDropAllowed = owner.canAcceptPluginDrop
                            && owner.canAcceptPluginDrop (description.substring (7), trackId);
-        setMouseCursor (dragDropAllowed ? juce::MouseCursor::CopyingCursor
-                                        : juce::MouseCursor::NormalCursor);
+        else if (dragDropIsDevice)
+            dragDropAllowed = owner.canAcceptDeviceDrop
+                           && owner.canAcceptDeviceDrop (
+                                  sourceTrackId, sourceDeviceId, trackId, dragDropIsCopy);
+        setMouseCursor (dragDropAllowed
+            ? dragDropIsDevice && ! dragDropIsCopy ? juce::MouseCursor::DraggingHandCursor
+                                                   : juce::MouseCursor::CopyingCursor
+            : juce::MouseCursor::NormalCursor);
         repaint();
     }
 
@@ -3892,6 +3968,7 @@ private:
     int movePreviewTrackIndex = -1;
     double movePreviewStart = 0.0;
     bool dragDropAllowed = false, dragDropIsAudio = false;
+    bool dragDropIsDevice = false, dragDropIsCopy = false;
     int curTrack = -1, curClip = -1, curAudioClipId = -1;
     int dragTrackIndex = -1;
     double origStart = 0.0, origLen = 4.0, downBeat = 0.0, dragBeat = 0.0;

@@ -516,14 +516,26 @@ void PluginWorkerRuntime::processRequest (pluginworker::Command command)
             }
             const auto stateFile = juce::File::createFileWithoutCheckingPath (
                 juce::String::fromUTF8 (shared->stateFilePath));
+            if (stateFile.existsAsFile() && ! stateFile.deleteFile())
+            {
+                copyString (shared->error, pluginworker::errorLength,
+                            "Could not replace the previous plugin state file.");
+                break;
+            }
             juce::FileOutputStream stream (stateFile);
             if (state.getSize() <= static_cast<std::size_t> (std::numeric_limits<int>::max())
                 && stream.openedOk()
                 && (state.getSize() == 0 || stream.write (state.getData(), state.getSize())))
             {
-                shared->stateBytes = static_cast<LONG> (state.getSize());
                 stream.flush();
-                InterlockedExchange (&shared->result, 1);
+                if (stateFile.getSize() == static_cast<juce::int64> (state.getSize()))
+                {
+                    shared->stateBytes = static_cast<LONG> (state.getSize());
+                    InterlockedExchange (&shared->result, 1);
+                }
+                else
+                    copyString (shared->error, pluginworker::errorLength,
+                                "The plugin state file was not written completely.");
             }
             else
             {

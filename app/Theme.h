@@ -340,7 +340,7 @@ inline juce::Colour magenta()      { return juce::Colour (0xffff4fa3); }
 inline juce::Colour amber()        { return juce::Colour (0xffffa23b); }
 inline juce::Colour emerald()      { return juce::Colour (0xff38d99b); }
 inline juce::Colour noteFill()     { return accent(); }
-inline juce::Colour noteSelected() { return accentHover(); }
+inline juce::Colour noteSelected() { return recording(); }
 inline juce::Colour rowWhite()     { return panel(); }
 inline juce::Colour rowBlack()     { return control(); }
 inline juce::Colour rowInScale()

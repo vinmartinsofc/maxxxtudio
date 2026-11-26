@@ -130,14 +130,15 @@ public:
 
     void mouseDrag (const juce::MouseEvent& event) override
     {
-        if (info.isInstrument || info.groupId > 0 || dragStarted || ! event.mods.isLeftButtonDown()
-            || event.getDistanceFromDragStart() < 6)
+        if (dragStarted || ! event.mods.isLeftButtonDown() || event.getDistanceFromDragStart() < 6)
             return;
 
         if (auto* container = juce::DragAndDropContainer::findParentDragContainerFor (this))
         {
             const auto image = juce::ScaledImage (createComponentSnapshot (getLocalBounds()));
-            container->startDragging (dragSourceDescription(), this, image, false, nullptr, &event.source);
+            const bool copy = event.mods.isCtrlDown() || event.mods.isCommandDown();
+            container->startDragging (dragSourceDescription (copy), this, image, false, nullptr,
+                                      &event.source);
             dragStarted = true;
         }
     }
@@ -155,12 +156,15 @@ public:
         if (details.description.toString().startsWith ("plugin:"))
             return owner.isInterestedInDragSource (details);
 
-        if (info.groupId > 0)
-            return false;
-
         int sourceTrackId = -1, sourceDeviceId = -1;
-        return ! info.isInstrument && draggedDevice (details, sourceTrackId, sourceDeviceId)
-            && sourceTrackId == owner.trackId && sourceDeviceId != info.id;
+        bool copy = false;
+        if (! owner.draggedDevice (details, sourceTrackId, sourceDeviceId, copy))
+            return false;
+        if (sourceTrackId == owner.trackId)
+            return ! copy && details.description.toString().startsWith ("device-order:")
+                && info.groupId == 0 && ! info.isInstrument && sourceDeviceId != info.id;
+        return owner.canAcceptDeviceTransfer
+            && owner.canAcceptDeviceTransfer (sourceTrackId, sourceDeviceId, owner.trackId, copy);
     }
 
     void itemDragEnter (const SourceDetails& details) override
@@ -201,17 +205,34 @@ public:
         }
 
         int sourceTrackId = -1, sourceDeviceId = -1;
+        bool copy = false;
+        if (! owner.draggedDevice (details, sourceTrackId, sourceDeviceId, copy))
+            return;
+
         const bool afterTarget = details.localPosition.x >= getWidth() / 2;
         const int targetDeviceId = info.id;
         auto cb = owner.onReorder;
         dropHighlight = false;
         repaint();
-        if (draggedDevice (details, sourceTrackId, sourceDeviceId))
+        if (sourceTrackId == owner.trackId && ! copy
+            && details.description.toString().startsWith ("device-order:"))
             juce::MessageManager::callAsync ([cb, sourceTrackId, sourceDeviceId,
                                                targetDeviceId, afterTarget]
             {
                 if (cb) cb (sourceTrackId, sourceDeviceId, targetDeviceId, afterTarget);
             });
+        else if (owner.onDeviceTransferRequested)
+        {
+            const int targetTrackId = owner.trackId;
+            const int insertionIndex = owner.insertionIndexAt (
+                owner.getLocalPoint (this, details.localPosition).x);
+            auto transfer = owner.onDeviceTransferRequested;
+            juce::MessageManager::callAsync ([transfer, sourceTrackId, sourceDeviceId,
+                                              targetTrackId, insertionIndex, copy]
+            {
+                transfer (sourceTrackId, sourceDeviceId, targetTrackId, insertionIndex, copy);
+            });
+        }
     }
 
     void paint (juce::Graphics& g) override
@@ -311,27 +332,12 @@ public:
     }
 
 private:
-    juce::var dragSourceDescription() const
+    juce::var dragSourceDescription (bool copy) const
     {
-        return info.isInstrument ? juce::var()
-            : juce::var ("device-order:" + juce::String (owner.trackId) + ":" + juce::String (info.id));
-    }
-
-    bool draggedDevice (const SourceDetails& details, int& sourceTrackId, int& sourceDeviceId) const
-    {
-        const auto description = details.description.toString();
-        const juce::String prefix = "device-order:";
-        if (! description.startsWith (prefix))
-            return false;
-
-        const auto payload = description.substring (prefix.length());
-        const int separator = payload.indexOfChar (':');
-        if (separator <= 0)
-            return false;
-
-        sourceTrackId = payload.substring (0, separator).getIntValue();
-        sourceDeviceId = payload.substring (separator + 1).getIntValue();
-        return sourceTrackId >= 0 && sourceDeviceId > 0;
+        const auto source = juce::String (owner.trackId) + ":" + juce::String (info.id);
+        if (! copy && ! info.isInstrument && info.groupId == 0)
+            return "device-order:" + source;
+        return juce::String (copy ? "device-copy:" : "device-move:") + source;
     }
 
     void updateDropTarget (const SourceDetails& details)
@@ -431,19 +437,34 @@ bool DeviceView::keyPressed (const juce::KeyPress& key, juce::Component*)
 bool DeviceView::isInterestedInDragSource (const SourceDetails& details)
 {
     const auto description = details.description.toString();
-    return description.startsWith ("plugin:") && canAcceptPluginDrop
-        && canAcceptPluginDrop (trackId, description.substring (7));
+    if (description.startsWith ("plugin:"))
+        return canAcceptPluginDrop
+            && canAcceptPluginDrop (trackId, description.substring (7));
+
+    int sourceTrackId = -1, sourceDeviceId = -1;
+    bool copy = false;
+    return draggedDevice (details, sourceTrackId, sourceDeviceId, copy)
+        && sourceTrackId != trackId && canAcceptDeviceTransfer
+        && canAcceptDeviceTransfer (sourceTrackId, sourceDeviceId, trackId, copy);
 }
 
 void DeviceView::itemDragEnter (const SourceDetails& details)
 {
-    setMouseCursor (juce::MouseCursor::CopyingCursor);
+    int sourceTrackId = -1, sourceDeviceId = -1;
+    bool copy = false;
+    const bool isDeviceTransfer = draggedDevice (details, sourceTrackId, sourceDeviceId, copy);
+    setMouseCursor (isDeviceTransfer && ! copy ? juce::MouseCursor::DraggingHandCursor
+                                               : juce::MouseCursor::CopyingCursor);
     updatePluginDrop (details);
 }
 
 void DeviceView::itemDragMove (const SourceDetails& details)
 {
-    setMouseCursor (juce::MouseCursor::CopyingCursor);
+    int sourceTrackId = -1, sourceDeviceId = -1;
+    bool copy = false;
+    const bool isDeviceTransfer = draggedDevice (details, sourceTrackId, sourceDeviceId, copy);
+    setMouseCursor (isDeviceTransfer && ! copy ? juce::MouseCursor::DraggingHandCursor
+                                               : juce::MouseCursor::CopyingCursor);
     updatePluginDrop (details);
 }
 
@@ -472,6 +493,21 @@ void DeviceView::itemDropped (const SourceDetails& details)
         {
             if (callback) callback (targetTrackId, identifier, insertionIndex);
         });
+    }
+    else
+    {
+        int sourceTrackId = -1, sourceDeviceId = -1;
+        bool copy = false;
+        if (draggedDevice (details, sourceTrackId, sourceDeviceId, copy)
+            && sourceTrackId != targetTrackId && onDeviceTransferRequested)
+        {
+            auto transfer = onDeviceTransferRequested;
+            juce::MessageManager::callAsync ([transfer, sourceTrackId, sourceDeviceId,
+                                              targetTrackId, insertionIndex, copy]
+            {
+                transfer (sourceTrackId, sourceDeviceId, targetTrackId, insertionIndex, copy);
+            });
+        }
     }
 }
 
@@ -512,6 +548,29 @@ int DeviceView::insertionIndexAt (int x) const
         i = last + 1;
     }
     return static_cast<int> (boxes.size());
+}
+
+bool DeviceView::draggedDevice (const SourceDetails& details, int& sourceTrackId,
+                                int& sourceDeviceId, bool& copy) const
+{
+    copy = false;
+    const auto description = details.description.toString();
+    const auto prefix = description.startsWith ("device-order:") ? juce::String ("device-order:")
+        : description.startsWith ("device-move:") ? juce::String ("device-move:")
+        : description.startsWith ("device-copy:") ? juce::String ("device-copy:")
+        : juce::String();
+    if (prefix.isEmpty())
+        return false;
+
+    const auto payload = description.substring (prefix.length());
+    const int separator = payload.indexOfChar (':');
+    if (separator <= 0)
+        return false;
+
+    sourceTrackId = payload.substring (0, separator).getIntValue();
+    sourceDeviceId = payload.substring (separator + 1).getIntValue();
+    copy = description.startsWith ("device-copy:");
+    return sourceTrackId >= 0 && sourceDeviceId > 0;
 }
 
 void DeviceView::updatePluginDrop (const SourceDetails& details)

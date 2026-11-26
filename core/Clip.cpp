@@ -1,6 +1,7 @@
 #include "Clip.h"
 #include <algorithm>
 #include <cmath>
+#include <set>
 
 namespace roll
 {
@@ -73,8 +74,23 @@ void Clip::resolveOverlaps (const std::vector<int>& ids)
 
 void Clip::setNotes(std::vector<Note> newNotes)
 {
-    notesVec = std::move(newNotes);
-    for (const auto& n : notesVec)
-        nextId = std::max(nextId, n.id + 1);
+    std::set<int> usedIds;
+    for (auto& note : newNotes)
+        if (note.id <= 0 || ! usedIds.insert (note.id).second)
+            note.id = 0;
+
+    for (auto& note : newNotes)
+    {
+        if (note.id != 0)
+            continue;
+        while (usedIds.count (nextId) != 0)
+            ++nextId;
+        note.id = nextId++;
+        usedIds.insert (note.id);
+    }
+
+    for (const auto& note : newNotes)
+        nextId = std::max (nextId, note.id + 1);
+    notesVec = std::move (newNotes);
 }
 } // namespace roll
