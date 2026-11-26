@@ -3937,7 +3937,7 @@ public:
             if (! control->isVisible())
                 continue;
             auto bounds = control->getBounds();
-            bounds.translate (-headerWidth + scrollX, -bounds.getY());
+            bounds.translate (-owner.trackPaneWidth() + scrollX, -bounds.getY());
             bounds.setHeight (getHeight());
             g.excludeClipRegion (bounds);
         }
@@ -4811,6 +4811,27 @@ public:
             repaint (10, getHeight() - 13, getWidth() - 20, 10);
         }
     }
+    void setInputPeaks (ArrangementView::LiveInputValues values)
+    {
+        const float left = values.active ? values.left : 0.0f;
+        const float right = values.active ? values.right : 0.0f;
+        if (inputMeterActive != values.active || std::abs (left - inputLeftPeak) > 0.001f
+            || std::abs (right - inputRightPeak) > 0.001f)
+        {
+            inputMeterActive = values.active;
+            inputLeftPeak = left;
+            inputRightPeak = right;
+            repaint();
+        }
+    }
+    void setRecordingIndicatorState (ArrangementView::RecordingIndicatorState state)
+    {
+        if (recordingIndicatorState != state)
+        {
+            recordingIndicatorState = state;
+            repaint();
+        }
+    }
     void refreshText()
     {
         refreshMidiMappingInfo();
@@ -4917,17 +4938,60 @@ public:
         g.setColour (theme::border());
         g.drawHorizontalLine (getHeight() - 1, 0.0f, static_cast<float> (getWidth()));
 
-        if (track == nullptr || ! track->collapsed)
+        if (recordingIndicatorState != ArrangementView::RecordingIndicatorState::None)
+        {
+            const auto recordingColour = recordingIndicatorState
+                    == ArrangementView::RecordingIndicatorState::CountIn
+                ? theme::warning() : theme::recording();
+            const juce::String statusText = recordingIndicatorState
+                    == ArrangementView::RecordingIndicatorState::CountIn
+                ? "COUNT-IN"
+                : recordingIndicatorState == ArrangementView::RecordingIndicatorState::Midi
+                    ? "REC MIDI" : "REC AUDIO";
+            if (track != nullptr && track->collapsed)
+            {
+                g.setColour (recordingColour);
+                g.fillEllipse (getWidth() - 9.0f, 5.0f, 6.0f, 6.0f);
+            }
+            else
+            {
+                g.setColour (recordingColour.withAlpha (0.16f));
+                g.fillRoundedRectangle (14.0f, 26.0f, 72.0f, 14.0f, 4.0f);
+                g.setColour (recordingColour);
+                g.fillEllipse (18.0f, 30.0f, 6.0f, 6.0f);
+                g.setFont (theme::fontOptions (9.5f, juce::Font::bold));
+                g.drawText (statusText, 28, 26, 56, 14, juce::Justification::centredLeft, true);
+            }
+        }
+        else if (track == nullptr || ! track->collapsed)
         {
             g.setColour (theme::textDim());
             g.setFont (theme::fontOptions (12.5f));
             const juce::String summary = owner.deviceSummary ? owner.deviceSummary (trackId) : juce::String();
             g.drawText (summary.isEmpty() ? theme::ui ("No instrument") : summary,
-                        14, 26, getWidth() - 30, 14, juce::Justification::centredLeft, true);
+                        14, 26, getWidth() - (inputMeterActive ? 58 : 30), 14,
+                        juce::Justification::centredLeft, true);
         }
 
         if (getHeight() >= 40)
         {
+            if (inputMeterActive)
+            {
+                g.setColour (theme::textDim());
+                g.setFont (theme::fontOptions (8.0f, juce::Font::bold));
+                g.drawText ("IN", getWidth() - 28, 26, 24, 8, juce::Justification::centred);
+                const float inputMeterTop = 36.0f;
+                const float inputMeterBottom = std::max (
+                    inputMeterTop + 4.0f, static_cast<float> (getHeight() - 20));
+                theme::drawSegmentedMeter (g,
+                    juce::Rectangle<float> (static_cast<float> (getWidth() - 20), inputMeterTop,
+                                            4.0f, inputMeterBottom - inputMeterTop),
+                    theme::meterAmount (inputLeftPeak), true, 18);
+                theme::drawSegmentedMeter (g,
+                    juce::Rectangle<float> (static_cast<float> (getWidth() - 12), inputMeterTop,
+                                            4.0f, inputMeterBottom - inputMeterTop),
+                    theme::meterAmount (inputRightPeak), true, 18);
+            }
             theme::drawSegmentedMeter (g,
                 juce::Rectangle<float> (10.0f, static_cast<float> (getHeight() - 13),
                                         static_cast<float> (getWidth() - 20), 4.0f),
@@ -5191,6 +5255,10 @@ private:
     juce::TextButton routingButton;
     MixerKnobSlider volume, pan;
     float leftPeak = 0.0f, rightPeak = 0.0f;
+    float inputLeftPeak = 0.0f, inputRightPeak = 0.0f;
+    bool inputMeterActive = false;
+    ArrangementView::RecordingIndicatorState recordingIndicatorState
+        = ArrangementView::RecordingIndicatorState::None;
 };
 
 // ============================================================ MasterHeader (Master track)
@@ -5868,6 +5936,7 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     addAndMakeVisible (*overview);
     addAndMakeVisible (timeRulerHolder);
     addAndMakeVisible (timeReadout);
+    addAndMakeVisible (headerToggleButton);
     addAndMakeVisible (addTrackButton);
     addAndMakeVisible (addAudioTrackButton);
     addAndMakeVisible (gridBox);
@@ -5885,8 +5954,12 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
 
     addTrackButton.setMouseClickGrabsKeyboardFocus (false);
     addAudioTrackButton.setMouseClickGrabsKeyboardFocus (false);
+    headerToggleButton.setMouseClickGrabsKeyboardFocus (false);
     addTrackButton.setTooltip ("Add MIDI Track (Ctrl+Shift+T)");
     addAudioTrackButton.setTooltip ("Add Audio Track (Ctrl+T)");
+    headerToggleButton.setColour (juce::TextButton::buttonColourId, theme::control());
+    headerToggleButton.setColour (juce::TextButton::textColourOffId, theme::text());
+    headerToggleButton.setTooltip ("Hide track headers");
     gridBox.setMouseClickGrabsKeyboardFocus (false);
     locatorPreviousButton.setMouseClickGrabsKeyboardFocus (false);
     locatorSetButton.setMouseClickGrabsKeyboardFocus (false);
@@ -5926,6 +5999,7 @@ ArrangementView::ArrangementView (ProjectModel& p) : project (p)
     timeReadout.setFont (theme::fontOptions (11.5f));
     timeReadout.setJustificationType (juce::Justification::centred);
     timeReadout.setTooltip ("Current project position");
+    headerToggleButton.onClick = [this] { toggleTrackHeaders(); };
     addTrackButton.onClick = [this] { project.addTrack(); };
     addAudioTrackButton.onClick = [this] { project.addTrack (roll::TrackType::Audio); };
     static constexpr double gridValues[] { 1.0, 0.5, 0.25, 0.125, 0.0625,
@@ -6593,13 +6667,13 @@ void ArrangementView::syncPositions()
     ruler->setTopLeftPosition (-vp.x, 0);
     timeRuler->setTopLeftPosition (-vp.x, 0);
     overview->repaint();
-    headerHolder.setSize (headerWidth, viewport.getMaximumVisibleHeight());
+    headerHolder.setSize (trackPaneWidth(), viewport.getMaximumVisibleHeight());
     for (size_t i = 0; i < headers.size(); ++i)
     {
         const int height = rowHeight (static_cast<int> (i));
-        headers[i]->setVisible (height > 0);
+        headers[i]->setVisible (trackHeadersVisible && height > 0);
         headers[i]->setBounds (0, rowTop (static_cast<int> (i)) - vp.y,
-                               headerWidth, height);
+                               trackPaneWidth(), height);
     }
 }
 
@@ -6732,6 +6806,14 @@ void ArrangementView::timerCallback()
             header->setPeak (meterProvider (header->id()));
     }
 
+    if (liveInputProvider)
+        for (auto& header : headers)
+            header->setInputPeaks (liveInputProvider (header->id()));
+
+    if (recordingIndicatorProvider)
+        for (auto& header : headers)
+            header->setRecordingIndicatorState (recordingIndicatorProvider (header->id()));
+
     if (meterProvider)
     {
         if (masterHeader != nullptr) masterHeader->setPeak (meterProvider (0));
@@ -6770,16 +6852,33 @@ void ArrangementView::paint (juce::Graphics& g)
 void ArrangementView::resized()
 {
     auto area = getLocalBounds();
+    const int paneWidth = trackPaneWidth();
     auto overviewArea = area.removeFromTop (overviewHeight);
-    overviewArea.removeFromLeft (headerWidth);
+    overviewArea.removeFromLeft (paneWidth);
     overview->setBounds (overviewArea);
     auto top = area.removeFromTop (rulerHeight);
-    auto addTrackArea = top.removeFromLeft (headerWidth).reduced (4);
-    addTrackButton.setBounds (addTrackArea.removeFromLeft (56));
-    addTrackArea.removeFromLeft (3);
-    addAudioTrackButton.setBounds (addTrackArea.removeFromLeft (64));
-    addTrackArea.removeFromLeft (3);
-    gridBox.setBounds (addTrackArea);
+    auto addTrackArea = top.removeFromLeft (paneWidth).reduced (4);
+    headerToggleButton.setBounds (addTrackArea.removeFromLeft (24));
+    if (trackHeadersVisible)
+    {
+        addTrackArea.removeFromLeft (3);
+        addTrackButton.setBounds (addTrackArea.removeFromLeft (56));
+        addTrackArea.removeFromLeft (3);
+        addAudioTrackButton.setBounds (addTrackArea.removeFromLeft (64));
+        addTrackArea.removeFromLeft (3);
+        gridBox.setBounds (addTrackArea);
+    }
+    else
+    {
+        addTrackButton.setBounds ({});
+        addAudioTrackButton.setBounds ({});
+        gridBox.setBounds ({});
+    }
+    addTrackButton.setVisible (trackHeadersVisible);
+    addAudioTrackButton.setVisible (trackHeadersVisible);
+    gridBox.setVisible (trackHeadersVisible);
+    headerHolder.setVisible (trackHeadersVisible);
+    timeReadout.setVisible (trackHeadersVisible);
     auto locatorControls = top;
     rulerHolder.setBounds (top);
     int right = locatorControls.getRight() - 4;
@@ -6793,7 +6892,7 @@ void ArrangementView::resized()
     automationTargetButton.setVisible (true);
     automationModeButton.setVisible (true);
 
-    const bool compactToolbar = top.getWidth() - headerWidth < 300;
+    const bool compactToolbar = top.getWidth() - paneWidth < 300;
     if (compactToolbar)
     {
         locatorDeleteButton.setBounds (right - 30, buttonY, 28, buttonHeight);
@@ -6822,18 +6921,27 @@ void ArrangementView::resized()
         automationTargetButton.setBounds (right - 110, buttonY, 108, buttonHeight);
         right -= 120;
         automationModeButton.setBounds (right - 28, buttonY, 26, buttonHeight);
-        automationStatusLabel.setBounds (headerWidth + 4, buttonY,
-            std::max (0, automationModeButton.getX() - headerWidth - 8), buttonHeight);
+        automationStatusLabel.setBounds (paneWidth + 4, buttonY,
+            std::max (0, automationModeButton.getX() - paneWidth - 8), buttonHeight);
     }
     updateAutomationStatus();
     auto timeArea = area.removeFromBottom (timeRulerHeight);
-    auto left = area.removeFromLeft (headerWidth);
-    timeArea.removeFromLeft (headerWidth);
+    auto left = area.removeFromLeft (paneWidth);
+    timeArea.removeFromLeft (paneWidth);
     viewport.setBounds (area);
     headerHolder.setBounds (left.withHeight (viewport.getMaximumVisibleHeight()));
-    timeReadout.setBounds (left.getX(), timeArea.getY(), headerWidth, timeRulerHeight);
+    timeReadout.setBounds (left.getX(), timeArea.getY(), paneWidth, timeRulerHeight);
     timeRulerHolder.setBounds (timeArea);
     updateSizes();
+}
+
+void ArrangementView::toggleTrackHeaders()
+{
+    trackHeadersVisible = ! trackHeadersVisible;
+    headerToggleButton.setButtonText (trackHeadersVisible ? "<" : ">");
+    headerToggleButton.setTooltip (
+        trackHeadersVisible ? "Hide track headers" : "Show track headers");
+    resized();
 }
 
 void ArrangementView::showLocatorAutomationMenu()

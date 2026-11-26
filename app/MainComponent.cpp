@@ -15,6 +15,7 @@
 #include "NativeEffectProcessors.h"
 #include "RemotePluginProcessor.h"
 #include "ThemeKnobSlider.h"
+#include "Recording.h"
 #include <juce_dsp/juce_dsp.h>
 #include "Icons.h"
 #include <algorithm>
@@ -24,6 +25,7 @@
 #include <limits>
 #include <map>
 #include <set>
+#include <thread>
 #include <utility>
 
 namespace
@@ -1403,6 +1405,26 @@ private:
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
 };
 
+struct MainComponent::RecordingSession
+{
+    enum class Kind { Audio, Midi };
+    static constexpr std::size_t midiEventCapacity = 65536;
+
+    Kind kind = Kind::Midi;
+    std::uint64_t generation = 0;
+    int trackId = -1;
+    double startBeat = 0.0, startBpm = 120.0, sampleRate = 0.0;
+    bool loopWasEnabled = false;
+    int audioChannels = 0;
+    juce::File audioFile;
+    juce::TimeSliceThread writerThread { "Audio Recording Writer" };
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
+    std::atomic<std::int64_t> samplesWritten { 0 };
+    std::atomic<std::size_t> midiEventCount { 0 };
+    std::array<roll::RecordedMidiEvent, midiEventCapacity> midiEvents {};
+    std::atomic<bool> overflow { false }, inputLost { false };
+};
+
 MainComponent::MainComponent()
 {
     tooltipWindow = std::make_unique<juce::TooltipWindow> (this, 450);
@@ -1682,6 +1704,13 @@ MainComponent::MainComponent()
     };
     project.onTrackRemoved = [this] (int id)
     {
+        if (transport.isCountInActive())
+            transport.cancelCountIn();
+        if (recordingSession != nullptr && recordingSession->trackId == id)
+        {
+            finishRecording (true);
+            setProjectStatus ("Recording cancelled because its target track was removed.");
+        }
         closeWindowsOfTrack (id);
         engine.removeTrack (id);
         publishAudioTrack (id);
@@ -1706,7 +1735,17 @@ MainComponent::MainComponent()
     {
         publishAudioTrack (trackId);
     };
-    project.onSelectionChanged = [this] { onSelectionChanged(); };
+    project.onSelectionChanged = [this]
+    {
+        if (transport.isCountInActive())
+            transport.cancelCountIn();
+        if (recordingSession != nullptr && project.selectedTrackId != recordingSession->trackId)
+        {
+            finishRecording();
+            setProjectStatus ("Recording finalized because the selected track changed.");
+        }
+        onSelectionChanged();
+    };
     project.onLoopChanged = [this] { engine.graph().setLoopRegion (project.loopStart, project.loopEnd); };
     arrangement.onMidiLearnRequested = [this] (int trackId, MidiMappingTarget target)
     {
@@ -1729,6 +1768,12 @@ MainComponent::MainComponent()
     project.addChangeListener (this);
     model.addChangeListener (this);
     engine.audioDeviceManager().addMidiInputDeviceCallback ({}, this);
+    engine.audioDeviceManager().addAudioCallback (this);
+    transport.onRecordStart = [this] (bool loopWasEnabled)
+    {
+        return startRecording (loopWasEnabled);
+    };
+    transport.onRecordStop = [this] { finishRecording(); };
 
     // ---- piano roll <-> projeto ----
     model.onNotesChanged = [this] { project.notifyTrackNotes (project.selectedTrackId); project.sendChangeMessage(); };
@@ -1847,6 +1892,30 @@ MainComponent::MainComponent()
     };
     arrangement.meterProvider = [this] (int id) { return engine.peak (id); };
     arrangement.trackStereoPeakProvider = [this] (int id) { return engine.peakStereo (id); };
+    arrangement.liveInputProvider = [this] (int trackId)
+    {
+        const auto* track = project.track (trackId);
+        const auto* device = engine.audioDeviceManager().getCurrentAudioDevice();
+        if (track == nullptr || track->type != roll::TrackType::Audio
+            || project.selectedTrackId != trackId || device == nullptr
+            || device->getActiveInputChannels().countNumberOfSetBits() == 0)
+            return ArrangementView::LiveInputValues {};
+
+        return ArrangementView::LiveInputValues {
+            liveAudioInputPeaks[0].load (std::memory_order_relaxed),
+            liveAudioInputPeaks[1].load (std::memory_order_relaxed), true
+        };
+    };
+    arrangement.recordingIndicatorProvider = [this] (int trackId)
+    {
+        if (transport.isCountInActive() && project.selectedTrackId == trackId)
+            return ArrangementView::RecordingIndicatorState::CountIn;
+        if (recordingSession == nullptr || recordingSession->trackId != trackId)
+            return ArrangementView::RecordingIndicatorState::None;
+        return recordingSession->kind == RecordingSession::Kind::Audio
+            ? ArrangementView::RecordingIndicatorState::Audio
+            : ArrangementView::RecordingIndicatorState::Midi;
+    };
     arrangement.masterStereoPeakProvider = [this] { return engine.masterPeakStereo(); };
     arrangement.liveMixerProvider = [this] (int id)
     {
@@ -2493,7 +2562,10 @@ MainComponent::MainComponent()
 
 MainComponent::~MainComponent()
 {
+    lifetimeToken->store (false);
     engine.audioDeviceManager().removeMidiInputDeviceCallback ({}, this);
+    engine.audioDeviceManager().removeAudioCallback (this);
+    finishRecording();
     removeKeyListenerRecursively (*this);
     stopGroovePreview();
     grooveBrowserWindow.reset();
@@ -4230,6 +4302,7 @@ void MainComponent::resumeFromPausedPosition()
 
 void MainComponent::seekTransport (double beats)
 {
+    finishRecording();
     const double position = std::isfinite (beats) ? std::max (0.0, beats) : 0.0;
     pendingArrangementSeek = false;
     suppressSongStartOnce = false;
@@ -4629,6 +4702,359 @@ void MainComponent::clearMidiMapping (int trackId, MidiMappingTarget target)
     setProjectStatus ("MIDI mapping removed.");
 }
 
+bool MainComponent::startRecording (bool loopWasEnabled)
+{
+    if (recordingSession != nullptr)
+    {
+        setProjectStatus ("A recording is already active.");
+        return false;
+    }
+    if (audioFinalizationInProgress)
+    {
+        setProjectStatus ("Wait for the previous audio recording to finish processing.");
+        return false;
+    }
+
+    auto* track = project.selectedTrack();
+    if (track == nullptr)
+    {
+        setProjectStatus ("Select a track before recording.");
+        return false;
+    }
+    if (track->type != roll::TrackType::Audio && track->type != roll::TrackType::Midi)
+    {
+        setProjectStatus ("Recording is not supported on this track type.");
+        return false;
+    }
+    if (track->frozen)
+    {
+        setProjectStatus ("Unfreeze the selected track before recording.");
+        return false;
+    }
+
+    auto session = std::make_unique<RecordingSession>();
+    session->trackId = track->id;
+    session->startBeat = std::max (0.0, engine.graph().positionBeats());
+    session->startBpm = std::clamp (engine.graph().getBpm(), 20.0, 999.0);
+    session->loopWasEnabled = loopWasEnabled;
+
+    if (track->type == roll::TrackType::Midi)
+    {
+        if (! track->isFree (session->startBeat, 1.0 / 16.0))
+        {
+            setProjectStatus ("Recording cannot start: the selected MIDI track already has a clip here.");
+            return false;
+        }
+        session->kind = RecordingSession::Kind::Midi;
+    }
+    else
+    {
+        auto* device = engine.audioDeviceManager().getCurrentAudioDevice();
+        if (device == nullptr)
+        {
+            setProjectStatus ("Audio recording unavailable: no audio device is active.");
+            return false;
+        }
+        const auto activeInputs = device->getActiveInputChannels();
+        const int inputCount = activeInputs.countNumberOfSetBits();
+        session->sampleRate = device->getCurrentSampleRate();
+        if (inputCount == 0)
+        {
+            setProjectStatus ("Audio recording unavailable: enable an input channel in Audio Preferences.");
+            return false;
+        }
+        if (! std::isfinite (session->sampleRate) || session->sampleRate <= 0.0)
+        {
+            setProjectStatus ("Audio recording unavailable: the input device has an invalid sample rate.");
+            return false;
+        }
+        if (! track->isAudioFree (session->startBeat, 1.0 / 16.0))
+        {
+            setProjectStatus ("Recording cannot start: the selected audio track already has a clip here.");
+            return false;
+        }
+
+        session->kind = RecordingSession::Kind::Audio;
+        session->audioChannels = std::clamp (inputCount, 1, 2);
+        auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                          .getChildFile ("MaXXXtudio").getChildFile ("Recordings");
+        const auto folderError = folder.createDirectory();
+        if (folderError.failed())
+        {
+            setProjectStatus ("Could not create the audio recording folder: " + folderError.getErrorMessage());
+            return false;
+        }
+
+        session->audioFile = folder.getNonexistentChildFile ("Recording", ".wav", true);
+        juce::WavAudioFormat wav;
+        std::unique_ptr<juce::OutputStream> output = session->audioFile.createOutputStream();
+        if (output == nullptr)
+        {
+            setProjectStatus ("Could not create an audio recording file.");
+            return false;
+        }
+        const juce::AudioFormatWriterOptions writerOptions;
+        auto writer = wav.createWriterFor (output, writerOptions.withSampleRate (session->sampleRate)
+            .withNumChannels (session->audioChannels).withBitsPerSample (24));
+        if (writer == nullptr)
+        {
+            session->audioFile.deleteFile();
+            setProjectStatus ("Could not initialize the WAV recording writer.");
+            return false;
+        }
+        if (! session->writerThread.startThread())
+        {
+            session->audioFile.deleteFile();
+            setProjectStatus ("Could not start the audio recording writer.");
+            return false;
+        }
+        const int bufferedSamples = juce::jlimit (8192, 262144,
+            static_cast<int> (std::min (session->sampleRate * 4.0, 262144.0)));
+        session->writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (
+            writer.release(), session->writerThread, bufferedSamples);
+    }
+
+    if (session->loopWasEnabled)
+        transport.setLoopEnabled (false);
+    session->generation = nextRecordingGeneration.fetch_add (1, std::memory_order_relaxed);
+    recordingSession = std::move (session);
+    activeRecordingGeneration.store (recordingSession->generation, std::memory_order_release);
+    activeRecordingSession.store (recordingSession.get(), std::memory_order_seq_cst);
+    setProjectStatus (recordingSession->kind == RecordingSession::Kind::Audio
+        ? "Recording audio input to the selected track..."
+        : "Recording MIDI input to the selected track...");
+    return true;
+}
+
+void MainComponent::finishRecording (bool discard)
+{
+    if (recordingSession == nullptr)
+        return;
+
+    transport.setRecording (false);
+    activeRecordingGeneration.store (0, std::memory_order_release);
+    activeRecordingSession.store (nullptr, std::memory_order_seq_cst);
+    while (recordingCallbacksInFlight.load (std::memory_order_seq_cst) != 0)
+        juce::Thread::sleep (1);
+
+    auto session = std::move (recordingSession);
+    const double endBeat = std::max (session->startBeat, engine.graph().positionBeats());
+    if (session->loopWasEnabled)
+        transport.setLoopEnabled (true);
+    const auto reportFailure = [this] (const juce::String& reason)
+    {
+        setProjectStatus ("Recording failed: " + reason);
+    };
+
+    if (session->kind == RecordingSession::Kind::Audio)
+    {
+        session->writer.reset();
+        session->writerThread.stopThread (5000);
+        if (discard)
+        {
+            session->audioFile.deleteFile();
+            return;
+        }
+        if (session->overflow.load())
+        {
+            session->audioFile.deleteFile();
+            reportFailure ("the audio writer could not keep up; no clip was created.");
+            return;
+        }
+        if (session->inputLost.load())
+        {
+            session->audioFile.deleteFile();
+            reportFailure ("an input channel stopped delivering audio; no clip was created.");
+            return;
+        }
+
+        const auto audioFile = session->audioFile;
+        const int trackId = session->trackId;
+        const double startBeat = session->startBeat;
+        const double sourceBpm = std::clamp (session->startBpm, 20.0, 300.0);
+        const int generation = projectGeneration;
+        const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+        audioFinalizationInProgress = true;
+        ++pendingAudioLoads;
+        updateActionIndicator();
+        setProjectStatus ("Finalizing audio recording...");
+        engine.loadAudioFileAsync (audioFile,
+            [this, token, audioFile, trackId, startBeat, sourceBpm, generation, reportFailure]
+            (const juce::String& error, std::shared_ptr<const AudioFileData> data)
+        {
+            const auto alive = token.lock();
+            if (alive == nullptr || ! alive->load())
+                return;
+
+            audioFinalizationInProgress = false;
+            pendingAudioLoads = std::max (0, pendingAudioLoads - 1);
+            updateActionIndicator();
+            if (generation != projectGeneration)
+            {
+                audioFile.deleteFile();
+                return;
+            }
+            if (error.isNotEmpty() || data == nullptr || data->durationSeconds <= 0.0
+                || data->waveform.empty())
+            {
+                audioFile.deleteFile();
+                reportFailure (error.isNotEmpty() ? error : "the recorded WAV file was empty.");
+                return;
+            }
+
+            auto* target = project.track (trackId);
+            const double lengthBeats = data->durationSeconds * sourceBpm / 60.0;
+            if (target == nullptr || target->type != roll::TrackType::Audio
+                || ! target->isAudioFree (startBeat, lengthBeats))
+            {
+                audioFile.deleteFile();
+                reportFailure (target == nullptr ? "the target track no longer exists."
+                    : "the recorded range overlaps an existing clip.");
+                return;
+            }
+
+            const auto path = audioFile.getFullPathName().toStdString();
+            audioAssets[path] = data;
+            if (project.addAudioClip (trackId, startBeat, lengthBeats, path,
+                                      audioFile.getFileName().toStdString(), data->waveform,
+                                      data->durationSeconds, sourceBpm) == nullptr)
+            {
+                audioAssets.erase (path);
+                audioFile.deleteFile();
+                reportFailure ("the recorded clip could not be inserted.");
+                return;
+            }
+            setProjectStatus ("Audio recording saved as " + audioFile.getFileName() + ".");
+        }, true);
+        return;
+    }
+
+    const auto capturedEvents = std::min (session->midiEventCount.load (std::memory_order_acquire),
+                                          RecordingSession::midiEventCapacity);
+    if (discard)
+        return;
+    if (session->overflow.load())
+    {
+        reportFailure ("the MIDI event buffer filled; no clip was created.");
+        return;
+    }
+    std::vector<roll::RecordedMidiEvent> events (
+        session->midiEvents.begin(), session->midiEvents.begin() + capturedEvents);
+    const auto notes = roll::makeRecordedNotes (events, session->startBeat, endBeat);
+    if (notes.empty())
+    {
+        setProjectStatus ("No MIDI notes were received; no clip was created.");
+        return;
+    }
+    auto* target = project.track (session->trackId);
+    if (target == nullptr || target->type != roll::TrackType::Midi)
+    {
+        reportFailure ("the target track no longer exists.");
+        return;
+    }
+    double lengthBeats = 0.25;
+    for (const auto& note : notes)
+        lengthBeats = std::max (lengthBeats, note.endBeats());
+    lengthBeats = std::ceil (lengthBeats * 16.0) / 16.0;
+    if (! target->isFree (session->startBeat, lengthBeats))
+    {
+        reportFailure ("the recorded range overlaps an existing clip.");
+        return;
+    }
+    auto* clip = project.addClip (session->trackId, session->startBeat, lengthBeats);
+    if (clip == nullptr)
+    {
+        reportFailure ("a clip could not be inserted because the track changed or became occupied.");
+        return;
+    }
+    for (auto note : notes)
+        clip->clip.addNote (note);
+    project.notifyTrackNotes (session->trackId);
+    setProjectStatus ("MIDI recording created " + juce::String (notes.size()) + " notes.");
+}
+
+void MainComponent::audioDeviceIOCallbackWithContext (const float* const* inputChannelData,
+                                                       int numInputChannels,
+                                                       float* const*, int, int numSamples,
+                                                       const juce::AudioIODeviceCallbackContext&)
+{
+    recordingCallbacksInFlight.fetch_add (1, std::memory_order_seq_cst);
+    std::array<float, 2> inputPeaks {};
+    for (int channel = 0; inputChannelData != nullptr && channel < std::min (2, numInputChannels);
+         ++channel)
+    {
+        const auto* samples = inputChannelData[channel];
+        if (samples == nullptr)
+            continue;
+        for (int sample = 0; sample < numSamples; ++sample)
+            inputPeaks[static_cast<std::size_t> (channel)] = std::max (
+                inputPeaks[static_cast<std::size_t> (channel)], std::abs (samples[sample]));
+    }
+    if (numInputChannels == 1)
+        inputPeaks[1] = inputPeaks[0];
+    for (std::size_t channel = 0; channel < inputPeaks.size(); ++channel)
+        liveAudioInputPeaks[channel].store (inputPeaks[channel], std::memory_order_relaxed);
+
+    auto* session = activeRecordingSession.load (std::memory_order_seq_cst);
+    if (session != nullptr && session->kind == RecordingSession::Kind::Audio && session->writer != nullptr)
+    {
+        const float* selectedChannels[2] {};
+        int selected = 0;
+        for (int channel = 0; inputChannelData != nullptr
+                            && channel < numInputChannels && selected < session->audioChannels; ++channel)
+            if (inputChannelData[channel] != nullptr)
+                selectedChannels[selected++] = inputChannelData[channel];
+
+        if (selected < session->audioChannels)
+            session->inputLost.store (true, std::memory_order_relaxed);
+        else if (! session->writer->write (selectedChannels, numSamples))
+            session->overflow.store (true, std::memory_order_relaxed);
+        else
+            session->samplesWritten.fetch_add (numSamples, std::memory_order_relaxed);
+    }
+    recordingCallbacksInFlight.fetch_sub (1, std::memory_order_seq_cst);
+}
+
+void MainComponent::audioDeviceAboutToStart (juce::AudioIODevice*)
+{
+}
+
+void MainComponent::audioDeviceStopped()
+{
+    const auto stoppedGeneration = activeRecordingGeneration.load (std::memory_order_acquire);
+    activeRecordingSession.store (nullptr, std::memory_order_seq_cst);
+    if (stoppedGeneration == 0)
+        return;
+    const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
+    juce::MessageManager::callAsync ([this, token, stoppedGeneration]
+    {
+        const auto alive = token.lock();
+        if (alive != nullptr && alive->load() && recordingSession != nullptr
+            && recordingSession->generation == stoppedGeneration
+            && recordingSession->kind == RecordingSession::Kind::Audio)
+        {
+            setProjectStatus ("Audio device stopped; finalizing the recording...");
+            finishRecording();
+        }
+    });
+}
+
+void MainComponent::captureRecordedMidiEvent (int pitch, int channel, int velocity,
+                                              double beat, bool noteOn)
+{
+    recordingCallbacksInFlight.fetch_add (1, std::memory_order_seq_cst);
+    if (auto* session = activeRecordingSession.load (std::memory_order_seq_cst);
+        session != nullptr && session->kind == RecordingSession::Kind::Midi)
+    {
+        const auto index = session->midiEventCount.fetch_add (1, std::memory_order_relaxed);
+        if (index < RecordingSession::midiEventCapacity)
+            session->midiEvents[index] = { pitch, channel, velocity, beat, noteOn };
+        else
+            session->overflow.store (true, std::memory_order_relaxed);
+    }
+    recordingCallbacksInFlight.fetch_sub (1, std::memory_order_seq_cst);
+}
+
 void MainComponent::handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage& message)
 {
     MidiMappingMessageType messageType;
@@ -4651,6 +5077,11 @@ void MainComponent::handleIncomingMidiMessage (juce::MidiInput*, const juce::Mid
     {
         return;
     }
+
+    if (message.isNoteOn() || message.isNoteOff())
+        captureRecordedMidiEvent (message.getNoteNumber(), message.getChannel(),
+                                  message.getVelocity(), engine.graph().positionBeats(),
+                                  message.isNoteOn());
 
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
     if (! juce::MessageManager::callAsync ([this, token, channel = message.getChannel(),
@@ -4879,6 +5310,7 @@ void MainComponent::createNewProject()
         return;
     }
 
+    finishRecording (true);
     ProjectModel blankProject;
     const auto* midiTrack = blankProject.addTrack();
     blankProject.addTrack (roll::TrackType::Audio);
@@ -4935,6 +5367,13 @@ void MainComponent::showOptionsWindow()
             {
                 theme::setWaveformStyle (style);
                 arrangement.refreshWaveformAppearance();
+            },
+            [this]
+            {
+                return std::pair<float, float> {
+                    liveAudioInputPeaks[0].load (std::memory_order_relaxed),
+                    liveAudioInputPeaks[1].load (std::memory_order_relaxed)
+                };
             });
     }
 
@@ -5127,6 +5566,7 @@ void MainComponent::offerRecoveryBeforeOpening (std::function<void()> continueSt
         return;
     }
 
+    finishRecording();
     const juce::Component::SafePointer<MainComponent> safeThis (this);
     AppModalDialog::show (
         *this, "Recovery Session Found",
@@ -5159,6 +5599,12 @@ void MainComponent::requestClose (std::function<void()> onCloseApproved)
     {
         setProjectStatus ("Wait for the recovery copy to finish before closing.");
         return;
+    }
+
+    if (recordingSession != nullptr)
+    {
+        finishRecording();
+        transport.stop();
     }
 
     const juce::Component::SafePointer<MainComponent> safeThis (this);
@@ -5403,6 +5849,7 @@ void MainComponent::loadProject (const juce::File& file, bool recovering)
 void MainComponent::applyLoadedProject (const juce::File& file, ProjectFileData data,
                                        const std::shared_ptr<TaskScope>& task, bool recovering)
 {
+    finishRecording (true);
     pendingMidiLearn.reset();
     lastMidiButtonValues.clear();
     projectLoadTask = task;
@@ -6132,7 +6579,11 @@ void MainComponent::releaseComputerMidiNotes()
     for (std::size_t i = 0; i < computerMidiNoteActive.size(); ++i)
     {
         if (computerMidiNoteActive[i])
+        {
             engine.previewNote (computerMidiTrackIds[i], computerMidiKeyPitch[i], false);
+            captureRecordedMidiEvent (computerMidiKeyPitch[i], 1, 0,
+                                      engine.graph().positionBeats(), false);
+        }
 
         computerMidiKeyDown[i] = false;
         computerMidiNoteActive[i] = false;
@@ -6214,6 +6665,8 @@ void MainComponent::updateComputerMidiKeyboard()
             {
                 engine.previewNote (midiTrackId, pitch, true,
                                     static_cast<float> (computerMidiVelocity) / 127.0f);
+                captureRecordedMidiEvent (pitch, 1, computerMidiVelocity,
+                                          engine.graph().positionBeats(), true);
                 computerMidiKeyPitch[i] = pitch;
                 computerMidiTrackIds[i] = midiTrackId;
                 computerMidiNoteActive[i] = true;
@@ -6224,6 +6677,8 @@ void MainComponent::updateComputerMidiKeyboard()
         else if (! down && computerMidiKeyDown[i] && computerMidiNoteActive[i])
         {
             engine.previewNote (computerMidiTrackIds[i], computerMidiKeyPitch[i], false);
+            captureRecordedMidiEvent (computerMidiKeyPitch[i], 1, 0,
+                                      engine.graph().positionBeats(), false);
             computerMidiNoteActive[i] = false;
             lastComputerMidiNote = midiNoteName (computerMidiKeyPitch[i]);
             statusChanged = noteChanged = true;
@@ -6342,7 +6797,7 @@ void MainComponent::duplicateSelectedTrack (int trackId)
     operation->targetTrackId = duplicateId;
     operation->plugins = std::move (pluginStates);
     operation->task = std::make_shared<TaskScope> (
-        taskRegistry, theme::ui ("Copying track devices"), "track:" + juce::String (duplicateId), 0.0);
+        taskRegistry, theme::ui ("Copying track devices"), "global", 0.0);
     trackDuplicationInProgress = true;
     const std::weak_ptr<std::atomic<bool>> token = lifetimeToken;
 

@@ -1790,10 +1790,29 @@ AudioEngine::AudioEngine()
     if (settingsFile.existsAsFile() && savedSettings == nullptr)
         juce::Logger::writeToLog ("AudioEngine: Could not read audio device preferences.");
 
-    const auto error = deviceManager.initialise (0, 2, savedSettings.get(), true);
+    const auto error = deviceManager.initialise (1, 2, savedSettings.get(), true);
     if (error.isNotEmpty())
         juce::Logger::writeToLog ("AudioEngine: " + error);
     deviceManager.addChangeListener (this);
+    bool enabledDefaultInput = false;
+    if (auto* device = deviceManager.getCurrentAudioDevice();
+        device != nullptr && device->getInputChannelNames().size() > 0
+        && device->getActiveInputChannels().countNumberOfSetBits() == 0)
+    {
+        juce::AudioDeviceManager::AudioDeviceSetup setup;
+        deviceManager.getAudioDeviceSetup (setup);
+        setup.inputChannels.setBit (0);
+        if (device->getInputChannelNames().size() > 1)
+            setup.inputChannels.setBit (1);
+        const auto inputError = deviceManager.setAudioDeviceSetup (setup, true);
+        if (inputError.isNotEmpty())
+            juce::Logger::writeToLog ("AudioEngine: Could not enable the default audio input: "
+                                      + inputError);
+        else
+            enabledDefaultInput = true;
+    }
+    if (enabledDefaultInput)
+        saveAudioDeviceSettings();
     player.setProcessor (&seqGraph);
     deviceManager.addAudioCallback (&player);
 }

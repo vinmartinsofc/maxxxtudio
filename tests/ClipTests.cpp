@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include "Clip.h"
 #include "History.h"
+#include "Recording.h"
 
 using namespace roll;
 
@@ -81,4 +82,24 @@ TEST_CASE("Different pitches do not interfere")
     int b = clip.addNote({ 62, 1.0, 1.0, 100 });
     clip.resolveOverlaps({ b });
     REQUIRE(clip.find(a)->lengthBeats == 3.0);
+}
+
+TEST_CASE("Recorded MIDI pairs notes and closes held notes at the capture end")
+{
+    const std::vector<RecordedMidiEvent> events {
+        { 60, 1, 91, 4.5, true },
+        { 60, 1, 0, 5.25, false },
+        { 64, 2, 73, 5.0, true }
+    };
+
+    const auto notes = makeRecordedNotes (events, 4.0, 6.0);
+    REQUIRE (notes.size() == 2);
+    REQUIRE (notes[0].pitch == 60);
+    REQUIRE (notes[0].startBeats == 0.5);
+    REQUIRE (notes[0].lengthBeats == 0.75);
+    REQUIRE (notes[0].velocity == 91);
+    REQUIRE (notes[1].pitch == 64);
+    REQUIRE (notes[1].startBeats == 1.0);
+    REQUIRE (notes[1].lengthBeats == 1.0);
+    REQUIRE (notes[1].velocity == 73);
 }

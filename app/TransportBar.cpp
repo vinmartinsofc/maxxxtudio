@@ -66,22 +66,26 @@ void IconToggleButton::paintButton (juce::Graphics& g, bool over, bool down)
 {
     const auto bounds = getLocalBounds().toFloat().reduced (1.0f);
     const bool active = getToggleState();
+    const bool isRecordControl = icon == icons::Icon::Record;
     if (theme::isHighTech())
     {
-        const auto fill = down ? theme::pressed()
+        const auto fill = active && isRecordControl ? theme::recording().withAlpha (0.18f)
+                        : down ? theme::pressed()
                         : active ? theme::panelLight()
                         : over ? theme::hover() : theme::control();
         theme::drawChromeSurface (g, bounds, 5.0f, fill);
-        g.setColour (active || down ? theme::accent()
+        g.setColour (active && isRecordControl ? theme::recording()
+                    : active || down ? theme::accent()
                     : over ? theme::accentHover() : theme::controlBorder());
         g.drawRoundedRectangle (bounds, 5.0f, 1.0f);
         if (active)
         {
-            g.setColour (theme::accent());
+            g.setColour (isRecordControl ? theme::recording() : theme::accent());
             g.fillRoundedRectangle (bounds.withHeight (2.0f), 1.0f);
         }
 
-        const auto iconColour = isEnabled() ? (active ? theme::accent() : theme::textDim())
+        const auto iconColour = isEnabled() ? (active ? (isRecordControl ? theme::recording() : theme::accent())
+                                                     : theme::textDim())
                                             : theme::textDim().withAlpha (0.4f);
         if (const auto* drawable = icons::get (icon, iconColour, 18))
             drawable->drawWithin (g, bounds.reduced (8.0f, 7.0f),
@@ -89,13 +93,16 @@ void IconToggleButton::paintButton (juce::Graphics& g, bool over, bool down)
         return;
     }
 
-    const auto fill = down ? theme::pressed() : over ? theme::hover() : theme::control();
+    const auto fill = active && isRecordControl ? theme::recording().withAlpha (0.15f)
+                    : down ? theme::pressed() : over ? theme::hover() : theme::control();
     g.setColour (fill);
     g.fillRoundedRectangle (bounds, 4.0f);
-    g.setColour (active ? theme::accent().withAlpha (0.7f) : theme::controlBorder());
+    g.setColour (active && isRecordControl ? theme::recording()
+                : active ? theme::accent().withAlpha (0.7f) : theme::controlBorder());
     g.drawRoundedRectangle (bounds, 4.0f, 1.0f);
 
-    const auto iconColour = isEnabled() ? (active ? theme::accent() : theme::textDim())
+    const auto iconColour = isEnabled() ? (active ? (isRecordControl ? theme::recording() : theme::accent())
+                                                 : theme::textDim())
                                         : theme::textDim().withAlpha (0.4f);
     if (const auto* drawable = icons::get (icon, iconColour, 18))
         drawable->drawWithin (g, bounds.reduced (8.0f, 7.0f),
@@ -106,6 +113,8 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 {
     addAndMakeVisible (playButton);
     addAndMakeVisible (stopButton);
+    addAndMakeVisible (recordButton);
+    addAndMakeVisible (countInSelector);
     addAndMakeVisible (startButton);
     addAndMakeVisible (endButton);
     addAndMakeVisible (projectButton);
@@ -113,7 +122,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     addAndMakeVisible (metronomeButton);
     addAndMakeVisible (metronomeVolumeSlider);
     for (auto* b : std::initializer_list<juce::Component*> {
-             &playButton, &stopButton, &startButton, &endButton })
+             &playButton, &stopButton, &recordButton, &startButton, &endButton })
         b->setMouseClickGrabsKeyboardFocus (false);
     metronomeButton.setMouseClickGrabsKeyboardFocus (false);
     projectButton.setMouseClickGrabsKeyboardFocus (false);
@@ -166,6 +175,64 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 
     playButton.onClick = [this] { togglePlay(); };
     stopButton.onClick = [this] { stop(); };
+    recordButton.setClickingTogglesState (false);
+    recordButton.setTooltip ("Record input on the selected track");
+    countInSelector.addItem ("Off", 1);
+    countInSelector.addItem ("1 beat", 2);
+    countInSelector.addItem ("2 beats", 3);
+    countInSelector.addItem ("3 beats", 4);
+    countInSelector.addItem ("4 beats", 5);
+    countInSelector.addItem ("8 beats", 6);
+    countInSelector.setSelectedId (5, juce::dontSendNotification);
+    countInSelector.setTooltip ("Count-in before recording: choose 0, 1, 2, 3, 4, or 8 beats");
+    countInSelector.setColour (juce::ComboBox::backgroundColourId, theme::control());
+    countInSelector.setColour (juce::ComboBox::textColourId, theme::text());
+    countInSelector.setColour (juce::ComboBox::outlineColourId, theme::controlBorder());
+    countInSelector.onChange = [this]
+    {
+        const int selectedId = countInSelector.getSelectedId();
+        countInBeats = selectedId == 1 ? 0 : selectedId == 6 ? 8 : selectedId - 1;
+    };
+    recordButton.onClick = [this]
+    {
+        if (recording)
+        {
+            if (onRecordStop)
+                onRecordStop();
+            setRecording (false);
+            return;
+        }
+
+        if (countInActive)
+        {
+            const bool shouldRestorePosition = ! countInWasPlaying;
+            const double startBeat = countInStartBeat;
+            cancelCountIn();
+            if (shouldRestorePosition)
+            {
+                graph.setPlaying (false);
+                graph.seek (startBeat);
+            }
+            updateButtons();
+            return;
+        }
+
+        const bool wasPlaying = graph.isPlaying();
+        if (! wasPlaying && onBeforePlay)
+            onBeforePlay();
+        if (onRecordStart)
+        {
+            if (countInBeats > 0)
+                beginCountIn (wasPlaying);
+            else if (onRecordStart (graph.isLoop()))
+            {
+                setRecording (true);
+                if (! wasPlaying)
+                    graph.setPlaying (true);
+                updateButtons();
+            }
+        }
+    };
     loopButton.setTooltip ("Loop: toggle repeat for the marked region");
 
     loopButton.setClickingTogglesState (true);
@@ -266,9 +333,17 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
 
 void TransportBar::togglePlay()
 {
+    if (countInActive)
+        cancelCountIn();
     const bool wasPlaying = graph.isPlaying();
     if (wasPlaying)
     {
+        if (recording)
+        {
+            if (onRecordStop)
+                onRecordStop();
+            setRecording (false);
+        }
         if (onBeforePause)
             onBeforePause();
     }
@@ -289,6 +364,14 @@ void TransportBar::setLoopEnabled (bool on)
 
 void TransportBar::stop()
 {
+    if (countInActive)
+        cancelCountIn();
+    if (recording)
+    {
+        if (onRecordStop)
+            onRecordStop();
+        setRecording (false);
+    }
     if (onBeforeStop)
         onBeforeStop();
     graph.setPlaying (false);
@@ -296,8 +379,122 @@ void TransportBar::stop()
     updateButtons();
 }
 
+void TransportBar::setRecording (bool shouldRecord)
+{
+    recording = shouldRecord;
+    updateRecordControls();
+}
+
+void TransportBar::cancelCountIn()
+{
+    if (! countInActive)
+        return;
+
+    countInActive = false;
+    restoreCountInMetronome();
+    if (countInLoopWasEnabled)
+        setLoopEnabled (true);
+    graph.setPlaying (countInWasPlaying);
+    positionLabel.setColour (juce::Label::textColourId, theme::text());
+    lastPosition = -1.0;
+    updateRecordControls();
+    updateButtons();
+}
+
+void TransportBar::updateRecordControls()
+{
+    recordButton.setToggleState (recording || countInActive, juce::dontSendNotification);
+    loopButton.setEnabled (! recording && ! countInActive);
+    countInSelector.setEnabled (! recording && ! countInActive);
+    metronomeButton.setEnabled (! countInActive);
+    metronomeVolumeSlider.setEnabled (! countInActive);
+    recordButton.setTooltip (recording ? "Stop recording"
+        : countInActive ? "Cancel the recording count-in"
+                        : "Record input on the selected track");
+}
+
+void TransportBar::beginCountIn (bool wasPlaying)
+{
+    countInWasPlaying = wasPlaying;
+    countInStartBeat = graph.positionBeats();
+    if (! std::isfinite (countInStartBeat))
+        countInStartBeat = 0.0;
+    countInLoopWasEnabled = graph.isLoop();
+    countInMetronomeWasEnabled = graph.isMetronomeEnabled();
+    activeCountInBeats = countInBeats;
+    countInRemainingBeats = activeCountInBeats;
+    countInLastUpdateSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    displayedCountInBeat = 0;
+    countInActive = true;
+
+    if (countInLoopWasEnabled)
+        setLoopEnabled (false);
+    graph.setMetronomeEnabled (true);
+    metronomeButton.setToggleState (true, juce::dontSendNotification);
+    positionLabel.setColour (juce::Label::textColourId, theme::recording());
+    updateRecordControls();
+    updateCountInDisplay (countInRemainingBeats);
+    graph.setPlaying (false);
+    updateButtons();
+}
+
+void TransportBar::restoreCountInMetronome()
+{
+    graph.setMetronomeEnabled (countInMetronomeWasEnabled);
+    metronomeButton.setToggleState (countInMetronomeWasEnabled, juce::dontSendNotification);
+}
+
+void TransportBar::finishCountIn()
+{
+    const bool loopWasEnabled = countInLoopWasEnabled;
+    const bool wasPlaying = countInWasPlaying;
+    const double startBeat = countInStartBeat;
+    countInActive = false;
+    restoreCountInMetronome();
+    positionLabel.setColour (juce::Label::textColourId, theme::text());
+    updateRecordControls();
+
+    if (onRecordStart && onRecordStart (loopWasEnabled))
+    {
+        setRecording (true);
+        if (! graph.isPlaying())
+            graph.setPlaying (true);
+    }
+    else
+    {
+        if (loopWasEnabled)
+            setLoopEnabled (true);
+        if (! wasPlaying)
+            graph.seek (startBeat);
+        graph.setPlaying (wasPlaying);
+    }
+    lastPosition = -1.0;
+    updateButtons();
+}
+
+void TransportBar::updateCountInDisplay (double remainingBeats)
+{
+    const int beat = juce::jlimit (1, activeCountInBeats,
+        static_cast<int> (std::ceil (remainingBeats - 1.0e-9)));
+    if (beat == displayedCountInBeat)
+        return;
+
+    displayedCountInBeat = beat;
+    const auto text = "COUNT-IN " + juce::String (beat);
+    positionLabel.setText (text, juce::dontSendNotification);
+    recordButton.setTooltip ("Cancel count-in (" + juce::String (beat) + " beats remaining)");
+}
+
 void TransportBar::resumeFromPosition (double beats)
 {
+    if (countInActive)
+        cancelCountIn();
+    if (recording)
+    {
+        if (onRecordStop)
+            onRecordStop();
+        setRecording (false);
+    }
     graph.seek (beats);
     graph.setPlaying (true);
     updateButtons();
@@ -363,6 +560,18 @@ void TransportBar::timerCallback()
 
     const double pos = graph.positionBeats();
     const double bpm = graph.getBpm();
+    if (countInActive)
+    {
+        const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+        const double elapsed = std::max (0.0, now - countInLastUpdateSeconds);
+        countInLastUpdateSeconds = now;
+        countInRemainingBeats -= elapsed * std::clamp (bpm, 20.0, 999.0) / 60.0;
+        if (countInRemainingBeats <= 0.0)
+            finishCountIn();
+        else
+            updateCountInDisplay (countInRemainingBeats);
+    }
+
     const bool positionChanged = std::abs (pos - lastPosition) >= 1.0e-9;
     const bool tempoChanged = std::abs (bpm - lastBpm) >= 1.0e-9;
     if (! positionChanged && ! tempoChanged)
@@ -382,7 +591,8 @@ void TransportBar::timerCallback()
         + juce::String (minutes).paddedLeft ('0', 2) + ":"
         + juce::String (displaySeconds).paddedLeft ('0', 2) + ":"
         + juce::String (frames).paddedLeft ('0', 2);
-    positionLabel.setText (timecode, juce::dontSendNotification);
+    if (! countInActive)
+        positionLabel.setText (timecode, juce::dontSendNotification);
 
     if (positionChanged && onPosition)
         onPosition (pos);
@@ -439,6 +649,10 @@ void TransportBar::resized()
     area.removeFromLeft (6);
     playButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (6);
+    recordButton.setBounds (area.removeFromLeft (40));
+    area.removeFromLeft (4);
+    countInSelector.setBounds (area.removeFromLeft (78).reduced (0, 7));
+    area.removeFromLeft (4);
     stopButton.setBounds (area.removeFromLeft (44));
     area.removeFromLeft (4);
     endButton.setBounds (area.removeFromLeft (40));

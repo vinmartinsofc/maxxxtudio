@@ -27,12 +27,22 @@ public:
         bool muted = false;
     };
 
+    struct LiveInputValues
+    {
+        float left = 0.0f, right = 0.0f;
+        bool active = false;
+    };
+
+    enum class RecordingIndicatorState { None, CountIn, Audio, Midi };
+
     explicit ArrangementView (ProjectModel&);
     ~ArrangementView() override;
 
     std::function<void (double beats)>  onSeek;
     std::function<float (int trackId)>  meterProvider;
     std::function<std::pair<float, float> (int trackId)> trackStereoPeakProvider;
+    std::function<LiveInputValues (int trackId)> liveInputProvider;
+    std::function<RecordingIndicatorState (int trackId)> recordingIndicatorProvider;
     std::function<bool()> playbackStateProvider;
     std::function<bool()> computerMidiKeyboardEnabledProvider;
     std::function<void()> onMasterPeakReset;
@@ -96,8 +106,9 @@ public:
     void paint (juce::Graphics&) override;
     void resized() override;
 
-    static constexpr int headerWidth = 210, overviewHeight = 20, rulerHeight = 28, timeRulerHeight = 0,
-                         trackHeight = 94, collapsedTrackHeight = 24;
+    static constexpr int headerWidth = 210, collapsedHeaderWidth = 32, overviewHeight = 20,
+                         rulerHeight = 28, timeRulerHeight = 0, trackHeight = 94,
+                         collapsedTrackHeight = 24;
 
 private:
     class Lanes;
@@ -127,6 +138,11 @@ private:
     void updateAutomationStatus();
     void showAutomationTargetMenu();
     void updateAutomationTargetButton();
+    void toggleTrackHeaders();
+    int trackPaneWidth() const noexcept
+    {
+        return trackHeadersVisible ? headerWidth : collapsedHeaderWidth;
+    }
     void selectTrackFromHeader (int trackId, juce::ModifierKeys modifiers);
     int rowTop (int row) const;
     int rowHeight (int row) const;
@@ -152,6 +168,7 @@ private:
     juce::Viewport viewport;
     juce::Component headerHolder, rulerHolder, timeRulerHolder;
     juce::Label timeReadout;
+    juce::TextButton headerToggleButton { "<" };
     juce::TextButton addTrackButton { "+ MIDI" }, addAudioTrackButton { "+ Audio" };
     juce::TextButton locatorPreviousButton { "<" }, locatorSetButton { "+" }, locatorNextButton { ">" },
                      locatorDeleteButton { "Del" }, locatorOverflowButton { "..." };
@@ -161,6 +178,7 @@ private:
     roll::AutomationTarget automationTarget;
     bool automationMode = false;
     bool automationModeKeyDown = false;
+    bool trackHeadersVisible = true;
     int automationTargetTrackId = -1, lastSelectedTrackId = -1;
     int trackReorderSourceId = -1;
     int trackReorderDropIndex = -1;

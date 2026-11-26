@@ -512,10 +512,11 @@ TEST_CASE ("Comp Master compresses audio and publishes its live scope and meters
     juce::ScopedJuceInitialiser_GUI juceInitialiser;
     CompMasterProcessor processor;
     REQUIRE (processor.getName() == "Comp Master");
-    REQUIRE (processor.getParameters().size() == 10);
+    REQUIRE (processor.getParameters().size() == 11);
     REQUIRE (std::abs (processor.getParameters()[0]->getValue() - 1.0f) < 0.00001f);
     REQUIRE (std::abs (processor.getParameters()[1]->getValue() - 1.0f / 19.0f) < 0.00001f);
     REQUIRE (std::abs (processor.getParameters()[9]->getValue() - 0.5f) < 0.00001f);
+    REQUIRE (std::abs (processor.getParameters()[10]->getValue() - 0.5f) < 0.00001f);
     std::unique_ptr<juce::AudioProcessorEditor> editor (processor.createEditor());
     REQUIRE (editor != nullptr);
     REQUIRE (editor->getWidth() == 780);
@@ -627,6 +628,35 @@ TEST_CASE ("Comp Master mix blends dry audio to preserve transient weight")
 
     REQUIRE (buffer.getSample (0, 511) > 0.4f);
     REQUIRE (buffer.getSample (0, 511) < 0.5f);
+}
+
+TEST_CASE ("Comp Master output gain scales audio and is stored in A/B states")
+{
+    CompMasterProcessor processor;
+    processor.prepareToPlay (48000.0, 1);
+    auto* outputGain = processor.getParameters()[10];
+    outputGain->setValue (0.625f);
+
+    juce::AudioBuffer<float> buffer (4, 1);
+    buffer.clear();
+    buffer.setSample (0, 0, 0.25f);
+    buffer.setSample (1, 0, 0.25f);
+    juce::MidiBuffer midi;
+    processor.processBlock (buffer, midi);
+    const float expected = 0.25f * juce::Decibels::decibelsToGain (6.0f);
+    REQUIRE (std::abs (buffer.getSample (0, 0) - expected) < 0.0001f);
+    REQUIRE (std::abs (buffer.getSample (1, 0) - expected) < 0.0001f);
+
+    processor.selectABState (1);
+    outputGain->setValue (0.75f);
+    juce::MemoryBlock state;
+    processor.getStateInformation (state);
+
+    CompMasterProcessor restored;
+    restored.setStateInformation (state.getData(), static_cast<int> (state.getSize()));
+    REQUIRE (std::abs (restored.getParameters()[10]->getValue() - 0.75f) < 0.00001f);
+    restored.selectABState (0);
+    REQUIRE (std::abs (restored.getParameters()[10]->getValue() - 0.625f) < 0.00001f);
 }
 
 TEST_CASE ("Comp Master visualization keeps only the newest scope columns")
@@ -745,7 +775,7 @@ TEST_CASE ("EQ Master applies its eight parametric bands and restores their stat
     const auto devices = engine.devices (1);
     REQUIRE (devices.size() == 2);
     REQUIRE (devices[0].name == "Comp Master");
-    REQUIRE (devices[0].automatableParameters.size() == 10);
+    REQUIRE (devices[0].automatableParameters.size() == 11);
     REQUIRE (devices[1].name == "EQ Master");
     REQUIRE (devices[1].automatableParameters.size() == EqMasterProcessor::bandCount * 6 + 3);
     const auto states = engine.getPluginStates();

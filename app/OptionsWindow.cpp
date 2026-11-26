@@ -1,32 +1,101 @@
 #include "OptionsWindow.h"
 #include "Theme.h"
+#include <algorithm>
 #include <utility>
 
 namespace
 {
+class AudioInputMonitor final : public juce::Component, private juce::Timer
+{
+public:
+    AudioInputMonitor (juce::AudioDeviceManager& manager,
+                       std::function<std::pair<float, float>()> provider)
+        : deviceManager (manager), levelProvider (std::move (provider))
+    {
+        startTimerHz (30);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto bounds = getLocalBounds().toFloat();
+        g.setColour (theme::control());
+        g.fillRoundedRectangle (bounds, 5.0f);
+        g.setColour (theme::border());
+        g.drawRoundedRectangle (bounds.reduced (0.5f), 5.0f, 1.0f);
+
+        const auto* device = deviceManager.getCurrentAudioDevice();
+        const bool hasInput = device != nullptr
+            && device->getActiveInputChannels().countNumberOfSetBits() > 0;
+        const auto peak = std::max (leftPeak, rightPeak);
+        const auto status = device == nullptr ? "No audio device selected."
+            : ! hasInput ? "Enable an input channel above."
+            : peak < 0.001f ? "No signal: check the selected input and Windows microphone access."
+            : "Input signal detected.";
+
+        g.setColour (theme::text());
+        g.setFont (theme::fontOptions (11.0f, juce::Font::bold));
+        g.drawText ("INPUT TEST", 10, 5, 85, 16, juce::Justification::centredLeft);
+        g.setColour (theme::textDim());
+        g.setFont (theme::fontOptions (10.0f));
+        g.drawText (status, 10, 22, std::max (0, getWidth() - 230), 16,
+                    juce::Justification::centredLeft, true);
+
+        auto meterArea = getLocalBounds().toFloat().reduced (0.0f, 11.0f).removeFromRight (190.0f);
+        meterArea.removeFromLeft (8.0f);
+        const float rowHeight = 7.0f;
+        theme::drawSegmentedMeter (g, meterArea.removeFromTop (rowHeight),
+                                   theme::meterAmount (leftPeak), false, 24);
+        meterArea.removeFromTop (5.0f);
+        theme::drawSegmentedMeter (g, meterArea.removeFromTop (rowHeight),
+                                   theme::meterAmount (rightPeak), false, 24);
+        g.setColour (theme::textDim());
+        g.setFont (theme::fontOptions (8.0f, juce::Font::bold));
+        g.drawText ("L", getWidth() - 202, 9, 10, 10, juce::Justification::centred);
+        g.drawText ("R", getWidth() - 202, 21, 10, 10, juce::Justification::centred);
+    }
+
+private:
+    void timerCallback() override
+    {
+        const auto levels = levelProvider ? levelProvider() : std::pair<float, float> {};
+        leftPeak = levels.first;
+        rightPeak = levels.second;
+        repaint();
+    }
+
+    juce::AudioDeviceManager& deviceManager;
+    std::function<std::pair<float, float>()> levelProvider;
+    float leftPeak = 0.0f, rightPeak = 0.0f;
+};
+
 class AudioPreferencesPage final : public juce::Component
 {
 public:
-    explicit AudioPreferencesPage (juce::AudioDeviceManager& manager)
-        : selector (manager, 0, 2, 1, 2, true, false, false, false)
+    AudioPreferencesPage (juce::AudioDeviceManager& manager,
+                          std::function<std::pair<float, float>()> inputLevelProvider)
+        : selector (manager, 0, 2, 1, 2, true, false, false, false),
+          inputMonitor (manager, std::move (inputLevelProvider))
     {
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::centredLeft);
         addAndMakeVisible (description);
         selector.setItemHeight (26);
         addAndMakeVisible (selector);
+        addAndMakeVisible (inputMonitor);
     }
 
     void resized() override
     {
         auto area = getLocalBounds().reduced (14);
         description.setBounds (area.removeFromTop (34));
+        inputMonitor.setBounds (area.removeFromBottom (58));
         selector.setBounds (area);
     }
 
 private:
-    juce::Label description { {}, "Configure audio and enable the MIDI inputs used by MIDI Learn." };
+    juce::Label description { {}, "Choose the audio device and enable its input channels. The input test below should respond to your microphone." };
     juce::AudioDeviceSelectorComponent selector;
+    AudioInputMonitor inputMonitor;
 };
 
 class PluginPreferencesPage final : public juce::Component, private juce::Timer
@@ -342,12 +411,14 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
                               std::function<void (bool)> onCreateEdgeFadesChanged,
                               std::function<void (theme::AccentStyle)> onAccentStyleChanged,
                               theme::WaveformStyle waveformStyle,
-                              std::function<void (theme::WaveformStyle)> onWaveformStyleChanged)
+                              std::function<void (theme::WaveformStyle)> onWaveformStyleChanged,
+                              std::function<std::pair<float, float>()> audioInputLevelProvider)
     : juce::DocumentWindow (theme::ui ("Preferences"), theme::panel(),
                             juce::DocumentWindow::closeButton)
 {
     auto tabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
-    tabs->addTab (theme::ui ("Audio"), theme::panel(), new AudioPreferencesPage (audioDeviceManager), true);
+    tabs->addTab (theme::ui ("Audio"), theme::panel(),
+                  new AudioPreferencesPage (audioDeviceManager, std::move (audioInputLevelProvider)), true);
     tabs->addTab (theme::ui ("Plugins"), theme::panel(), new PluginPreferencesPage (scanner), true);
     tabs->addTab (theme::ui ("Record/Warp/Launch"), theme::panel(),
                   new FadePreferencesPage (createEdgeFades, std::move (onCreateEdgeFadesChanged)), true);

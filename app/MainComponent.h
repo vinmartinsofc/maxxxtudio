@@ -26,6 +26,7 @@
 
 class MainComponent : public juce::Component, public juce::DragAndDropContainer,
                       public juce::KeyListener, public juce::MidiInputCallback,
+                      public juce::AudioIODeviceCallback,
                       private juce::ChangeListener, private juce::Timer
 {
 public:
@@ -59,6 +60,7 @@ private:
     class PluginWindowNavigator;
     struct PluginHistoryRestore;
     struct PluginCopyOperation;
+    struct RecordingSession;
 
     void startSimulatedTask();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
@@ -155,6 +157,13 @@ private:
                                            int number, int value, bool noteOn);
     void applyMidiMapping (const MidiMapping&, int value, bool noteOn);
     void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+    void audioDeviceIOCallbackWithContext (const float* const*, int, float* const*, int, int,
+                                           const juce::AudioIODeviceCallbackContext&) override;
+    void audioDeviceAboutToStart (juce::AudioIODevice*) override;
+    void audioDeviceStopped() override;
+    bool startRecording (bool loopWasEnabled);
+    void finishRecording (bool discard = false);
+    void captureRecordedMidiEvent (int pitch, int channel, int velocity, double beat, bool noteOn);
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
     void timerCallback() override;
     juce::String deviceSummary (int trackId) const;
@@ -221,6 +230,12 @@ private:
     int missingProjectPlugins = 0;
     bool waitingForProjectPluginScan = false, restoringProjectPlugins = false;
     std::shared_ptr<std::atomic<bool>> lifetimeToken { std::make_shared<std::atomic<bool>> (true) };
+    std::unique_ptr<RecordingSession> recordingSession;
+    std::atomic<RecordingSession*> activeRecordingSession { nullptr };
+    std::atomic<std::uint64_t> activeRecordingGeneration { 0 }, nextRecordingGeneration { 1 };
+    std::atomic<int> recordingCallbacksInFlight { 0 };
+    std::array<std::atomic<float>, 2> liveAudioInputPeaks {};
+    bool audioFinalizationInProgress = false;
     std::unique_ptr<ActionIndicator> actionIndicator;
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
     std::unique_ptr<SpectrumAnalyzer> spectrumAnalyzer;

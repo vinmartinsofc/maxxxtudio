@@ -18,7 +18,7 @@ public:
     enum class Kind
     {
         Decibels, Width, Balance, Percent, Rate, Degrees, Toggle, Shape, ChannelMode,
-        Threshold, Ratio, Attack, Release, Knee, Makeup, Frequency, EqGain, Quality,
+        Threshold, Ratio, Attack, Release, Knee, Makeup, OutputGain, Frequency, EqGain, Quality,
         FilterType, FilterSlope, MidSide
     };
 
@@ -81,6 +81,7 @@ public:
                 return juce::String (1.0f * std::pow (1000.0f, normalized), 1) + " ms";
             case Kind::Knee: return juce::String (normalized * 24.0f, 1) + " dB";
             case Kind::Makeup: return juce::String (normalized * 24.0f, 1) + " dB";
+            case Kind::OutputGain: return juce::String (normalized * 48.0f - 24.0f, 1) + " dB";
             case Kind::Frequency:
                 return juce::String (20.0f * std::pow (1000.0f, normalized), 0) + " Hz";
             case Kind::EqGain: return juce::String (normalized * 36.0f - 18.0f, 1) + " dB";
@@ -140,6 +141,7 @@ public:
                                    / std::log (1000.0f), 0.0f, 1.0f);
             case Kind::Knee: return std::clamp (number / 24.0f, 0.0f, 1.0f);
             case Kind::Makeup: return std::clamp (number / 24.0f, 0.0f, 1.0f);
+            case Kind::OutputGain: return std::clamp ((number + 24.0f) / 48.0f, 0.0f, 1.0f);
             case Kind::Frequency:
                 return std::clamp (std::log (std::max (number, 20.0f) / 20.0f)
                                    / std::log (1000.0f), 0.0f, 1.0f);
@@ -918,7 +920,7 @@ namespace
 class ParameterKnob final : public juce::Component
 {
 public:
-    explicit ParameterKnob (juce::AudioProcessorParameter& parameter)
+    explicit ParameterKnob (juce::AudioProcessorParameter& parameter, int textBoxWidth = 78)
     {
         label.setColour (juce::Label::textColourId, theme::text());
         label.setFont (theme::fontOptions (12.0f, juce::Font::bold));
@@ -926,7 +928,7 @@ public:
         addAndMakeVisible (label);
 
         slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
-        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, 78, 22);
+        slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, textBoxWidth, 22);
         slider.setRange (0.0, 1.0, 0.001);
         slider.setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
         slider.setColour (juce::Slider::rotarySliderOutlineColourId, theme::border());
@@ -1148,19 +1150,22 @@ public:
         setResizable (false, false);
         for (int index = 0; index < 6; ++index)
         {
-            auto control = std::make_unique<ParameterKnob> (*processor.getParameters()[index]);
+            auto control = std::make_unique<ParameterKnob> (*processor.getParameters()[index], 62);
             addAndMakeVisible (*control);
             controls.push_back (std::move (control));
         }
         for (int index = 6; index < 8; ++index)
         {
-            auto control = std::make_unique<ParameterKnob> (*processor.getParameters()[index]);
+            auto control = std::make_unique<ParameterKnob> (*processor.getParameters()[index], 64);
             addAndMakeVisible (*control);
             sidechainControls.push_back (std::move (control));
         }
-        auto mixControl = std::make_unique<ParameterKnob> (*processor.getParameters()[9]);
+        auto mixControl = std::make_unique<ParameterKnob> (*processor.getParameters()[9], 62);
         addAndMakeVisible (*mixControl);
         controls.push_back (std::move (mixControl));
+        auto outputGainControl = std::make_unique<ParameterKnob> (*processor.getParameters()[10], 62);
+        addAndMakeVisible (*outputGainControl);
+        controls.push_back (std::move (outputGainControl));
         refreshSourceItems();
         sourceBox.setSelectedId (selectedSourceItem(), juce::dontSendNotification);
         sourceBox.onChange = [this]
@@ -1253,8 +1258,8 @@ public:
         resetButton.setBounds (footer.removeFromRight (80).reduced (1));
         area.removeFromTop (4);
         auto controlsRow = area.removeFromTop (130);
-        const int sidechainWidth = 80;
-        const int gap = 8;
+        const int sidechainWidth = 70;
+        const int gap = 6;
         const int count = static_cast<int> (controls.size());
         if (count <= 0)
             return;
@@ -1264,7 +1269,7 @@ public:
         {
             auto cell = controlsRow.removeFromLeft (controlWidth);
             controls[static_cast<std::size_t> (index)]->setBounds (
-                cell.withSizeKeepingCentre (72, controlsRow.getHeight()));
+                cell.withSizeKeepingCentre (68, controlsRow.getHeight()));
             if (index + 1 < count)
                 controlsRow.removeFromLeft (gap);
         }
@@ -1272,7 +1277,7 @@ public:
         for (auto& control : sidechainControls)
         {
             auto cell = controlsRow.removeFromLeft (sidechainWidth);
-            control->setBounds (cell.withSizeKeepingCentre (72, controlsRow.getHeight()));
+            control->setBounds (cell.withSizeKeepingCentre (68, controlsRow.getHeight()));
             if (control != sidechainControls.back())
                 controlsRow.removeFromLeft (gap);
         }
@@ -1376,14 +1381,19 @@ private:
             {
                 const int first = start + pixel * visibleCount / pixelWidth;
                 const int last = std::max (first + 1, start + (pixel + 1) * visibleCount / pixelWidth);
-                float minimum = 0.0f, maximum = 0.0f, reduction = 0.0f;
+                float minimum = 0.0f, maximum = 0.0f, reduction = 0.0f, peakSum = 0.0f;
                 for (int index = first; index < std::min (last, count); ++index)
                 {
                     const auto& column = waveform[static_cast<std::size_t> (index)];
                     minimum = std::min (minimum, column.minimum);
                     maximum = std::max (maximum, column.maximum);
                     reduction = std::max (reduction, column.gainReductionDb);
+                    peakSum += std::max (std::abs (column.minimum), std::abs (column.maximum));
                 }
+                const int columnCount = std::max (1, std::min (last, count) - first);
+                const float peakAmplitude = std::max (std::abs (minimum), std::abs (maximum));
+                const bool transient = peakAmplitude >= 0.025f
+                    && peakAmplitude > peakSum / static_cast<float> (columnCount) * 1.65f;
                 const float x = graph.getX() + static_cast<float> (pixel);
                 const float top = centreY - juce::jlimit (0.0f, 1.0f, maximum) * halfHeight;
                 const float bottom = centreY - juce::jlimit (-1.0f, 0.0f, minimum) * halfHeight;
@@ -1395,6 +1405,11 @@ private:
                 g.fillRect (x - 0.5f, top - 1.0f, 2.5f, std::max (2.0f, bottom - top + 2.0f));
                 g.setColour (waveformColour);
                 g.fillRect (x, top, 1.5f, std::max (1.0f, bottom - top));
+                if (transient)
+                {
+                    g.setColour (theme::text().withAlpha (0.82f));
+                    g.drawLine (x, top, x, bottom, 1.25f);
+                }
                 const float grY = centreY + juce::jlimit (0.0f, 1.0f, reduction / 12.0f) * halfHeight;
                 if (pixel == 0)
                     reductionLine.startNewSubPath (x, grY);
@@ -2349,6 +2364,8 @@ CompMasterProcessor::CompMasterProcessor()
                                        EffectParameter::Kind::Toggle));
     addParameter (new EffectParameter ("mix", "Mix", 0.5f, 0.5f,
                                        EffectParameter::Kind::Percent));
+    addParameter (new EffectParameter ("output_gain", "Out Gain", 0.5f, 0.5f,
+                                       EffectParameter::Kind::OutputGain));
     for (int index = 0; index < scopeBufferSize; ++index)
     {
         scopeMinimums[static_cast<std::size_t> (index)].store (0.0f);
@@ -2398,6 +2415,8 @@ void CompMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     const float highCut = 20.0f * std::pow (1000.0f, parameters[7]->getValue());
     const bool bypass = parameters[8]->getValue() >= 0.5f;
     const float mix = parameters[9]->getValue();
+    const float outputGain = juce::Decibels::decibelsToGain (
+        parameters[10]->getValue() * 48.0f - 24.0f);
     const int sourceTrackId = sidechainSource.load (std::memory_order_relaxed);
     if (sourceTrackId != lastSidechainSourceId)
     {
@@ -2477,9 +2496,9 @@ void CompMasterProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         const float gain = bypass ? 1.0f
             : juce::Decibels::decibelsToGain (reductionDb + makeupDb);
         const float blendedGain = 1.0f + (gain - 1.0f) * mix;
-        outputLeft[sample] = dryLeft * blendedGain;
+        outputLeft[sample] = dryLeft * blendedGain * outputGain;
         if (output.getNumChannels() > 1)
-            outputRight[sample] = dryRight * blendedGain;
+            outputRight[sample] = dryRight * blendedGain * outputGain;
 
         blockPeakLeft = std::max (blockPeakLeft, std::abs (outputLeft[sample]));
         blockPeakRight = std::max (blockPeakRight, std::abs (output.getNumChannels() > 1

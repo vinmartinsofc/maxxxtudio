@@ -3,6 +3,7 @@
 #include "PluginScanner.h"
 #include "Theme.h"
 #include <functional>
+#include <utility>
 
 class OptionsWindow final : public juce::DocumentWindow
 {
@@ -11,7 +12,8 @@ public:
                    std::function<void (bool)> onCreateEdgeFadesChanged,
                    std::function<void (theme::AccentStyle)> onAccentStyleChanged,
                    theme::WaveformStyle waveformStyle,
-                   std::function<void (theme::WaveformStyle)> onWaveformStyleChanged);
+                   std::function<void (theme::WaveformStyle)> onWaveformStyleChanged,
+                   std::function<std::pair<float, float>()> audioInputLevelProvider);
 
     void closeButtonPressed() override;
 };

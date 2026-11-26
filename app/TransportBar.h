@@ -42,8 +42,11 @@ public:
 
     void togglePlay();
     void stop();
+    void setRecording (bool);
+    void cancelCountIn();
     void resumeFromPosition (double beats);
     void setLoopEnabled (bool);
+    bool isCountInActive() const noexcept { return countInActive; }
     std::function<void (bool)> onLoopToggled;
     std::function<void (bool)> onBrowserToggled;
     std::function<void (bool)> onFileBrowserToggled;
@@ -56,6 +59,8 @@ public:
     std::function<void (double bpm)> onBpmChanged;
     std::function<void()> onBeforePlay;
     std::function<void()> onBeforePause, onBeforeStop;
+    std::function<bool (bool loopWasEnabled)> onRecordStart;
+    std::function<void()> onRecordStop;
     void setBrowserVisible (bool);
     void setFileBrowserVisible (bool);
     void setFavoritesVisible (bool);
@@ -81,10 +86,17 @@ private:
 
     void timerCallback() override;
     void updateButtons();
+    void updateRecordControls();
+    void beginCountIn (bool wasPlaying);
+    void finishCountIn();
+    void restoreCountInMetronome();
+    void updateCountInDisplay (double remainingBeats);
 
     SequencerGraph& graph;
     IconButton playButton { icons::Icon::Play, "Play" };
     IconButton stopButton { icons::Icon::Stop, "Stop" };
+    IconToggleButton recordButton { icons::Icon::Record, "Record" };
+    juce::ComboBox countInSelector;
     IconButton startButton { icons::Icon::Rewind, "Go to Start" };
     IconButton endButton { icons::Icon::FastForward, "Go to End" };
     IconButton projectButton { icons::Icon::Folder, "Project" };
@@ -104,4 +116,10 @@ private:
     CpuTooltipButton cpuTooltipArea;
     double displayedCpuAverage = 0.0;
     double lastPosition = -1.0, lastBpm = -1.0;
+    bool recording = false, countInActive = false;
+    bool countInWasPlaying = false, countInLoopWasEnabled = false;
+    bool countInMetronomeWasEnabled = false;
+    double countInStartBeat = 0.0, countInRemainingBeats = 0.0;
+    double countInLastUpdateSeconds = 0.0;
+    int countInBeats = 4, activeCountInBeats = 0, displayedCountInBeat = 0;
 };
