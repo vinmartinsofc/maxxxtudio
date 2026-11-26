@@ -9,10 +9,18 @@ MaXXXtudio is a free, open-source, cross-platform DAW built with C++20 and JUCE 
 ## Current interface
 
 <p align="center">
-  <img src="app/assets/readme/interface-overview.png" alt="MaXXXtudio arrangement, plugin browser, and mixer" width="1000">
+  <img src="app/assets/readme/interface-overview.png" alt="MaXXXtudio arrangement with optional count-in, track recording status, plugin browser, and mixer" width="1000">
 </p>
 
 The main window includes the Arrangement view, plugin browser, mixer, and piano roll. The audio browser and device chain show audio files and VST3 plugins for the selected track.
+
+### Audio and MIDI recording
+
+Record audio from the selected input or MIDI from a connected controller. The optional count-in is selectable from the transport; the playhead starts after the countdown, and track headers show the current count-in or recording state.
+
+<p align="center">
+  <img src="app/assets/readme/recording-count-in.png" alt="Transport count-in and COUNT-IN status on the MIDI track" width="1000">
+</p>
 
 ### Moving plugin windows
 
@@ -27,6 +35,7 @@ This demonstration shows how to move between multiple open plugin windows when s
 ## Implemented features
 
 - **Arrangement:** MIDI and audio tracks, multiple clips, move/copy/duplicate, split, adaptive grid, locators, loop, overview, track collapse/expand, and optional playhead following.
+- **Recording:** audio and MIDI capture, optional selectable count-in, and visible count-in/recording status on tracks.
 - **Piano roll:** create and edit notes, velocity editing, quantization, selection, scales, Fold, highlighting, MIDI grooves, computer-keyboard input, and horizontal/vertical zoom.
 - **Audio editing:** split and join clips, adjust clip edges, fades, transient analysis, and manual Auto-Warp using the detected source BPM. The first analyzed sample can set the project tempo; later samples follow it. Time-stretching is currently limited to Re-Pitch mode, which changes pitch.
 - **Selection and shortcuts:** select clips and time ranges, select multiple tracks, copy/cut/paste, duplicate, and group/ungroup tracks.
@@ -35,7 +44,7 @@ This demonstration shows how to move between multiple open plugin windows when s
 - **VST3 plugins:** background scanning, favorites, custom folders, isolated worker execution, and project crash recovery.
 - **Navigation:** browse plugins by folder, label, and type; browse audio files; color-code favorites; search, preview, and navigate history.
 - **MIDI grooves:** import `.agr` files, browse and preview the library, and apply grooves.
-- **Native tools:** Drum Master, Volume Master, Comp Master, EQ Master, and Reference Master.
+- **Native tools:** Drum Master, Volume Master, Comp Master with output gain and an auto-scaled oscilloscope, EQ Master, and Reference Master.
 - **Projects:** save and open `.std` files, autosave and recover sessions, undo/redo, and export 24-bit WAV files.
 - **Visual identity:** custom themes, control states, tooltips, vector icons, and a neon-accent color palette.
 

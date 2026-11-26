@@ -1344,20 +1344,37 @@ private:
         auto graph = content.reduced (30.0f, 0.0f);
         const float centreY = graph.getCentreY();
         const float halfHeight = graph.getHeight() * 0.5f;
+        const int count = static_cast<int> (waveform.size());
+        const int visibleCount = count > 0
+            ? std::max (1, juce::roundToInt (static_cast<double> (count) / zoomFactor)) : 0;
+        const int start = std::max (0, count - visibleCount);
+        float visiblePeak = 0.0f;
+        for (int index = start; index < count; ++index)
+        {
+            const auto& column = waveform[static_cast<std::size_t> (index)];
+            visiblePeak = std::max (visiblePeak,
+                std::max (std::abs (column.minimum), std::abs (column.maximum)));
+        }
+        const float displayGain = visiblePeak > 0.00001f
+            ? juce::jlimit (0.25f, 16.0f, 0.9f / visiblePeak) : 1.0f;
+        const float displayPeak = visiblePeak > 0.00001f
+            ? juce::jlimit (0.0f, 1.0f, visiblePeak * displayGain) : 1.0f;
+        const float peakDb = visiblePeak > 0.00001f
+            ? juce::Decibels::gainToDecibels (visiblePeak) : 0.0f;
         static constexpr std::array<float, 6> dbMarks {
             0.0f, -3.0f, -6.0f, -12.0f, -18.0f, -60.0f
         };
         g.setFont (theme::fontOptions (8.5f));
         for (const float db : dbMarks)
         {
-            const float amplitude = juce::Decibels::decibelsToGain (db);
+            const float amplitude = displayPeak * juce::Decibels::decibelsToGain (db);
             const float offset = amplitude * halfHeight;
             g.setColour (db == 0.0f ? theme::textDim().withAlpha (0.72f)
                                      : theme::border().withAlpha (0.5f));
             g.drawHorizontalLine (juce::roundToInt (centreY - offset), graph.getX(), graph.getRight());
             g.drawHorizontalLine (juce::roundToInt (centreY + offset), graph.getX(), graph.getRight());
             g.setColour (theme::textDim());
-            const auto label = db <= -60.0f ? "-inf" : juce::String (static_cast<int> (db));
+            const auto label = juce::String (static_cast<int> (std::round (peakDb + db)));
             g.drawText (label,
                         juce::Rectangle<float> (scope.getX() + 2.0f, centreY - offset - 6.0f,
                                                 25.0f, 12.0f),
@@ -1369,10 +1386,6 @@ private:
                             juce::Justification::centredLeft);
         }
 
-        const int count = static_cast<int> (waveform.size());
-        const int visibleCount = count > 0
-            ? std::max (1, juce::roundToInt (static_cast<double> (count) / zoomFactor)) : 0;
-        const int start = std::max (0, count - visibleCount);
         juce::Path reductionLine;
         if (visibleCount > 0)
         {
@@ -1395,10 +1408,12 @@ private:
                 const bool transient = peakAmplitude >= 0.025f
                     && peakAmplitude > peakSum / static_cast<float> (columnCount) * 1.65f;
                 const float x = graph.getX() + static_cast<float> (pixel);
-                const float top = centreY - juce::jlimit (0.0f, 1.0f, maximum) * halfHeight;
-                const float bottom = centreY - juce::jlimit (-1.0f, 0.0f, minimum) * halfHeight;
+                const float top = centreY
+                    - juce::jlimit (0.0f, 1.0f, maximum * displayGain) * halfHeight;
+                const float bottom = centreY
+                    - juce::jlimit (-1.0f, 0.0f, minimum * displayGain) * halfHeight;
                 const float amplitude = juce::jlimit (0.0f, 1.0f,
-                    std::max (std::abs (minimum), std::abs (maximum)));
+                    std::max (std::abs (minimum), std::abs (maximum)) * displayGain);
                 const auto waveformColour = juce::Colour (0xffa45bff)
                     .brighter (amplitude * 0.25f);
                 g.setColour (waveformColour.withAlpha (0.24f));
@@ -1419,6 +1434,12 @@ private:
             g.setColour (theme::recording());
             g.strokePath (reductionLine, juce::PathStrokeType (1.5f));
         }
+
+        g.setColour (theme::textDim());
+        g.setFont (theme::fontOptions (8.0f, juce::Font::bold));
+        g.drawText ("AUTO", graph.withX (graph.getRight() - 34.0f).withWidth (32.0f)
+                    .withY (graph.getY() + 2.0f).withHeight (10.0f),
+                    juce::Justification::centredRight, true);
 
         g.setColour (theme::textDim());
         g.setFont (theme::fontOptions (9.0f, juce::Font::bold));
@@ -1506,7 +1527,7 @@ private:
     std::vector<CompMasterProcessor::SidechainSource> sourceOptionsCache;
     juce::ComboBox sourceBox;
     juce::TextButton zoomIn, zoomOut, bypass, ab, resetButton;
-    double zoomFactor = 1.0;
+    double zoomFactor = 6.0;
 };
 
 class EqMasterEditor final : public juce::AudioProcessorEditor, private juce::Timer
