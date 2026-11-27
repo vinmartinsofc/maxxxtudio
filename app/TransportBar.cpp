@@ -176,7 +176,7 @@ TransportBar::TransportBar (SequencerGraph& g) : graph (g)
     playButton.onClick = [this] { togglePlay(); };
     stopButton.onClick = [this] { stop(); };
     recordButton.setClickingTogglesState (false);
-    recordButton.setTooltip ("Record input on the selected track");
+    recordButton.setTooltip ("Record audio/MIDI input, or automation in Automation Mode");
     countInSelector.addItem ("Off", 1);
     countInSelector.addItem ("1 beat", 2);
     countInSelector.addItem ("2 beats", 3);
@@ -410,7 +410,7 @@ void TransportBar::updateRecordControls()
     metronomeVolumeSlider.setEnabled (! countInActive);
     recordButton.setTooltip (recording ? "Stop recording"
         : countInActive ? "Cancel the recording count-in"
-                        : "Record input on the selected track");
+                        : "Record audio/MIDI input, or automation in Automation Mode");
 }
 
 void TransportBar::beginCountIn (bool wasPlaying)

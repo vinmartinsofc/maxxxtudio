@@ -6386,6 +6386,15 @@ void ArrangementView::selectPluginAutomationParameter (
 void ArrangementView::showAutomationTargetMenu()
 {
     juce::PopupMenu menu;
+    menu.addSectionHeader (theme::ui ("[A] = automation exists"));
+    const auto hasAutomation = [this] (int targetTrackId, const roll::AutomationTarget& target)
+    {
+        const auto* targetTrack = targetTrackId == 0
+            ? project.masterTrack.get() : project.track (targetTrackId);
+        return targetTrack != nullptr
+            && std::any_of (targetTrack->automation.begin(), targetTrack->automation.end(),
+                [&target] (const auto& envelope) { return envelope.target == target; });
+    };
     menu.addSectionHeader (theme::ui ("Mixer"));
     std::vector<AutomationParameterChoice> choices;
     const int trackId = automationTargetTrackId >= 0
@@ -6399,7 +6408,8 @@ void ArrangementView::showAutomationTargetMenu()
         choice.target.currentValue = value;
         choice.label = label;
         const bool selected = automationTarget == choice.target;
-        menu.addItem (id, label, true, selected);
+        menu.addItem (id, label + (hasAutomation (trackId, choice.target) ? "  [A]" : ""),
+                      true, selected);
         choices.push_back (std::move (choice));
     };
     addMixerChoice (1, roll::AutomationParameterType::Volume,
@@ -6409,24 +6419,48 @@ void ArrangementView::showAutomationTargetMenu()
     addMixerChoice (3, roll::AutomationParameterType::Mute,
                     theme::ui ("Mute"), track != nullptr && track->mute ? 1.0 : 0.0);
 
-    std::vector<std::pair<int, roll::AutomationTarget>> targets;
-    if (track != nullptr && automationParametersProvider)
+    struct PluginMenuTarget
     {
+        int menuId;
+        int trackId;
+        roll::AutomationTarget target;
+    };
+    std::vector<PluginMenuTarget> targets;
+    int nextId = 100;
+    const auto addPluginTargets = [&] (int targetTrackId, const juce::String& section)
+    {
+        if (! automationParametersProvider)
+            return;
+
+        auto parameters = automationParametersProvider (targetTrackId);
+        if (parameters.empty())
+            return;
+
         menu.addSeparator();
-        menu.addSectionHeader (theme::ui ("Plugins and Effects"));
-        int nextId = 100;
-        for (auto& choice : automationParametersProvider (trackId))
+        menu.addSectionHeader (section);
+        for (auto& choice : parameters)
         {
             const auto existing = std::find_if (targets.begin(), targets.end(),
-                [&choice] (const auto& current) { return current.second == choice.target; });
+                [&choice, targetTrackId] (const auto& current)
+                {
+                    return current.trackId == targetTrackId && current.target == choice.target;
+                });
             if (existing != targets.end())
                 continue;
+
             const int id = nextId++;
-            menu.addItem (id, choice.label,
-                          true, automationTarget == choice.target);
-            targets.emplace_back (id, choice.target);
+            menu.addItem (id, choice.label
+                + (hasAutomation (targetTrackId, choice.target) ? "  [A]" : ""),
+                true, automationTargetTrackId == targetTrackId
+                    && automationTarget == choice.target);
+            targets.push_back ({ id, targetTrackId, choice.target });
         }
-    }
+    };
+    if (trackId != 0)
+        addPluginTargets (trackId, theme::ui ("Track Plugins and Effects"));
+    if (project.selectedTrackId > 0 && project.selectedTrackId != trackId)
+        addPluginTargets (project.selectedTrackId, theme::ui ("Selected Track Plugins and Effects"));
+    addPluginTargets (0, theme::ui ("Master Effects"));
 
     juce::Component::SafePointer<ArrangementView> safeThis (this);
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&automationTargetButton),
@@ -6445,16 +6479,17 @@ void ArrangementView::showAutomationTargetMenu()
                 });
             if (selected != choices.end())
             {
-                safeThis->automationTargetTrackId = safeThis->project.selectedTrackId;
+                safeThis->automationTargetTrackId = trackId;
                 safeThis->automationTarget = selected->target;
             }
             else
             {
                 const auto pluginTarget = std::find_if (targets.begin(), targets.end(),
-                    [result] (const auto& target) { return target.first == result; });
+                    [result] (const auto& target) { return target.menuId == result; });
                 if (pluginTarget == targets.end())
                     return;
-                safeThis->selectPluginAutomationParameter (trackId, pluginTarget->second);
+                safeThis->selectPluginAutomationParameter (
+                    pluginTarget->trackId, pluginTarget->target);
                 return;
             }
             safeThis->updateAutomationTargetButton();

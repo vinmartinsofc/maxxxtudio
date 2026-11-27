@@ -4,6 +4,7 @@
  #include "PluginWorkerProtocol.h"
 #endif
 #include <juce_audio_utils/juce_audio_utils.h>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -20,14 +21,7 @@ public:
 
     bool hasFailed() const noexcept { return failed.load (std::memory_order_acquire); }
     bool isInstrument() const noexcept { return instrument; }
-    int consumeParameterGestureStarted() noexcept
-    {
-        return lastParameterGestureStarted.exchange (-1, std::memory_order_acq_rel);
-    }
-    int consumeParameterGestureEnded() noexcept
-    {
-        return lastParameterGestureEnded.exchange (-1, std::memory_order_acq_rel);
-    }
+    std::vector<std::pair<int, bool>> consumeParameterGestureEvents();
     static bool isPluginEditorForeground();
     static std::vector<juce::Rectangle<int>> pluginEditorWindowBounds();
     static void movePluginEditorWindows (int deltaX);
@@ -80,9 +74,10 @@ private:
     double sampleRate = 44100.0;
     bool resourcesPrepared = true;
     std::atomic<bool> failed { false };
-    std::atomic<int> lastParameterGestureStarted { -1 }, lastParameterGestureEnded { -1 };
     std::function<void (const juce::String&, const juce::String&)> onFailure;
 #if defined(_WIN32)
+    std::array<std::atomic<std::uint32_t>, pluginworker::parameterGestureWordCount>
+        lastParameterGestureStarted {}, lastParameterGestureEnded {};
     juce::CriticalSection requestLock;
     juce::CriticalSection stateLock;
     juce::MemoryBlock cachedState;

@@ -171,6 +171,7 @@ public:
     bool redo();
     bool canUndo() const noexcept { return ! undoStack.empty(); }
     bool canRedo() const noexcept { return ! redoStack.empty(); }
+    bool isEditInProgress() const noexcept { return editInProgress; }
     bool retainsAudioFile (const std::string& path) const;
     State createState() const;
     void replaceState (State);

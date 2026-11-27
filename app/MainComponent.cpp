@@ -41,46 +41,119 @@ bool isPianoRollToggleShortcut (const juce::KeyPress& key)
         || key.getKeyCode() == 96;
 }
 
-void replaceAccentColour (juce::Component& component, int colourId,
-                          juce::Colour previousAccent, juce::Colour accent,
-                          juce::Colour previousHover, juce::Colour hover)
+using ThemeColourSet = std::array<juce::Colour, 11>;
+using ThemeColourMap = std::array<std::pair<juce::Colour, juce::Colour>, 11>;
+
+ThemeColourSet currentThemeColours()
+{
+    return { theme::background(), theme::panel(), theme::panelLight(), theme::control(),
+             theme::hover(), theme::pressed(), theme::border(), theme::text(),
+             theme::textDim(), theme::accent(), theme::accentHover() };
+}
+
+void replaceThemeColour (juce::Component& component, int colourId,
+                         const ThemeColourMap& colours)
 {
     if (! component.isColourSpecified (colourId))
         return;
 
     const auto current = component.findColour (colourId, false);
-    if (current == previousAccent)
-        component.setColour (colourId, accent);
-    else if (current == previousHover)
-        component.setColour (colourId, hover);
+    for (const auto& [previous, replacement] : colours)
+        {
+            const auto replaceIfMatch = [&] (juce::Colour oldColour, juce::Colour newColour)
+        {
+                if (current != oldColour)
+                    return false;
+                component.setColour (colourId, newColour);
+                return true;
+            };
+            if (replaceIfMatch (previous, replacement))
+                return;
+
+            constexpr std::array<float, 8> shadeAmounts {
+                0.08f, 0.10f, 0.12f, 0.15f, 0.18f, 0.20f, 0.30f, 0.50f
+            };
+            for (const float amount : shadeAmounts)
+                if (replaceIfMatch (previous.darker (amount), replacement.darker (amount))
+                    || replaceIfMatch (previous.brighter (amount), replacement.brighter (amount)))
+                    return;
+
+            constexpr std::array<float, 12> alphaAmounts {
+                0.03f, 0.05f, 0.07f, 0.10f, 0.12f, 0.15f,
+                0.18f, 0.20f, 0.24f, 0.30f, 0.70f, 0.90f
+            };
+            for (const float alpha : alphaAmounts)
+                if (replaceIfMatch (previous.withAlpha (alpha), replacement.withAlpha (alpha)))
+                    return;
+        }
 }
 
-void refreshAccentColours (juce::Component& component,
-                           juce::Colour previousAccent, juce::Colour accent,
-                           juce::Colour previousHover, juce::Colour hover)
+void refreshThemeColours (juce::Component& component, const ThemeColourMap& colours)
 {
+    if (auto* window = dynamic_cast<juce::DocumentWindow*> (&component))
+        window->setColour (juce::DocumentWindow::backgroundColourId, theme::panel());
+
+    if (auto* tabs = dynamic_cast<juce::TabbedComponent*> (&component))
+    {
+        tabs->setColour (juce::TabbedComponent::backgroundColourId, theme::panel());
+        tabs->setColour (juce::TabbedComponent::outlineColourId, theme::border());
+        for (int i = 0; i < tabs->getNumTabs(); ++i)
+            tabs->setTabBackgroundColour (i, theme::panel());
+
+        auto& tabBar = tabs->getTabbedButtonBar();
+        tabBar.setColour (juce::TabbedButtonBar::tabTextColourId, theme::textDim());
+        tabBar.setColour (juce::TabbedButtonBar::frontTextColourId, theme::text());
+        tabBar.setColour (juce::TabbedButtonBar::tabOutlineColourId, theme::border());
+        tabBar.setColour (juce::TabbedButtonBar::frontOutlineColourId, theme::accent());
+    }
+
     if (dynamic_cast<juce::TextButton*> (&component) != nullptr)
         for (const int id : { juce::TextButton::buttonColourId, juce::TextButton::buttonOnColourId,
                               juce::TextButton::textColourOffId, juce::TextButton::textColourOnId })
-            replaceAccentColour (component, id, previousAccent, accent, previousHover, hover);
+            replaceThemeColour (component, id, colours);
 
     if (dynamic_cast<juce::Slider*> (&component) != nullptr)
-        for (const int id : { juce::Slider::thumbColourId, juce::Slider::trackColourId,
-                              juce::Slider::rotarySliderFillColourId,
-                              juce::Slider::textBoxHighlightColourId })
-            replaceAccentColour (component, id, previousAccent, accent, previousHover, hover);
+        for (const int id : { juce::Slider::backgroundColourId, juce::Slider::thumbColourId,
+                              juce::Slider::trackColourId, juce::Slider::rotarySliderFillColourId,
+                              juce::Slider::rotarySliderOutlineColourId,
+                              juce::Slider::textBoxTextColourId,
+                              juce::Slider::textBoxBackgroundColourId,
+                              juce::Slider::textBoxHighlightColourId,
+                              juce::Slider::textBoxOutlineColourId })
+            replaceThemeColour (component, id, colours);
 
     if (dynamic_cast<juce::Label*> (&component) != nullptr)
-        replaceAccentColour (component, juce::Label::textColourId,
-                             previousAccent, accent, previousHover, hover);
+        for (const int id : { juce::Label::textColourId, juce::Label::backgroundColourId,
+                              juce::Label::outlineColourId })
+            replaceThemeColour (component, id, colours);
 
     if (dynamic_cast<juce::ToggleButton*> (&component) != nullptr)
-        replaceAccentColour (component, juce::ToggleButton::tickColourId,
-                             previousAccent, accent, previousHover, hover);
+        for (const int id : { juce::ToggleButton::textColourId, juce::ToggleButton::tickColourId,
+                              juce::ToggleButton::tickDisabledColourId })
+            replaceThemeColour (component, id, colours);
+
+    if (dynamic_cast<juce::ComboBox*> (&component) != nullptr)
+        for (const int id : { juce::ComboBox::backgroundColourId, juce::ComboBox::textColourId,
+                              juce::ComboBox::outlineColourId, juce::ComboBox::arrowColourId,
+                              juce::ComboBox::focusedOutlineColourId })
+            replaceThemeColour (component, id, colours);
+
+    if (dynamic_cast<juce::TextEditor*> (&component) != nullptr)
+        for (const int id : { juce::TextEditor::backgroundColourId, juce::TextEditor::textColourId,
+                              juce::TextEditor::highlightColourId,
+                              juce::TextEditor::highlightedTextColourId,
+                              juce::TextEditor::outlineColourId,
+                              juce::TextEditor::focusedOutlineColourId,
+                              juce::TextEditor::shadowColourId })
+            replaceThemeColour (component, id, colours);
+
+    if (dynamic_cast<juce::ListBox*> (&component) != nullptr)
+        for (const int id : { juce::ListBox::backgroundColourId, juce::ListBox::outlineColourId })
+            replaceThemeColour (component, id, colours);
 
     for (int i = 0; i < component.getNumChildComponents(); ++i)
         if (auto* child = component.getChildComponent (i))
-            refreshAccentColours (*child, previousAccent, accent, previousHover, hover);
+            refreshThemeColours (*child, colours);
 
     component.repaint();
 }
@@ -1365,7 +1438,7 @@ private:
     void timerCallback() override
     {
         const int startedParameter = pendingParameterGestureStart.exchange (-1, std::memory_order_acq_rel);
-        if (startedParameter >= 0 && isVisible() && ! isMinimised() && isActiveWindow()
+        if (startedParameter >= 0 && isVisible() && ! isMinimised()
             && onPluginParameterGesture)
             onPluginParameterGesture (automationTrackId, automationDeviceId, startedParameter, true);
 
@@ -2608,6 +2681,7 @@ MainComponent::MainComponent()
     changeListenerCallback (&model);
     showDetail (false);
 
+    addAndMakeVisible (themeTransitionOverlay);
     setWantsKeyboardFocus (true);
     addKeyListenerRecursively (*this);
     setSize (1360, 800);
@@ -3466,6 +3540,7 @@ void MainComponent::paint (juce::Graphics& g)
 void MainComponent::resized()
 {
     auto area = getLocalBounds();
+    themeTransitionOverlay.setBounds (area);
     themeBackground.setBounds (area);
     themeBackground.toBack();
     transport.setBounds (area.removeFromTop (44));
@@ -4974,6 +5049,16 @@ bool MainComponent::startRecording (bool loopWasEnabled)
         return false;
     }
 
+    if (arrangement.getAutomationMode())
+    {
+        automationOnlyRecording = true;
+        automationRecordingActive = true;
+        automationHistoryEditOwned = false;
+        pluginAutomationWriteStates.clear();
+        setProjectStatus ("Recording automation. Move plugin controls during playback; press Record to finish.");
+        return true;
+    }
+
     auto* track = project.selectedTrack();
     if (track == nullptr)
     {
@@ -5077,6 +5162,10 @@ bool MainComponent::startRecording (bool loopWasEnabled)
         transport.setLoopEnabled (false);
     session->generation = nextRecordingGeneration.fetch_add (1, std::memory_order_relaxed);
     recordingSession = std::move (session);
+    automationRecordingActive = true;
+    automationOnlyRecording = false;
+    automationHistoryEditOwned = false;
+    pluginAutomationWriteStates.clear();
     activeRecordingGeneration.store (recordingSession->generation, std::memory_order_release);
     activeRecordingSession.store (recordingSession.get(), std::memory_order_seq_cst);
     setProjectStatus (recordingSession->kind == RecordingSession::Kind::Audio
@@ -5088,7 +5177,17 @@ bool MainComponent::startRecording (bool loopWasEnabled)
 void MainComponent::finishRecording (bool discard)
 {
     if (recordingSession == nullptr)
+    {
+        if (! automationOnlyRecording)
+            return;
+
+        transport.setRecording (false);
+        finishPluginAutomationRecording (discard);
+        automationOnlyRecording = false;
+        if (! discard)
+            setProjectStatus ("Automation recording finished.");
         return;
+    }
 
     transport.setRecording (false);
     activeRecordingGeneration.store (0, std::memory_order_release);
@@ -5097,6 +5196,7 @@ void MainComponent::finishRecording (bool discard)
         juce::Thread::sleep (1);
 
     auto session = std::move (recordingSession);
+    finishPluginAutomationRecording (discard);
     const double endBeat = std::max (session->startBeat, engine.graph().positionBeats());
     if (session->loopWasEnabled)
         transport.setLoopEnabled (true);
@@ -5489,9 +5589,31 @@ void MainComponent::applyMidiMapping (const MidiMapping& mapping, int value, boo
 void MainComponent::handlePluginParameterGesture (
     int trackId, int deviceId, int parameterIndex, bool gestureIsStarting)
 {
-    engine.setPluginAutomationOverride (trackId, deviceId, parameterIndex, gestureIsStarting);
-    if (! gestureIsStarting)
+    const auto active = std::find_if (activeParameterGestures.begin(), activeParameterGestures.end(),
+        [trackId, deviceId, parameterIndex] (const auto& gesture)
+        {
+            return gesture.trackId == trackId && gesture.deviceId == deviceId
+                && gesture.parameterIndex == parameterIndex;
+        });
+    if (gestureIsStarting)
+    {
+        engine.setPluginAutomationOverride (trackId, deviceId, parameterIndex, true);
+        if (active == activeParameterGestures.end())
+            activeParameterGestures.push_back ({ trackId, deviceId, parameterIndex });
+    }
+    else
+    {
+        if (active != activeParameterGestures.end())
+            samplePluginAutomation (trackId, deviceId, parameterIndex);
+        std::erase_if (activeParameterGestures,
+            [trackId, deviceId, parameterIndex] (const auto& gesture)
+            {
+                return gesture.trackId == trackId && gesture.deviceId == deviceId
+                    && gesture.parameterIndex == parameterIndex;
+            });
+        engine.setPluginAutomationOverride (trackId, deviceId, parameterIndex, false);
         return;
+    }
 
     const auto devices = engine.devices (trackId);
     for (std::size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex)
@@ -5515,7 +5637,154 @@ void MainComponent::handlePluginParameterGesture (
         target.deviceIndex = static_cast<int> (deviceIndex);
         target.currentValue = std::clamp (static_cast<double> (parameter->value), 0.0, 1.0);
         arrangement.selectPluginAutomationParameter (trackId, target);
+        samplePluginAutomation (trackId, deviceId, parameterIndex);
         return;
+    }
+}
+
+void MainComponent::samplePluginAutomation (int trackId, int deviceId, int parameterIndex)
+{
+    if (! automationRecordingActive || ! engine.graph().isPlaying()
+        || transport.isCountInActive())
+        return;
+
+    const auto devices = engine.devices (trackId);
+    for (std::size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex)
+    {
+        const auto& device = devices[deviceIndex];
+        if (device.id != deviceId)
+            continue;
+
+        const auto parameter = std::find_if (device.automatableParameters.begin(),
+                                              device.automatableParameters.end(),
+            [parameterIndex] (const auto& candidate) { return candidate.index == parameterIndex; });
+        if (parameter == device.automatableParameters.end())
+            return;
+
+        auto* track = trackId == 0 ? project.masterTrack.get() : project.track (trackId);
+        if (track == nullptr)
+            return;
+
+        roll::AutomationTarget target;
+        target.type = roll::AutomationParameterType::PluginParameter;
+        target.pluginIdentifier = device.pluginIdentifier.toStdString();
+        target.parameterId = parameter->id.toStdString();
+        target.parameterName = parameter->name.toStdString();
+        target.parameterIndex = parameter->index;
+        target.deviceIndex = static_cast<int> (deviceIndex);
+        target.currentValue = std::clamp (static_cast<double> (parameter->value), 0.0, 1.0);
+        const double beat = std::max (0.0, engine.graph().positionBeats());
+
+        auto writer = std::find_if (pluginAutomationWriteStates.begin(),
+                                    pluginAutomationWriteStates.end(),
+            [trackId, deviceId, parameterIndex] (const auto& state)
+            {
+                return state.trackId == trackId && state.deviceId == deviceId
+                    && state.parameterIndex == parameterIndex;
+            });
+        if (writer == pluginAutomationWriteStates.end())
+        {
+            pluginAutomationWriteStates.push_back ({ trackId, deviceId, parameterIndex, target });
+            writer = pluginAutomationWriteStates.end() - 1;
+        }
+        writer->target = target;
+        if (writer->failed)
+            return;
+        if (! writer->hasBaseline)
+        {
+            writer->lastBeat = beat;
+            writer->lastValue = target.currentValue;
+            writer->hasBaseline = true;
+            return;
+        }
+        if (std::abs (target.currentValue - writer->lastValue) < 0.00025)
+        {
+            writer->lastBeat = beat;
+            writer->lastValue = target.currentValue;
+            return;
+        }
+
+        roll::AutomationEnvelope envelope;
+        const auto existing = std::find_if (track->automation.begin(), track->automation.end(),
+            [&target] (const auto& item) { return item.target == target; });
+        if (existing != track->automation.end())
+            envelope = *existing;
+        else
+            envelope.target = target;
+        envelope.target.currentValue = target.currentValue;
+
+        const auto setPoint = [&envelope] (double pointBeat, double value)
+        {
+            auto point = std::lower_bound (envelope.points.begin(), envelope.points.end(), pointBeat,
+                [] (const roll::AutomationPoint& candidate, double position)
+                {
+                    return candidate.beat < position;
+                });
+            constexpr double beatEpsilon = 1.0e-5;
+            if (point != envelope.points.end()
+                && std::abs (point->beat - pointBeat) < beatEpsilon)
+                point->value = value;
+            else if (point != envelope.points.begin()
+                     && std::abs ((point - 1)->beat - pointBeat) < beatEpsilon)
+                (point - 1)->value = value;
+            else
+                envelope.points.insert (point, { pointBeat, value });
+        };
+        if (! writer->hasEnvelope)
+            setPoint (writer->lastBeat, writer->lastValue);
+        setPoint (beat, target.currentValue);
+        if (! roll::isValidAutomationEnvelope (envelope))
+        {
+            writer->failed = true;
+            juce::Logger::writeToLog (
+                "MainComponent: Live plugin automation produced an invalid envelope.");
+            setProjectStatus ("Could not record this plugin parameter's automation.");
+            return;
+        }
+
+        if (! project.isEditInProgress())
+        {
+            project.beginEdit();
+            automationHistoryEditOwned = true;
+        }
+        if (! project.setAutomationEnvelope (trackId, std::move (envelope)))
+        {
+            writer->failed = true;
+            juce::Logger::writeToLog (
+                "MainComponent: Could not save live plugin automation.");
+            setProjectStatus ("Could not save this plugin parameter's automation.");
+            return;
+        }
+        writer->hasEnvelope = true;
+        writer->lastBeat = beat;
+        writer->lastValue = target.currentValue;
+        return;
+    }
+}
+
+void MainComponent::finishPluginAutomationRecording (bool discard)
+{
+    if (! automationRecordingActive)
+        return;
+
+    if (! discard && engine.graph().isPlaying() && ! transport.isCountInActive())
+        for (const auto& gesture : activeParameterGestures)
+            samplePluginAutomation (gesture.trackId, gesture.deviceId, gesture.parameterIndex);
+
+    automationRecordingActive = false;
+    for (const auto& gesture : activeParameterGestures)
+        engine.setPluginAutomationOverride (
+            gesture.trackId, gesture.deviceId, gesture.parameterIndex, false);
+    activeParameterGestures.clear();
+    pluginAutomationWriteStates.clear();
+
+    if (automationHistoryEditOwned)
+    {
+        if (discard)
+            project.cancelEdit();
+        else
+            project.endEdit();
+        automationHistoryEditOwned = false;
     }
 }
 
@@ -5590,6 +5859,72 @@ void MainComponent::createNewProject()
     applyLoadedProject ({}, std::move (data), task, false);
 }
 
+void MainComponent::beginThemeTransition()
+{
+    themeTransitionOverlay.start (*this);
+}
+
+void MainComponent::updateThemeLookAndFeel()
+{
+    if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (
+            &juce::LookAndFeel::getDefaultLookAndFeel()))
+    {
+        laf->setColourScheme ({ theme::background(), theme::panel(), theme::panel(),
+                                theme::border(), theme::text(), theme::control(),
+                                theme::text(), theme::accent(), theme::text() });
+        laf->setColour (juce::TextButton::buttonOnColourId, theme::accent());
+        laf->setColour (juce::Slider::thumbColourId, theme::accent());
+        laf->setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
+    }
+}
+
+void MainComponent::applyThemeAppearanceChange (std::function<void()> apply)
+{
+    if (! apply)
+        return;
+
+    const auto previousColours = currentThemeColours();
+    apply();
+    const auto updatedColours = currentThemeColours();
+    if (previousColours == updatedColours)
+        return;
+
+    ThemeColourMap colourMap;
+    for (std::size_t i = 0; i < colourMap.size(); ++i)
+        colourMap[i] = { previousColours[i], updatedColours[i] };
+
+    themeBackground.refresh();
+    updateThemeLookAndFeel();
+    refreshThemeColours (*this, colourMap);
+    if (optionsWindow != nullptr)
+    {
+        refreshThemeColours (*optionsWindow, colourMap);
+        optionsWindow->startThemeTransition();
+    }
+    if (tooltipWindow != nullptr)
+        refreshThemeColours (*tooltipWindow, colourMap);
+    if (grooveBrowserWindow != nullptr)
+        refreshThemeColours (*grooveBrowserWindow, colourMap);
+    if (referenceMasterWindow != nullptr)
+        refreshThemeColours (*referenceMasterWindow, colourMap);
+    for (auto& [deviceId, window] : windows)
+    {
+        juce::ignoreUnused (deviceId);
+        if (window != nullptr)
+        {
+            window->setColour (juce::DocumentWindow::backgroundColourId, theme::panel());
+            refreshThemeColours (*window, colourMap);
+        }
+    }
+    if (auto* window = dynamic_cast<juce::DocumentWindow*> (mainWindow))
+    {
+        window->setColour (juce::DocumentWindow::backgroundColourId, theme::panel());
+        window->setIcon (icons::appIcon());
+    }
+    beginThemeTransition();
+    repaint();
+}
+
 void MainComponent::showOptionsWindow()
 {
     if (optionsWindow == nullptr)
@@ -5601,31 +5936,13 @@ void MainComponent::showOptionsWindow()
                 createFadesOnClipEdges = enabled;
                 saveCreateFadesOnClipEdges (enabled);
             },
+            [this] (theme::Palette palette)
+            {
+                applyThemeAppearanceChange ([palette] { theme::setPalette (palette); });
+            },
             [this] (theme::AccentStyle style)
             {
-                const auto oldAccent = theme::accent();
-                const auto oldHover = theme::accentHover();
-                theme::setAccentStyle (style);
-                const auto newAccent = theme::accent();
-                const auto newHover = theme::accentHover();
-
-                if (auto* laf = dynamic_cast<juce::LookAndFeel_V4*> (&juce::LookAndFeel::getDefaultLookAndFeel()))
-                {
-                    laf->setColourScheme ({ theme::background(), theme::panel(), theme::panel(),
-                                            theme::border(), theme::text(), theme::control(),
-                                            theme::text(), theme::accent(), theme::text() });
-                    laf->setColour (juce::TextButton::buttonOnColourId, theme::accent());
-                    laf->setColour (juce::Slider::thumbColourId, theme::accent());
-                    laf->setColour (juce::Slider::rotarySliderFillColourId, theme::accent());
-                }
-
-                refreshAccentColours (*this, oldAccent, newAccent, oldHover, newHover);
-                if (optionsWindow != nullptr)
-                    refreshAccentColours (*optionsWindow, oldAccent, newAccent, oldHover, newHover);
-                if (tooltipWindow != nullptr)
-                    refreshAccentColours (*tooltipWindow, oldAccent, newAccent, oldHover, newHover);
-                if (auto* window = dynamic_cast<juce::DocumentWindow*> (mainWindow))
-                    window->setIcon (icons::appIcon());
+                applyThemeAppearanceChange ([style] { theme::setAccentStyle (style); });
             },
             theme::waveformStyle(),
             [this] (theme::WaveformStyle style)
@@ -6850,6 +7167,9 @@ void MainComponent::timerCallback()
     for (const auto& gesture : engine.consumePluginParameterGestures())
         handlePluginParameterGesture (gesture.trackId, gesture.deviceId,
                                       gesture.parameterIndex, gesture.gestureIsStarting);
+    if (automationRecordingActive)
+        for (const auto& gesture : activeParameterGestures)
+            samplePluginAutomation (gesture.trackId, gesture.deviceId, gesture.parameterIndex);
 
     const auto now = juce::Time::getMillisecondCounterHiRes();
     if (now >= nextRecoverySaveTime)

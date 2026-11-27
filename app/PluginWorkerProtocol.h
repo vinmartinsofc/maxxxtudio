@@ -18,13 +18,14 @@ inline constexpr int maxSamples = 8192;
 inline constexpr int maxMidiEvents = 512;
 inline constexpr int maxMidiBytes = 256;
 inline constexpr int maxParameters = 4096;
+inline constexpr int parameterGestureWordCount = (maxParameters + 31) / 32;
 inline constexpr int parameterNameLength = 96;
 inline constexpr int parameterIdLength = 64;
 inline constexpr int pluginNameLength = 128;
 inline constexpr int errorLength = 512;
 inline constexpr int descriptionLength = 16384;
 inline constexpr int statePathLength = 1024;
-inline constexpr LONG protocolVersion = 7;
+inline constexpr LONG protocolVersion = 8;
 
 enum class Command : LONG
 {
@@ -87,10 +88,12 @@ struct SharedData
     char stateFilePath[statePathLength] {};
     char parameterNames[maxParameters][parameterNameLength] {};
     char parameterIds[maxParameters][parameterIdLength] {};
+    LONG parameterAutomatable[maxParameters] {};
     LONG parameterValues[maxParameters] {};
     LONG parameterChanged[maxParameters] {};
-    LONG parameterGestureStarted = -1;
-    LONG parameterGestureEnded = -1;
+    LONG parameterGesturePending = 0;
+    LONG parameterGestureStarted[parameterGestureWordCount] {};
+    LONG parameterGestureEnded[parameterGestureWordCount] {};
     MidiEvent midi[maxMidiEvents] {};
     float audio[maxChannels][maxSamples] {};
 };

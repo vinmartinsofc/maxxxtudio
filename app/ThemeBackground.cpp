@@ -4,8 +4,6 @@
 
 namespace
 {
-constexpr std::uint32_t backgroundTop = 0xff14161a;       // Blue-black gradient top.
-constexpr std::uint32_t backgroundBottom = 0xff08090a;    // Blue-black gradient base.
 constexpr std::uint32_t spotlightCentre = 0xe61b2027;     // Soft top-centred spotlight.
 constexpr std::uint32_t spotlightEdge = 0x001b2027;       // Fully transparent spotlight edge.
 }
@@ -52,8 +50,13 @@ void ThemeBackground::rebuildImage()
 
     backgroundImage = juce::Image (juce::Image::RGB, width, height, true);
     juce::Graphics g (backgroundImage);
-    juce::ColourGradient base (juce::Colour (backgroundTop), 0.0f, 0.0f,
-                               juce::Colour (backgroundBottom), 0.0f, bounds.getHeight(), false);
+    const auto baseBottom = theme::background();
+    const auto baseTop = theme::isBlackTexturedBlue()
+        ? theme::isAmberBlue() ? juce::Colour (0xff112c49)
+                               : juce::Colour (0xff14161a)
+        : baseBottom.brighter (0.08f);
+    juce::ColourGradient base (baseTop, 0.0f, 0.0f,
+                               baseBottom, 0.0f, bounds.getHeight(), false);
     g.setGradientFill (base);
     g.fillRect (bounds);
 
@@ -66,9 +69,13 @@ void ThemeBackground::rebuildImage()
     const int sourceWidth = sourceRadius * 2;
     juce::Image spotlight (juce::Image::ARGB, sourceWidth, sourceRadius, true);
     juce::Graphics spotlightGraphics (spotlight);
-    juce::ColourGradient radial (juce::Colour (spotlightCentre),
+    const auto spotlightColour = theme::isAmberBlue()
+        ? juce::Colour (0xe62b5480) : juce::Colour (spotlightCentre);
+    const auto spotlightEdgeColour = theme::isAmberBlue()
+        ? juce::Colour (0x002b5480) : juce::Colour (spotlightEdge);
+    juce::ColourGradient radial (spotlightColour,
                                  static_cast<float> (sourceRadius), 0.0f,
-                                 juce::Colour (spotlightEdge),
+                                 spotlightEdgeColour,
                                  static_cast<float> (sourceRadius),
                                  static_cast<float> (sourceRadius), true);
     spotlightGraphics.setGradientFill (radial);

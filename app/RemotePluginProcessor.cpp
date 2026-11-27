@@ -260,17 +260,19 @@ class RemoteParameter final : public juce::AudioProcessorParameterWithID
 {
 public:
     RemoteParameter (RemotePluginProcessor& owner, int parameterIndex,
-                     const juce::String& identifier, const juce::String& name)
+                     const juce::String& identifier, const juce::String& name,
+                     bool canAutomate)
         : juce::AudioProcessorParameterWithID (
               juce::ParameterID (identifier.isNotEmpty() ? identifier
                                                           : "parameter_" + juce::String (parameterIndex), 1),
               name),
-          processor (owner), index (parameterIndex)
+          processor (owner), index (parameterIndex), automatable (canAutomate)
     {
     }
 
     float getValue() const override { return processor.readParameter (index); }
     void setValue (float value) override { processor.updateParameter (index, value); }
+    bool isAutomatable() const override { return automatable; }
     float getDefaultValue() const override { return 0.0f; }
     juce::String getText (float value, int maximumLength) const override
     {
@@ -284,6 +286,7 @@ public:
 private:
     RemotePluginProcessor& processor;
     const int index;
+    const bool automatable;
 };
 
 class RemotePluginProcessor::RemoteEditor final : public juce::AudioProcessorEditor
@@ -381,8 +384,6 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
 
     std::memset (shared, 0, sizeof (*shared));
     shared->version = pluginworker::protocolVersion;
-    shared->parameterGestureStarted = -1;
-    shared->parameterGestureEnded = -1;
     shared->sampleRate = sampleRate;
     shared->blockSize = sampleBlockSize;
     const auto stateFile = juce::File::getSpecialLocation (juce::File::tempDirectory)
@@ -516,7 +517,8 @@ bool RemotePluginProcessor::startWorker (const juce::PluginDescription& descript
     for (int i = 0; i < parameterCount; ++i)
         addParameter (new RemoteParameter (*this, i,
                                            juce::String::fromUTF8 (shared->parameterIds[i]),
-                                           juce::String::fromUTF8 (shared->parameterNames[i])));
+                                           juce::String::fromUTF8 (shared->parameterNames[i]),
+                                           shared->parameterAutomatable[i] != 0));
     return true;
 }
 
@@ -745,12 +747,18 @@ void RemotePluginProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         }
         processRequestPending = false;
 
-        const int touchedParameter = InterlockedExchange (&shared->parameterGestureStarted, -1);
-        if (touchedParameter >= 0 && touchedParameter < getParameters().size())
-            lastParameterGestureStarted.store (touchedParameter, std::memory_order_release);
-        const int releasedParameter = InterlockedExchange (&shared->parameterGestureEnded, -1);
-        if (releasedParameter >= 0 && releasedParameter < getParameters().size())
-            lastParameterGestureEnded.store (releasedParameter, std::memory_order_release);
+        if (InterlockedExchange (&shared->parameterGesturePending, 0) != 0)
+            for (int word = 0; word < pluginworker::parameterGestureWordCount; ++word)
+            {
+                const auto started = static_cast<std::uint32_t> (
+                    InterlockedExchange (&shared->parameterGestureStarted[word], 0));
+                const auto ended = static_cast<std::uint32_t> (
+                    InterlockedExchange (&shared->parameterGestureEnded[word], 0));
+                lastParameterGestureStarted[static_cast<std::size_t> (word)].fetch_or (
+                    started, std::memory_order_release);
+                lastParameterGestureEnded[static_cast<std::size_t> (word)].fetch_or (
+                    ended, std::memory_order_release);
+            }
 
         buffer.clear();
         const int outputSamples = std::min (
@@ -959,6 +967,30 @@ void RemotePluginProcessor::setStateInformation (const void* data, int size)
 #endif
 }
 
+std::vector<std::pair<int, bool>> RemotePluginProcessor::consumeParameterGestureEvents()
+{
+    std::vector<std::pair<int, bool>> events;
+    for (int word = 0; word < pluginworker::parameterGestureWordCount; ++word)
+    {
+        const auto started = lastParameterGestureStarted[static_cast<std::size_t> (word)]
+                                 .exchange (0, std::memory_order_acq_rel);
+        const auto ended = lastParameterGestureEnded[static_cast<std::size_t> (word)]
+                               .exchange (0, std::memory_order_acq_rel);
+        for (int bit = 0; bit < 32; ++bit)
+        {
+            const auto parameterIndex = word * 32 + bit;
+            if (parameterIndex >= getParameters().size())
+                break;
+            const auto mask = std::uint32_t { 1 } << static_cast<unsigned> (bit);
+            if ((started & mask) != 0)
+                events.emplace_back (parameterIndex, true);
+            if ((ended & mask) != 0)
+                events.emplace_back (parameterIndex, false);
+        }
+    }
+    return events;
+}
+
 #endif
 
 #if ! defined(_WIN32)
@@ -1080,6 +1112,32 @@ bool RemotePluginProcessor::showEditor (int, int)
         return true;
     }
     return false;
+}
+
+std::vector<std::pair<int, bool>> RemotePluginProcessor::consumeParameterGestureEvents()
+{
+    std::vector<std::pair<int, bool>> events;
+#if defined(_WIN32)
+    for (int word = 0; word < pluginworker::parameterGestureWordCount; ++word)
+    {
+        const auto started = lastParameterGestureStarted[static_cast<std::size_t> (word)]
+                                 .exchange (0, std::memory_order_acq_rel);
+        const auto ended = lastParameterGestureEnded[static_cast<std::size_t> (word)]
+                               .exchange (0, std::memory_order_acq_rel);
+        for (int bit = 0; bit < 32; ++bit)
+        {
+            const auto parameterIndex = word * 32 + bit;
+            if (parameterIndex >= getParameters().size())
+                break;
+            const auto mask = std::uint32_t { 1 } << static_cast<unsigned> (bit);
+            if ((started & mask) != 0)
+                events.emplace_back (parameterIndex, true);
+            if ((ended & mask) != 0)
+                events.emplace_back (parameterIndex, false);
+        }
+    }
+#endif
+    return events;
 }
 
 juce::AudioProcessorEditor* RemotePluginProcessor::createEditor()

@@ -3301,14 +3301,10 @@ std::vector<PluginParameterGesture> AudioEngine::consumePluginParameterGestures(
         for (auto& device : track.devices)
             if (device.node != nullptr)
                 if (auto* remote = dynamic_cast<RemotePluginProcessor*> (device.node->getProcessor()))
-                {
-                    if (const int parameterIndex = remote->consumeParameterGestureStarted();
-                        parameterIndex >= 0)
-                        gestures.push_back ({ trackId, device.id, parameterIndex, true });
-                    if (const int parameterIndex = remote->consumeParameterGestureEnded();
-                        parameterIndex >= 0)
-                        gestures.push_back ({ trackId, device.id, parameterIndex, false });
-                }
+                    for (const auto& [parameterIndex, gestureIsStarting]
+                         : remote->consumeParameterGestureEvents())
+                        gestures.push_back (
+                            { trackId, device.id, parameterIndex, gestureIsStarting });
     return gestures;
 }
 

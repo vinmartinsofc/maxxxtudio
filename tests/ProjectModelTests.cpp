@@ -661,6 +661,32 @@ TEST_CASE ("ProjectModel validates automation and includes it in undo and redo")
     REQUIRE (model.track (trackId)->automation.size() == 1);
 }
 
+TEST_CASE ("A track can keep separate automation envelopes for multiple plugin parameters")
+{
+    ProjectModel model;
+    auto* track = model.addTrack();
+    REQUIRE (track != nullptr);
+
+    roll::AutomationEnvelope gain;
+    gain.target.type = roll::AutomationParameterType::PluginParameter;
+    gain.target.pluginIdentifier = "test.plugin";
+    gain.target.parameterId = "gain";
+    gain.target.parameterIndex = 0;
+    gain.target.deviceIndex = 0;
+    gain.points = { { 0.0, 0.25 }, { 2.0, 0.75 } };
+
+    auto frequency = gain;
+    frequency.target.parameterId = "frequency";
+    frequency.target.parameterIndex = 1;
+    frequency.points = { { 0.0, 0.5 }, { 2.0, 0.9 } };
+
+    REQUIRE (model.setAutomationEnvelope (track->id, gain));
+    REQUIRE (model.setAutomationEnvelope (track->id, frequency));
+    REQUIRE (track->automation.size() == 2);
+    CHECK (track->automation[0].target.parameterId == "gain");
+    CHECK (track->automation[1].target.parameterId == "frequency");
+}
+
 TEST_CASE ("Audio clip automation requires an existing audio clip and supports undo")
 {
     ProjectModel model;

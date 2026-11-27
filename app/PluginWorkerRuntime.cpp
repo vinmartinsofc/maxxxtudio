@@ -94,9 +94,15 @@ public:
     {
         if (shared != nullptr
             && parameterIndex >= 0 && parameterIndex < pluginworker::maxParameters)
-            InterlockedExchange (gestureIsStarting ? &shared->parameterGestureStarted
-                                                   : &shared->parameterGestureEnded,
-                                 parameterIndex);
+        {
+            const auto word = parameterIndex / 32;
+            const auto mask = static_cast<LONG> (
+                std::uint32_t { 1 } << static_cast<unsigned> (parameterIndex % 32));
+            InterlockedOr (gestureIsStarting ? &shared->parameterGestureStarted[word]
+                                             : &shared->parameterGestureEnded[word],
+                           mask);
+            InterlockedExchange (&shared->parameterGesturePending, 1);
+        }
     }
 
 private:
@@ -337,6 +343,8 @@ PluginWorkerRuntime::PluginWorkerRuntime (const juce::String& sessionId, DWORD p
         const auto* parameterWithId = dynamic_cast<juce::AudioProcessorParameterWithID*> (parameter);
         copyString (shared->parameterIds[i], pluginworker::parameterIdLength,
                     parameterWithId != nullptr ? parameterWithId->paramID : juce::String());
+        InterlockedExchange (&shared->parameterAutomatable[i],
+                             parameter->isAutomatable() ? 1 : 0);
         InterlockedExchange (&shared->parameterValues[i],
                              pluginworker::floatToBits (parameter->getValue()));
     }

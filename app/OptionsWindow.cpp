@@ -1,5 +1,6 @@
 #include "OptionsWindow.h"
 #include "Theme.h"
+#include "ThemeTransitionOverlay.h"
 #include <algorithm>
 #include <utility>
 
@@ -292,20 +293,44 @@ private:
 class AppearancePreferencesPage final : public juce::Component
 {
 public:
-    explicit AppearancePreferencesPage (std::function<void (theme::AccentStyle)> onChanged)
-        : changed (std::move (onChanged))
+    AppearancePreferencesPage (
+        std::function<void (theme::Palette)> onPaletteChanged,
+        std::function<void (theme::AccentStyle)> onAccentStyleChanged)
+        : paletteChanged (std::move (onPaletteChanged)),
+          accentChanged (std::move (onAccentStyleChanged))
     {
-        title.setText ("NEONWAVE Interface", juce::dontSendNotification);
+        title.setText ("Interface Appearance", juce::dontSendNotification);
         title.setFont (theme::fontOptions (15.0f, juce::Font::bold));
         title.setColour (juce::Label::textColourId, theme::text());
         addAndMakeVisible (title);
 
-        description.setText ("Choose the neon accent for the blue-black interface.",
+        description.setText ("Choose a Neonwave theme and accent colours.",
                              juce::dontSendNotification);
         description.setColour (juce::Label::textColourId, theme::textDim());
         description.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (description);
 
+        themeLabel.setColour (juce::Label::textColourId, theme::text());
+        addAndMakeVisible (themeLabel);
+        for (std::size_t i = 0; i < theme::paletteOptions.size(); ++i)
+            themeBox.addItem (theme::paletteOptions[i].name, static_cast<int> (i) + 1);
+        const auto selectedPalette = std::find_if (
+            theme::paletteOptions.begin(), theme::paletteOptions.end(),
+            [] (const theme::PaletteOption& option) { return option.palette == theme::current(); });
+        themeBox.setSelectedId (selectedPalette == theme::paletteOptions.end() ? 1
+            : static_cast<int> (std::distance (theme::paletteOptions.begin(), selectedPalette)) + 1,
+            juce::dontSendNotification);
+        themeBox.onChange = [this]
+        {
+            const auto index = themeBox.getSelectedId() - 1;
+            if (paletteChanged && index >= 0
+                && index < static_cast<int> (theme::paletteOptions.size()))
+                paletteChanged (theme::paletteOptions[static_cast<std::size_t> (index)].palette);
+        };
+        addAndMakeVisible (themeBox);
+
+        accentLabel.setColour (juce::Label::textColourId, theme::text());
+        addAndMakeVisible (accentLabel);
         accentBox.addItem ("Neon Cyan", 1);
         accentBox.addItem ("Neon Green", 2);
         accentBox.addItem ("Neon Red", 3);
@@ -313,16 +338,18 @@ public:
         accentBox.addItem ("Neon Magenta", 5);
         accentBox.addItem ("Synthwave Purple", 6);
         accentBox.addItem ("Cyberpunk Yellow", 7);
+        accentBox.addItem ("Amber & Blue", 8);
         const auto selectedId = theme::accentStyle() == theme::AccentStyle::NeonGreen ? 2
             : theme::accentStyle() == theme::AccentStyle::NeonRed ? 3
             : theme::accentStyle() == theme::AccentStyle::NeonBlue ? 4
             : theme::accentStyle() == theme::AccentStyle::NeonMagenta ? 5
             : theme::accentStyle() == theme::AccentStyle::SynthwavePurple ? 6
-            : theme::accentStyle() == theme::AccentStyle::CyberpunkYellow ? 7 : 1;
+            : theme::accentStyle() == theme::AccentStyle::CyberpunkYellow ? 7
+            : theme::accentStyle() == theme::AccentStyle::AmberBlue ? 8 : 1;
         accentBox.setSelectedId (selectedId, juce::dontSendNotification);
         accentBox.onChange = [this]
         {
-            if (changed)
+            if (accentChanged)
             {
                 const auto style = accentBox.getSelectedId() == 2 ? theme::AccentStyle::NeonGreen
                     : accentBox.getSelectedId() == 3 ? theme::AccentStyle::NeonRed
@@ -330,27 +357,33 @@ public:
                     : accentBox.getSelectedId() == 5 ? theme::AccentStyle::NeonMagenta
                     : accentBox.getSelectedId() == 6 ? theme::AccentStyle::SynthwavePurple
                     : accentBox.getSelectedId() == 7 ? theme::AccentStyle::CyberpunkYellow
+                    : accentBox.getSelectedId() == 8 ? theme::AccentStyle::AmberBlue
                                                      : theme::AccentStyle::NeonCyan;
-                changed (style);
+                accentChanged (style);
             }
         };
         addAndMakeVisible (accentBox);
-
     }
 
     void resized() override
     {
         auto area = getLocalBounds().reduced (18);
         title.setBounds (area.removeFromTop (28));
-        description.setBounds (area.removeFromTop (58));
-        area.removeFromTop (12);
+        description.setBounds (area.removeFromTop (42));
+        area.removeFromTop (8);
+        themeLabel.setBounds (area.removeFromTop (20));
+        themeBox.setBounds (area.removeFromTop (34).withWidth (300));
+        area.removeFromTop (14);
+        accentLabel.setBounds (area.removeFromTop (20));
         accentBox.setBounds (area.removeFromTop (34).withWidth (260));
     }
 
 private:
-    std::function<void (theme::AccentStyle)> changed;
-    juce::Label title, description;
-    juce::ComboBox accentBox;
+    std::function<void (theme::Palette)> paletteChanged;
+    std::function<void (theme::AccentStyle)> accentChanged;
+    juce::Label title, description, themeLabel { {}, "Theme" },
+                accentLabel { {}, "Accent" };
+    juce::ComboBox themeBox, accentBox;
 };
 
 class WaveformPreferencesPage final : public juce::Component
@@ -403,12 +436,36 @@ private:
     juce::Label title, description;
     juce::ComboBox styleBox;
 };
+
+class OptionsTabs final : public juce::TabbedComponent
+{
+public:
+    OptionsTabs() : juce::TabbedComponent (juce::TabbedButtonBar::TabsAtTop)
+    {
+        addAndMakeVisible (transitionOverlay);
+    }
+
+    void resized() override
+    {
+        juce::TabbedComponent::resized();
+        transitionOverlay.setBounds (getLocalBounds());
+    }
+
+    void startThemeTransition()
+    {
+        transitionOverlay.start (*this);
+    }
+
+private:
+    ThemeTransitionOverlay transitionOverlay;
+};
 }
 
 OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
                               PluginScanner& scanner,
                               bool createEdgeFades,
                               std::function<void (bool)> onCreateEdgeFadesChanged,
+                              std::function<void (theme::Palette)> onPaletteChanged,
                               std::function<void (theme::AccentStyle)> onAccentStyleChanged,
                               theme::WaveformStyle waveformStyle,
                               std::function<void (theme::WaveformStyle)> onWaveformStyleChanged,
@@ -416,14 +473,15 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
     : juce::DocumentWindow (theme::ui ("Preferences"), theme::panel(),
                             juce::DocumentWindow::closeButton)
 {
-    auto tabs = std::make_unique<juce::TabbedComponent> (juce::TabbedButtonBar::TabsAtTop);
+    auto tabs = std::make_unique<OptionsTabs>();
     tabs->addTab (theme::ui ("Audio"), theme::panel(),
                   new AudioPreferencesPage (audioDeviceManager, std::move (audioInputLevelProvider)), true);
     tabs->addTab (theme::ui ("Plugins"), theme::panel(), new PluginPreferencesPage (scanner), true);
     tabs->addTab (theme::ui ("Record/Warp/Launch"), theme::panel(),
                   new FadePreferencesPage (createEdgeFades, std::move (onCreateEdgeFadesChanged)), true);
     tabs->addTab (theme::ui ("Interface"), theme::panel(),
-                  new AppearancePreferencesPage (std::move (onAccentStyleChanged)), true);
+                  new AppearancePreferencesPage (std::move (onPaletteChanged),
+                                                 std::move (onAccentStyleChanged)), true);
     tabs->addTab (theme::ui ("Waveform"), theme::panel(),
                   new WaveformPreferencesPage (waveformStyle,
                                                std::move (onWaveformStyleChanged)), true);
@@ -439,4 +497,10 @@ OptionsWindow::OptionsWindow (juce::AudioDeviceManager& audioDeviceManager,
 void OptionsWindow::closeButtonPressed()
 {
     setVisible (false);
+}
+
+void OptionsWindow::startThemeTransition()
+{
+    if (auto* tabs = dynamic_cast<OptionsTabs*> (getContentComponent()))
+        tabs->startThemeTransition();
 }

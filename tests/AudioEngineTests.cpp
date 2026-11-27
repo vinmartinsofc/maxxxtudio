@@ -281,6 +281,29 @@ TEST_CASE ("Neon accent choices keep the layered blue-black interface palette")
     theme::selectedAccentStyle() = previousAccent;
 }
 
+TEST_CASE ("Neonwave exposes dark and light palettes with an amber-blue accent")
+{
+    const auto previousPalette = theme::selectedPalette();
+    const auto previousAccent = theme::accentStyle();
+
+    CHECK (theme::paletteOptions.size() == 2);
+    theme::selectedAccentStyle() = theme::AccentStyle::AmberBlue;
+    theme::selectedPalette() = theme::Palette::BlackTexturedBlue;
+    CHECK (theme::background() == juce::Colour (0xff07182b));
+    CHECK (theme::panel() == juce::Colour (0xff0c2036));
+    CHECK (theme::accent() == juce::Colour (0xffffb52e));
+    CHECK (theme::accentHover() == juce::Colour (0xffffd36a));
+
+    theme::selectedPalette() = theme::Palette::BlackTexturedBlueLight;
+    CHECK (theme::background() == juce::Colour (0xffedf3fa));
+    CHECK (theme::text() == juce::Colour (0xff1e2935));
+    CHECK (theme::accent() == juce::Colour (0xffa65e00));
+    CHECK (theme::accentHover() == juce::Colour (0xffc17a10));
+
+    theme::selectedPalette() = previousPalette;
+    theme::selectedAccentStyle() = previousAccent;
+}
+
 TEST_CASE ("Ultraviolet waveform colors transition from red to orange to green")
 {
     const auto red = ultravioletWaveformColour (0.0f);

@@ -16,6 +16,7 @@
 #include "TaskRegistry.h"
 #include "TaskStatusBar.h"
 #include "ThemeBackground.h"
+#include "ThemeTransitionOverlay.h"
 #include "TransportBar.h"
 #include <array>
 #include <map>
@@ -61,8 +62,22 @@ private:
     struct PluginHistoryRestore;
     struct PluginCopyOperation;
     struct RecordingSession;
+    struct ActiveParameterGesture
+    {
+        int trackId = 0, deviceId = 0, parameterIndex = -1;
+    };
+    struct PluginAutomationWriteState
+    {
+        int trackId = 0, deviceId = 0, parameterIndex = -1;
+        roll::AutomationTarget target;
+        double lastBeat = 0.0, lastValue = 0.0;
+        bool hasBaseline = false, hasEnvelope = false, failed = false;
+    };
 
     void startSimulatedTask();
+    void applyThemeAppearanceChange (std::function<void()> apply);
+    void updateThemeLookAndFeel();
+    void beginThemeTransition();
     void loadDevice (const juce::PluginDescription&, int trackId = -1, int insertionIndex = -1);
     void addNativeDrumRackToTrack (int trackId);
     juce::String addNativeEffectToTrack (
@@ -156,6 +171,8 @@ private:
     void clearMidiMapping (int trackId, MidiMappingTarget);
     void handlePluginParameterGesture (int trackId, int deviceId, int parameterIndex,
                                        bool gestureIsStarting);
+    void samplePluginAutomation (int trackId, int deviceId, int parameterIndex);
+    void finishPluginAutomationRecording (bool discard);
     void handleMidiMessageOnMessageThread (int channel, MidiMappingMessageType,
                                            int number, int value, bool noteOn);
     void applyMidiMapping (const MidiMapping&, int value, bool noteOn);
@@ -179,6 +196,7 @@ private:
     RollModel model;
 
     ThemeBackground themeBackground;
+    ThemeTransitionOverlay themeTransitionOverlay;
     TransportBar transport { engine.graph() };
     TaskStatusBar taskStatusBar { taskRegistry };
     BrowserPanel browser { scanner };
@@ -235,11 +253,15 @@ private:
     bool waitingForProjectPluginScan = false, restoringProjectPlugins = false;
     std::shared_ptr<std::atomic<bool>> lifetimeToken { std::make_shared<std::atomic<bool>> (true) };
     std::unique_ptr<RecordingSession> recordingSession;
+    std::vector<ActiveParameterGesture> activeParameterGestures;
+    std::vector<PluginAutomationWriteState> pluginAutomationWriteStates;
     std::atomic<RecordingSession*> activeRecordingSession { nullptr };
     std::atomic<std::uint64_t> activeRecordingGeneration { 0 }, nextRecordingGeneration { 1 };
     std::atomic<int> recordingCallbacksInFlight { 0 };
     std::array<std::atomic<float>, 2> liveAudioInputPeaks {};
     bool audioFinalizationInProgress = false;
+    bool automationRecordingActive = false, automationOnlyRecording = false;
+    bool automationHistoryEditOwned = false;
     std::unique_ptr<ActionIndicator> actionIndicator;
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
     std::unique_ptr<SpectrumAnalyzer> spectrumAnalyzer;
