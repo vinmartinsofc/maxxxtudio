@@ -88,12 +88,36 @@ juce::Colour spectrumWaveformColour (float frequency, float flatness)
     return colour.interpolatedWith (noiseTint, juce::jlimit (0.0f, 0.9f, flatness * 0.9f));
 }
 
+std::vector<roll::WaveformRange> makeAudioClipWaveform (
+    const roll::AudioPlacement& clip, const std::vector<roll::WaveformRange>& sourceWaveform,
+    double sourceDurationSeconds, double projectBpm, int columns)
+{
+    if (sourceWaveform.empty() || sourceDurationSeconds <= 0.0 || columns <= 0)
+        return clip.waveform;
+
+    std::vector<roll::WaveformRange> visible;
+    visible.reserve (static_cast<std::size_t> (columns));
+    for (int column = 0; column < columns; ++column)
+    {
+        const double beat = (static_cast<double> (column) + 0.5)
+                          / static_cast<double> (columns) * clip.lengthBeats;
+        const double sourceSeconds = roll::audioSourcePositionAtBeat (
+            clip, beat, projectBpm, sourceDurationSeconds);
+        const auto index = static_cast<std::size_t> (std::clamp (
+            sourceSeconds / sourceDurationSeconds * sourceWaveform.size(),
+            0.0, static_cast<double> (sourceWaveform.size() - 1)));
+        visible.push_back (sourceWaveform[index]);
+    }
+    return visible;
+}
+
 void drawSpectrumWaveform (juce::Graphics& g, juce::Rectangle<float> area,
                            const roll::AudioPlacement& clip,
+                           const std::vector<roll::WaveformRange>& waveform,
                            const std::vector<WaveformColumn>& spectrum,
-                           double sourceDurationSeconds, float halfHeight)
+                           double sourceDurationSeconds, double projectBpm, float halfHeight)
 {
-    if (clip.waveform.empty() || spectrum.empty() || sourceDurationSeconds <= 0.0
+    if (waveform.empty() || spectrum.empty() || sourceDurationSeconds <= 0.0
         || area.getWidth() < 1.0f || area.getHeight() < 1.0f)
         return;
 
@@ -106,25 +130,23 @@ void drawSpectrumWaveform (juce::Graphics& g, juce::Rectangle<float> area,
     {
         const double proportion = (static_cast<double> (column) + 0.5) / columns;
         const double beat = proportion * clip.lengthBeats;
-        double sourceSeconds = roll::audioSourceSecondsAtBeat (clip, beat);
-        if (clip.reverse)
-            sourceSeconds = clip.sourceOffsetSeconds + clip.durationSeconds
-                          - (sourceSeconds - clip.sourceOffsetSeconds);
+        const double sourceSeconds = roll::audioSourcePositionAtBeat (
+            clip, beat, projectBpm, sourceDurationSeconds);
         const auto spectrumIndex = static_cast<std::size_t> (std::clamp (
             sourceSeconds / sourceDurationSeconds * spectrum.size(), 0.0,
             static_cast<double> (spectrum.size() - 1)));
         const auto& analysis = spectrum[spectrumIndex];
 
         const double firstProportion = static_cast<double> (column) / columns;
-        const auto first = std::min (clip.waveform.size() - 1,
-            static_cast<std::size_t> (firstProportion * clip.waveform.size()));
-        const auto last = std::max (first + 1, std::min (clip.waveform.size(),
+        const auto first = std::min (waveform.size() - 1,
+            static_cast<std::size_t> (firstProportion * waveform.size()));
+        const auto last = std::max (first + 1, std::min (waveform.size(),
             static_cast<std::size_t> ((static_cast<double> (column + 1) / columns)
-                                      * clip.waveform.size())));
+                                      * waveform.size())));
         float peak = 0.0f;
         for (auto bin = first; bin < last; ++bin)
-            peak = std::max (peak, std::max (std::abs (clip.waveform[bin].minimum),
-                                             std::abs (clip.waveform[bin].maximum)));
+            peak = std::max (peak, std::max (std::abs (waveform[bin].minimum),
+                                             std::abs (waveform[bin].maximum)));
 
         const float amplitude = std::pow (std::clamp (peak, 0.0f, 1.0f), 0.72f);
         const float x = area.getX() + static_cast<float> (column * columnStep);
@@ -465,7 +487,6 @@ public:
         selectedFrozenTrackId = -1;
         hasRangeSelection = false;
         shiftRangeAnchorBeat = -1.0;
-        shiftRangeAnchorTrack = -1;
         repaint();
     }
 
@@ -562,6 +583,7 @@ public:
                 if (t.frozenAudioClip == nullptr)
                     continue;
                 const auto& clip = *t.frozenAudioClip;
+                const auto clipColour = clip.colour != 0 ? juce::Colour (clip.colour) : base;
                 const int rowTop = owner.rowTop (static_cast<int> (i));
                 const int rowHeight = owner.rowHeight (static_cast<int> (i));
                 const juce::Rectangle<float> r (
@@ -572,16 +594,16 @@ public:
                 if (r.toNearestInt().intersects (cb))
                 {
                     const bool selected = selectedFrozenTrackId == t.id;
-                    g.setColour (selected ? base.brighter (0.25f) : base.darker (0.25f));
+                    g.setColour (selected ? clipColour.brighter (0.25f) : clipColour.darker (0.25f));
                     g.fillRoundedRectangle (r, 4.0f);
                     g.setColour (selected ? juce::Colours::white : theme::accent().withAlpha (0.9f));
                     g.drawRoundedRectangle (r, 4.0f, selected ? 1.6f : 1.5f);
                     if (r.getWidth() > 10.0f)
                     {
                         const auto waveformArea = r.reduced (3.0f, 4.0f);
-                        g.setColour (base.brighter (0.7f));
+                        g.setColour (clipColour.brighter (0.7f));
                         drawWaveformEnvelope (g, waveformArea, clip.waveform,
-                                              base.brighter (0.7f), r.getHeight() * 0.4f);
+                                              clipColour.brighter (0.7f), r.getHeight() * 0.4f);
                         g.setColour (theme::text());
                         g.setFont (theme::fontOptions (11.5f, juce::Font::bold));
                         g.drawText (clip.name, r.toNearestInt().reduced (5, 1),
@@ -593,6 +615,7 @@ public:
             {
                 for (const auto& clip : t.audioClips)
                 {
+                    const auto clipColour = clip->colour != 0 ? juce::Colour (clip->colour) : base;
                     const int rowTop = owner.rowTop (static_cast<int> (i));
                     const int rowHeight = owner.rowHeight (static_cast<int> (i));
                     juce::Rectangle<float> r (static_cast<float> (clip->start * ppb),
@@ -602,7 +625,7 @@ public:
                     if (! r.toNearestInt().intersects (cb)) continue;
 
                     const bool selected = isClipSelected (t.id, clip->id, true);
-                    g.setColour (selected ? base.brighter (0.25f) : base);
+                    g.setColour (selected ? clipColour.brighter (0.25f) : clipColour);
                     g.fillRoundedRectangle (r, 4.0f);
                     if (t.collapsed)
                     {
@@ -637,23 +660,35 @@ public:
                     g.setColour (juce::Colours::white.withAlpha (0.24f));
                     g.drawHorizontalLine (static_cast<int> (waveformArea.getCentreY()),
                                           waveformArea.getX(), waveformArea.getRight());
+                    const auto* audioData = owner.audioDataProvider
+                        ? owner.audioDataProvider (clip->filePath) : nullptr;
+                    const auto& sourceWaveform = audioData != nullptr && ! audioData->waveform.empty()
+                        ? audioData->waveform : clip->waveform;
+                    const double sourceDuration = audioData != nullptr
+                        && audioData->durationSeconds > 0.0
+                        ? audioData->durationSeconds
+                        : std::max (clip->sourceLoopEndSeconds,
+                                    clip->sourceOffsetSeconds + clip->durationSeconds);
+                    const auto visibleWaveform = makeAudioClipWaveform (
+                        *clip, sourceWaveform, sourceDuration, owner.bpm,
+                        std::max (1, juce::roundToInt (waveformArea.getWidth())));
                     const auto style = theme::waveformStyle();
                     if (style == theme::WaveformStyle::Ultraviolet)
-                        drawReferenceWaveform (g, waveformArea, clip->waveform, halfHeight);
-                    else if (style == theme::WaveformStyle::Spectrum && owner.audioDataProvider)
+                        drawReferenceWaveform (g, waveformArea, visibleWaveform, halfHeight);
+                    else if (style == theme::WaveformStyle::Spectrum && audioData != nullptr)
                     {
-                        const auto* audioData = owner.audioDataProvider (clip->filePath);
-                        if (audioData != nullptr && ! audioData->waveformColumns.empty())
+                        if (! audioData->waveformColumns.empty())
                             drawSpectrumWaveform (g, waveformArea, *clip,
+                                                  visibleWaveform,
                                                   audioData->waveformColumns,
-                                                  audioData->durationSeconds, halfHeight);
+                                                  audioData->durationSeconds, owner.bpm, halfHeight);
                         else
-                            drawWaveformEnvelope (g, waveformArea, clip->waveform,
-                                                  base.brighter (0.7f), halfHeight);
+                            drawWaveformEnvelope (g, waveformArea, visibleWaveform,
+                                                  clipColour.brighter (0.7f), halfHeight);
                     }
                     else
-                        drawWaveformEnvelope (g, waveformArea, clip->waveform,
-                                              base.brighter (0.7f), halfHeight);
+                        drawWaveformEnvelope (g, waveformArea, visibleWaveform,
+                                              clipColour.brighter (0.7f), halfHeight);
                     if (clip->sourceOffsetSeconds > 1.0e-6)
                     {
                         g.setColour (theme::accent().withAlpha (0.95f));
@@ -669,6 +704,35 @@ public:
                                 r.toNearestInt().withTrimmedLeft (7).withTrimmedTop (15).withHeight (14),
                                 juce::Justification::centredLeft, true);
                         }
+                    }
+                    const double loopStart = clip->sourceLoopStartSeconds;
+                    const double loopEnd = clip->sourceLoopEndSeconds;
+                    if (loopEnd > loopStart)
+                    {
+                        const double sourceStart = clip->reverse
+                            ? clip->sourceOffsetSeconds + clip->durationSeconds
+                            : clip->sourceOffsetSeconds;
+                        const double secondsToLoop = clip->reverse
+                            ? sourceStart - loopStart : loopEnd - sourceStart;
+                        const double displayBpm = clip->warpEnabled
+                            ? clip->sourceBpm : owner.bpm;
+                        const double firstLoopBeat = std::max (
+                            0.0, secondsToLoop * displayBpm / 60.0);
+                        const double loopBeats = (loopEnd - loopStart) * displayBpm / 60.0;
+                        if (loopBeats > 0.0)
+                            for (double beat = firstLoopBeat; beat < clip->lengthBeats; beat += loopBeats)
+                            {
+                                const float markerX = r.getX() + static_cast<float> (beat * ppb);
+                                g.setColour (theme::text().withAlpha (0.85f));
+                                g.fillRect (markerX - 2.5f, waveformArea.getY(), 5.0f, 8.0f);
+                                g.setColour (juce::Colours::black);
+                                g.fillRect (markerX - 1.0f, waveformArea.getY() + 1.0f, 2.0f, 6.0f);
+                                juce::Path marker;
+                                marker.addTriangle (markerX - 3.0f, waveformArea.getY() + 1.0f,
+                                                    markerX + 3.0f, waveformArea.getY() + 1.0f,
+                                                    markerX, waveformArea.getY() + 5.0f);
+                                g.fillPath (marker);
+                            }
                     }
 
                     const float fadeTop = waveformArea.getY() + 3.0f;
@@ -748,6 +812,7 @@ public:
 
             for (const auto& p : t.clips)
             {
+                const auto clipColour = p->colour != 0 ? juce::Colour (p->colour) : base;
                 const int rowTop = owner.rowTop (static_cast<int> (i));
                 const int rowHeight = owner.rowHeight (static_cast<int> (i));
                 juce::Rectangle<float> r (static_cast<float> (p->start * ppb),
@@ -757,7 +822,7 @@ public:
                 if (! r.toNearestInt().intersects (cb)) continue;
 
                 const bool sel = isClipSelected (t.id, p->id, false);
-                g.setColour (sel ? base.brighter (0.25f) : base);
+                g.setColour (sel ? clipColour.brighter (0.25f) : clipColour);
                 g.fillRoundedRectangle (r, 4.0f);
                 if (t.collapsed)
                 {
@@ -1200,8 +1265,12 @@ public:
         }
         if (track->type == roll::TrackType::Audio)
         {
-            for (const auto& clip : track->audioClips)
-                if (beat >= clip->start && beat < clip->end()) { h.audioClip = clip.get(); break; }
+            for (auto clip = track->audioClips.rbegin(); clip != track->audioClips.rend(); ++clip)
+                if (beat >= (*clip)->start && beat < (*clip)->end())
+                {
+                    h.audioClip = clip->get();
+                    break;
+                }
         }
         else
         {
@@ -1222,6 +1291,8 @@ public:
         grabKeyboardFocus();
         mode = Mode::None;
         dragActive = false;
+        resizeTrackSnapshot.reset();
+        resizeReplacedContent = false;
         movePreviewActive = movePreviewIsCopy = false;
         movePreviewAllowed = true;
         movePreviewReplacesSource = false;
@@ -1315,8 +1386,21 @@ public:
 
         if (h.clip == nullptr && h.audioClip == nullptr)
         {
+            if (e.mods.isShiftDown())
+            {
+                pendingSelection = { trackId, -1, false };
+                selectionDownPosition = e.position;
+                mode = Mode::ShiftPending;
+                setMouseCursor (juce::MouseCursor::DraggingHandCursor);
+                notifyInteraction (true);
+                return;
+            }
+
             selectedClips.clear();
             selectionAnchor = {};
+            shiftRangeAnchorBeat = e.mods.isAltDown()
+                ? std::max (0.0, e.position.x / owner.pixelsPerBeat)
+                : owner.snapBeat (std::max (0.0, e.position.x / owner.pixelsPerBeat));
             project.selectClip (trackId, -1);
             selectionDownPosition = e.position;
             mode = Mode::EmptyClickPending;
@@ -1368,7 +1452,17 @@ public:
         const ClipSelection clickedClip { trackId,
             h.audioClip != nullptr ? h.audioClip->id : h.clip->id,
             h.audioClip != nullptr };
-        mode = fadeModeAt (h, e.position);
+        if (! e.mods.isCtrlDown())
+        {
+            shiftRangeAnchorBeat = h.audioClip != nullptr ? h.audioClip->start : h.clip->start;
+        }
+        const float left = static_cast<float> (
+            (h.audioClip != nullptr ? h.audioClip->start : h.clip->start) * owner.pixelsPerBeat);
+        const float right = static_cast<float> (
+            (h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
+        mode = e.position.x < left + 7.0f ? Mode::ResizeLeft
+            : e.position.x > right - 7.0f ? Mode::Resize
+                                         : fadeModeAt (h, e.position);
         const bool focusesClipTime = mode == Mode::None && isClipTimeSelectionArea (h, e.position);
         const bool dragExistingSelection = ! focusesClipTime && selectedClips.size() > 1
             && isClipSelected (clickedClip.trackId, clickedClip.clipId, clickedClip.audio);
@@ -1407,9 +1501,6 @@ public:
         }
         downBeat = e.position.x / owner.pixelsPerBeat;
         downY = e.position.y;
-        const float left = static_cast<float> (
-            (h.audioClip != nullptr ? h.audioClip->start : h.clip->start) * owner.pixelsPerBeat);
-        const float right = static_cast<float> ((h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
         if (focusesClipTime)
         {
             mode = Mode::ClipTimeSelectPending;
@@ -1417,13 +1508,12 @@ public:
             pendingRangeTrack = h.trackIndex;
         }
         else if (mode == Mode::None)
-            mode = e.position.x > right - 7.0f
-                ? Mode::Resize
-                : e.position.x < left + 7.0f
-                    ? Mode::ResizeLeft
-                    : Mode::Move;
+            mode = Mode::Move;
         if (mode == Mode::Move && dragExistingSelection)
             captureMultiDragSources (clickedClip);
+        if (mode == Mode::Resize || mode == Mode::ResizeLeft)
+            if (const auto* track = project.track (curTrack))
+                resizeTrackSnapshot = std::make_unique<roll::Track> (*track);
         if (mode == Mode::FadeInCurve || mode == Mode::FadeOutCurve)
             setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
         else
@@ -1450,6 +1540,16 @@ public:
                 ? selectedTrack->findAudioClip (clipId) : nullptr;
             const auto* midiClip = ! isAudio && selectedTrack != nullptr
                 ? selectedTrack->find (clipId) : nullptr;
+            const auto currentColour = isAudio
+                ? (audioClip != nullptr ? audioClip->colour : 0u)
+                : (midiClip != nullptr ? midiClip->colour : 0u);
+            juce::PopupMenu clipColourMenu;
+            clipColourMenu.addItem (20, theme::ui ("Automatic"), true, currentColour == 0);
+            for (std::size_t i = 0; i < trackColourNames.size(); ++i)
+                clipColourMenu.addItem (21 + static_cast<int> (i),
+                    theme::ui (trackColourNames[i]), true, currentColour == trackColours[i]);
+            menu.addSubMenu (theme::ui ("Clip Color"), clipColourMenu,
+                             audioClip != nullptr || midiClip != nullptr);
             const bool enabled = isAudio ? (audioClip != nullptr && audioClip->enabled)
                                          : (midiClip != nullptr && midiClip->enabled);
             menu.addItem (4, theme::ui (enabled ? "Disable Clip (0)" : "Enable Clip (0)"));
@@ -1526,6 +1626,18 @@ public:
             if (result == 6)
             {
                 safeThis->selectAll();
+                return;
+            }
+            if (result == 20)
+            {
+                safeThis->project.setClipColour (trackId, clipId, isAudio, 0);
+                return;
+            }
+            if (result >= 21 && result < 21 + static_cast<int> (trackColours.size()))
+            {
+                safeThis->project.setClipColour (
+                    trackId, clipId, isAudio,
+                    trackColours[static_cast<std::size_t> (result - 21)]);
                 return;
             }
             if (result == 7 && safeThis->owner.onFreezeTrackRequested)
@@ -1703,6 +1815,61 @@ public:
         dragActive = true;
         if (mode != Mode::RangeSelect)
             project.beginEdit();
+        if ((mode == Mode::Resize || mode == Mode::ResizeLeft) && resizeTrackSnapshot != nullptr)
+        {
+            if (auto* track = project.track (curTrack))
+                *track = *resizeTrackSnapshot;
+
+            resizeReplacedContent = false;
+            const double beat = e.position.x / owner.pixelsPerBeat;
+            double replacementStart = 0.0;
+            double replacementEnd = 0.0;
+            if (mode == Mode::Resize)
+            {
+                const double newLength = std::max (
+                    owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0,
+                    e.mods.isAltDown() ? origLen + (beat - downBeat)
+                                       : owner.snapBeat (origLen + (beat - downBeat)));
+                replacementStart = origStart + origLen;
+                replacementEnd = origStart + newLength;
+            }
+            else
+            {
+                const double requestedStart = e.mods.isAltDown() ? beat : owner.snapBeat (beat);
+                const double end = origStart + origLen;
+                const double minimumLength = owner.gridBeats() > 0.0
+                    ? owner.gridBeats() : 1.0 / 64.0;
+                replacementStart = std::clamp (requestedStart, 0.0, end - minimumLength);
+                replacementEnd = origStart;
+            }
+
+            if (replacementEnd > replacementStart + 1.0e-9)
+                if (const auto* track = resizeTrackSnapshot.get())
+                {
+                    if (track->type == roll::TrackType::Audio)
+                    {
+                        resizeReplacedContent = std::any_of (
+                            track->audioClips.begin(), track->audioClips.end(),
+                            [this, replacementStart, replacementEnd] (const auto& clip)
+                            {
+                                return clip->id != curAudioClipId
+                                    && clip->start < replacementEnd - 1.0e-9
+                                    && clip->end() > replacementStart + 1.0e-9;
+                            });
+                    }
+                    else
+                    {
+                        resizeReplacedContent = std::any_of (
+                            track->clips.begin(), track->clips.end(),
+                            [this, replacementStart, replacementEnd] (const auto& clip)
+                            {
+                                return clip->id != curClip
+                                    && clip->start < replacementEnd - 1.0e-9
+                                    && clip->end() > replacementStart + 1.0e-9;
+                            });
+                    }
+                }
+        }
         const bool noSnap = e.mods.isAltDown();
 
         if (mode == Mode::RangeSelect)
@@ -1739,13 +1906,8 @@ public:
                     double newLen = origLen + (beat - downBeat);
                     newLen = std::max (owner.gridBeats() > 0.0 ? owner.gridBeats() : 1.0 / 64.0,
                                        noSnap ? newLen : owner.snapBeat (newLen));
-                    if (std::abs (newLen - p->clip.length()) > 1.0e-9 && t->isFree (p->start, newLen, curClip))
-                    {
-                        p->clip.setLength (newLen);
-                        project.growTo (p->end() + 64.0);
-                        project.notifyTrackNotes (curTrack);
-                        project.sendChangeMessage();
-                    }
+                    if (std::abs (newLen - p->clip.length()) > 1.0e-9)
+                        project.resizeClip (curTrack, curClip, newLen);
                 }
         }
         else if (mode == Mode::ResizeLeft)
@@ -1860,7 +2022,15 @@ public:
 
         if (mode == Mode::ShiftPending)
         {
-            extendClipSelection (pendingSelection);
+            if (pendingSelection.clipId >= 0)
+                extendClipSelection (pendingSelection);
+            else
+                extendClipSelectionToPosition (
+                    e.mods.isAltDown()
+                        ? std::max (0.0, e.position.x / owner.pixelsPerBeat)
+                        : owner.snapBeat (std::max (0.0, e.position.x / owner.pixelsPerBeat)),
+                    std::clamp (owner.rowAt (juce::roundToInt (e.position.y)),
+                                0, static_cast<int> (project.tracks.size()) - 1));
             notifyAction ("Clip selected", icons::Icon::Pointer, false, 650);
             mode = Mode::None;
             movePreviewActive = false;
@@ -1896,7 +2066,7 @@ public:
                 if (curAudioClipId >= 0)
                 {
                     auto* clip = track->findAudioClip (curAudioClipId);
-                    if (clip != nullptr)
+                    if (clip != nullptr && ! resizeReplacedContent)
                     {
                         if (mode == Mode::Resize)
                         {
@@ -1923,7 +2093,7 @@ public:
                 else if (curClip >= 0)
                 {
                     auto* clip = track->find (curClip);
-                    if (clip != nullptr)
+                    if (clip != nullptr && ! resizeReplacedContent)
                     {
                         if (mode == Mode::Resize)
                         {
@@ -2091,6 +2261,8 @@ public:
         multiDragSources.clear();
         multiMovePreviewItems.clear();
         multiDragAnchorTrackIndex = -1;
+        resizeTrackSnapshot.reset();
+        resizeReplacedContent = false;
         updateCursor (e.position);
         curAudioClipId = -1;
         repaint();
@@ -3099,36 +3271,87 @@ private:
         start = std::min (anchorStart, targetStart);
         end = std::max (anchorEnd, targetEnd);
         const int anchorRow = project.trackIndex (anchor.trackId);
-        const int targetRow = project.trackIndex (target.trackId);
-        if (anchorRow < 0 || targetRow < 0)
+        if (anchorRow < 0 || project.trackIndex (target.trackId) < 0)
             return;
 
+        rangeStartBeat = start;
+        rangeEndBeat = end;
+        rangeStartTrack = 0;
+        rangeEndTrack = static_cast<int> (project.tracks.size()) - 1;
+        hasRangeSelection = true;
         selectedClips.clear();
-        const int firstRow = std::min (anchorRow, targetRow);
-        const int lastRow = std::max (anchorRow, targetRow);
-        for (int row = firstRow; row <= lastRow; ++row)
+        for (const auto& track : project.tracks)
         {
-            const auto& track = *project.tracks[static_cast<std::size_t> (row)];
-            if (track.frozen)
+            if (track->frozen)
                 continue;
-            if (track.type == roll::TrackType::Audio)
+            if (track->type == roll::TrackType::Audio)
             {
-                for (const auto& clip : track.audioClips)
+                for (const auto& clip : track->audioClips)
                     if (clip->start <= end && clip->end() >= start)
-                        selectedClips.push_back ({ track.id, clip->id, true });
+                        selectedClips.push_back ({ track->id, clip->id, true });
             }
             else
             {
-                for (const auto& clip : track.clips)
+                for (const auto& clip : track->clips)
                     if (clip->start <= end && clip->end() >= start)
-                        selectedClips.push_back ({ track.id, clip->id, false });
+                        selectedClips.push_back ({ track->id, clip->id, false });
             }
         }
         if (selectedClips.empty())
             selectedClips.push_back (target);
 
         setProjectSelection (target);
-        updateRangeFromSelection (true);
+        repaint();
+    }
+
+    void extendClipSelectionToPosition (double targetBeat, int targetRow)
+    {
+        if (project.tracks.empty() || targetRow < 0)
+            return;
+
+        double start = shiftRangeAnchorBeat >= 0.0 ? shiftRangeAnchorBeat : targetBeat;
+        double end = targetBeat;
+        double anchorStart = 0.0, anchorEnd = 0.0;
+        if (selectionAnchor.trackId >= 0
+            && getClipBounds (selectionAnchor, anchorStart, anchorEnd))
+        {
+            start = std::min (start, anchorStart);
+            end = std::max (end, anchorEnd);
+        }
+
+        rangeStartBeat = std::min (start, end);
+        rangeEndBeat = std::max (start, end);
+        rangeStartTrack = 0;
+        rangeEndTrack = static_cast<int> (project.tracks.size()) - 1;
+        hasRangeSelection = true;
+        selectedClips.clear();
+
+        for (const auto& track : project.tracks)
+        {
+            if (track->frozen)
+                continue;
+            if (track->type == roll::TrackType::Audio)
+            {
+                for (const auto& clip : track->audioClips)
+                    if (clip->start < rangeEndBeat && clip->end() > rangeStartBeat)
+                        selectedClips.push_back ({ track->id, clip->id, true });
+            }
+            else
+            {
+                for (const auto& clip : track->clips)
+                    if (clip->start < rangeEndBeat && clip->end() > rangeStartBeat)
+                        selectedClips.push_back ({ track->id, clip->id, false });
+            }
+        }
+
+        if (! selectedClips.empty())
+        {
+            if (selectionAnchor.trackId < 0)
+                selectionAnchor = selectedClips.front();
+            setProjectSelection (selectedClips.back());
+        }
+        else
+            project.selectClip (project.tracks[static_cast<std::size_t> (targetRow)]->id, -1);
         repaint();
     }
 
@@ -3691,7 +3914,7 @@ private:
 
     void updateCursor (juce::Point<float> position)
     {
-        if (mode == Mode::Resize)
+        if (mode == Mode::Resize || mode == Mode::ResizeLeft)
         {
             setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
             return;
@@ -3721,6 +3944,18 @@ private:
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
             return;
         }
+        if (h.audioClip != nullptr || h.clip != nullptr)
+        {
+            const float left = static_cast<float> (
+                (h.audioClip != nullptr ? h.audioClip->start : h.clip->start) * owner.pixelsPerBeat);
+            const float right = static_cast<float> (
+                (h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
+            if (position.x < left + 7.0f || position.x > right - 7.0f)
+            {
+                setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+                return;
+            }
+        }
         if (fadeModeAt (h, position) != Mode::None)
         {
             setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
@@ -3737,12 +3972,7 @@ private:
             return;
         }
 
-        const float right = static_cast<float> ((h.audioClip != nullptr ? h.audioClip->end() : h.clip->end()) * owner.pixelsPerBeat);
-        const float left = static_cast<float> (
-            (h.audioClip != nullptr ? h.audioClip->start : h.clip->start) * owner.pixelsPerBeat);
-        setMouseCursor (position.x > right - 7.0f || position.x < left + 7.0f
-                            ? juce::MouseCursor::LeftRightResizeCursor
-                            : juce::MouseCursor::DraggingHandCursor);
+        setMouseCursor (juce::MouseCursor::DraggingHandCursor);
     }
 
     Mode fadeModeAt (const Hit& h, juce::Point<float> position) const
@@ -3911,7 +4141,7 @@ private:
         }
 
         juce::String message;
-        if (mode == Mode::Resize)
+        if (mode == Mode::Resize || mode == Mode::ResizeLeft)
             message = "Clip: " + juce::String (clipLength / 4.0, 1)
                     + " bars; loop: "
                     + juce::String ((project.loopEnd - project.loopStart) / 4.0, 1);
@@ -3942,7 +4172,7 @@ private:
         else
             message = "Moving: bar " + juce::String (static_cast<int> (std::floor (clipStart / 4.0)) + 1);
         const int targetRow = movePreviewActive ? movePreviewTrackIndex : project.trackIndex (curTrack);
-        const int hintWidth = mode == Mode::Resize ? 310 : 230;
+        const int hintWidth = mode == Mode::Resize || mode == Mode::ResizeLeft ? 310 : 230;
         const int x = std::clamp (static_cast<int> ((clipStart + clipLength) * owner.pixelsPerBeat) + 8,
                                   4, std::max (4, getWidth() - hintWidth - 4));
         const int y = owner.rowTop (targetRow) + 8;
@@ -3975,17 +4205,18 @@ private:
     double origFadeIn = 0.0, origFadeOut = 0.0;
     double origFadeInCurve = 0.0, origFadeOutCurve = 0.0, downY = 0.0;
     bool hasRangeSelection = false;
+    bool resizeReplacedContent = false;
     double rangeStartBeat = 0.0, rangeEndBeat = 0.0;
     int rangeStartTrack = 0, rangeEndTrack = 0;
     int selectedFrozenTrackId = -1;
     double shiftRangeAnchorBeat = -1.0;
-    int shiftRangeAnchorTrack = -1;
     int multiDragAnchorTrackIndex = -1;
     int pendingRangeTrack = -1;
     std::vector<ClipSelection> selectedClips;
     std::vector<MultiDragSource> multiDragSources;
     std::vector<MovePreviewItem> multiMovePreviewItems;
     std::vector<ClipboardClip> clipboard;
+    std::unique_ptr<roll::Track> resizeTrackSnapshot;
     ClipSelection selectionAnchor, pendingSelection;
     juce::Point<float> selectionDownPosition;
 };
@@ -4003,21 +4234,6 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (theme::panelLight());
-        juce::Component* const toolbarControls[] {
-            &owner.locatorDeleteButton, &owner.locatorNextButton, &owner.locatorSetButton,
-            &owner.locatorPreviousButton, &owner.automationTargetButton,
-            &owner.automationModeButton, &owner.automationStatusLabel
-        };
-        const int scrollX = owner.viewport.getViewPositionX();
-        for (auto* control : toolbarControls)
-        {
-            if (! control->isVisible())
-                continue;
-            auto bounds = control->getBounds();
-            bounds.translate (-owner.trackPaneWidth() + scrollX, -bounds.getY());
-            bounds.setHeight (getHeight());
-            g.excludeClipRegion (bounds);
-        }
 
         const auto cb = g.getClipBounds();
         const double ppb = owner.pixelsPerBeat;
@@ -6991,51 +7207,7 @@ void ArrangementView::resized()
     gridBox.setVisible (trackHeadersVisible);
     headerHolder.setVisible (trackHeadersVisible);
     timeReadout.setVisible (trackHeadersVisible);
-    auto locatorControls = top;
     rulerHolder.setBounds (top);
-    int right = locatorControls.getRight() - 4;
-    const int buttonY = top.getY() + 4;
-    const int buttonHeight = rulerHeight - 8;
-    locatorOverflowButton.setVisible (false);
-    locatorDeleteButton.setVisible (true);
-    locatorNextButton.setVisible (true);
-    locatorSetButton.setVisible (true);
-    locatorPreviousButton.setVisible (true);
-    automationTargetButton.setVisible (true);
-    automationModeButton.setVisible (true);
-
-    const bool compactToolbar = top.getWidth() - paneWidth < 300;
-    if (compactToolbar)
-    {
-        locatorDeleteButton.setBounds (right - 30, buttonY, 28, buttonHeight);
-        right -= 32;
-        locatorNextButton.setBounds (right - 20, buttonY, 20, buttonHeight);
-        right -= 24;
-        locatorSetButton.setBounds (right - 20, buttonY, 20, buttonHeight);
-        right -= 24;
-        locatorPreviousButton.setBounds (right - 20, buttonY, 20, buttonHeight);
-        right -= 28;
-        automationTargetButton.setBounds (right - 76, buttonY, 76, buttonHeight);
-        right -= 80;
-        automationModeButton.setBounds (right - 24, buttonY, 24, buttonHeight);
-        automationStatusLabel.setBounds ({});
-    }
-    else
-    {
-        locatorDeleteButton.setBounds (right - 36, buttonY, 34, buttonHeight);
-        right -= 38;
-        locatorNextButton.setBounds (right - 26, buttonY, 24, buttonHeight);
-        right -= 28;
-        locatorSetButton.setBounds (right - 26, buttonY, 24, buttonHeight);
-        right -= 28;
-        locatorPreviousButton.setBounds (right - 26, buttonY, 24, buttonHeight);
-        right -= 40;
-        automationTargetButton.setBounds (right - 110, buttonY, 108, buttonHeight);
-        right -= 120;
-        automationModeButton.setBounds (right - 28, buttonY, 26, buttonHeight);
-        automationStatusLabel.setBounds (paneWidth + 4, buttonY,
-            std::max (0, automationModeButton.getX() - paneWidth - 8), buttonHeight);
-    }
     updateAutomationStatus();
     auto timeArea = area.removeFromBottom (timeRulerHeight);
     auto left = area.removeFromLeft (paneWidth);

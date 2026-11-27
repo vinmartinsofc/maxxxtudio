@@ -56,6 +56,46 @@ TEST_CASE ("Project files preserve flat group bus membership")
     REQUIRE (loaded.project.master.colour == 0xff9c27b0);
 }
 
+TEST_CASE ("Project files preserve clip colours and audio loop source bounds")
+{
+    TemporaryProjectFolder temporary;
+    const auto sourceFile = temporary.folder.getChildFile ("source.wav");
+    REQUIRE (sourceFile.replaceWithText ("audio source"));
+
+    ProjectFileData data;
+    data.project.master.id = AudioEngine::masterTrackId;
+    roll::Track midi;
+    midi.id = 1;
+    auto* midiClip = midi.addClip (0.0, 4.0);
+    REQUIRE (midiClip != nullptr);
+    midiClip->colour = 0xff16d34b;
+    data.project.tracks.push_back (midi);
+
+    roll::Track audio;
+    audio.id = 2;
+    audio.type = roll::TrackType::Audio;
+    auto* audioClip = audio.addAudioClip (
+        0.0, 4.0, sourceFile.getFullPathName().toStdString(), "source", {}, 2.0, 120.0);
+    REQUIRE (audioClip != nullptr);
+    audioClip->sourceLoopStartSeconds = 0.25;
+    audioClip->sourceLoopEndSeconds = 1.75;
+    audioClip->colour = 0xffffa23b;
+    data.project.tracks.push_back (audio);
+
+    const auto file = temporary.folder.getChildFile ("clip_state.std");
+    REQUIRE (ProjectFile::save (file, data).wasOk());
+    ProjectFileData loaded;
+    const auto result = ProjectFile::load (file, loaded);
+    INFO (result.getErrorMessage());
+    REQUIRE (result.wasOk());
+    REQUIRE (loaded.project.tracks.size() == 2);
+    CHECK (loaded.project.tracks[0].clips.front()->colour == 0xff16d34b);
+    REQUIRE (loaded.project.tracks[1].audioClips.size() == 1);
+    CHECK (loaded.project.tracks[1].audioClips.front()->colour == 0xffffa23b);
+    CHECK (loaded.project.tracks[1].audioClips.front()->sourceLoopStartSeconds == 0.25);
+    CHECK (loaded.project.tracks[1].audioClips.front()->sourceLoopEndSeconds == 1.75);
+}
+
 TEST_CASE ("Project files preserve the computer MIDI keyboard state")
 {
     TemporaryProjectFolder temporary;

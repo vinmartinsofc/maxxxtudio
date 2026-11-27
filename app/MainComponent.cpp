@@ -151,6 +151,9 @@ void refreshThemeColours (juce::Component& component, const ThemeColourMap& colo
         for (const int id : { juce::ListBox::backgroundColourId, juce::ListBox::outlineColourId })
             replaceThemeColour (component, id, colours);
 
+    if (dynamic_cast<juce::TreeView*> (&component) != nullptr)
+        replaceThemeColour (component, juce::TreeView::backgroundColourId, colours);
+
     for (int i = 0; i < component.getNumChildComponents(); ++i)
         if (auto* child = component.getChildComponent (i))
             refreshThemeColours (*child, colours);
@@ -665,6 +668,105 @@ private:
     juce::TextButton foldButton { "v" };
     std::size_t historyIndex = 0, historyCount = 0, windowIndex = 0, windowCount = 0;
     double windowEnergy = 0.0, integratedEnergy = 0.0, integratedCount = 0.0;
+    bool collapsed = false;
+};
+
+class MainComponent::LocatorAutomationPanel final : public juce::Component,
+                                                     public juce::SettableTooltipClient
+{
+public:
+    explicit LocatorAutomationPanel (ArrangementView& arrangementView)
+        : arrangement (arrangementView)
+    {
+        setTooltip ("Arrangement locators and automation controls");
+        title.setText ("MARKERS & AUTOMATION", juce::dontSendNotification);
+        title.setFont (theme::fontOptions (11.5f, juce::Font::bold));
+        title.setColour (juce::Label::textColourId, theme::text());
+        addAndMakeVisible (title);
+
+        foldButton.setButtonText ("v");
+        foldButton.setMouseClickGrabsKeyboardFocus (false);
+        foldButton.setColour (juce::TextButton::buttonColourId, theme::control());
+        foldButton.setColour (juce::TextButton::textColourOffId, theme::textDim());
+        foldButton.setTooltip ("Collapse or expand locator and automation controls");
+        foldButton.onClick = [this]
+        {
+            collapsed = ! collapsed;
+            foldButton.setButtonText (collapsed ? ">" : "v");
+            resized();
+            if (onCollapseChanged)
+                onCollapseChanged();
+        };
+        addAndMakeVisible (foldButton);
+
+        addAndMakeVisible (arrangement.locatorPreviousControl());
+        addAndMakeVisible (arrangement.locatorSetControl());
+        addAndMakeVisible (arrangement.locatorNextControl());
+        addAndMakeVisible (arrangement.locatorDeleteControl());
+        addAndMakeVisible (arrangement.locatorOverflowControl());
+        addAndMakeVisible (arrangement.automationTargetControl());
+        addAndMakeVisible (arrangement.automationModeControl());
+        addAndMakeVisible (arrangement.automationStatusControl());
+        resized();
+    }
+
+    std::function<void()> onCollapseChanged;
+    bool isCollapsed() const noexcept { return collapsed; }
+
+    void paint (juce::Graphics& g) override
+    {
+        theme::drawChromeSurface (g, getLocalBounds().toFloat().reduced (0.5f),
+                                  6.0f, theme::panel());
+    }
+
+    void resized() override
+    {
+        auto bounds = getLocalBounds().reduced (8, 5);
+        auto heading = bounds.removeFromTop (20);
+        title.setBounds (heading);
+        foldButton.setBounds (getWidth() - 28, 4, 20, 18);
+
+        if (collapsed)
+        {
+            for (auto* control : controls())
+                control->setBounds ({});
+            return;
+        }
+
+        bounds.removeFromTop (4);
+        auto automationRow = bounds.removeFromTop (24);
+        auto overflow = automationRow.removeFromRight (26);
+        arrangement.locatorOverflowControl().setBounds (overflow);
+        automationRow.removeFromRight (4);
+        arrangement.automationModeControl().setBounds (automationRow.removeFromRight (26));
+        automationRow.removeFromRight (4);
+        arrangement.automationTargetControl().setBounds (automationRow);
+
+        bounds.removeFromTop (3);
+        arrangement.automationStatusControl().setBounds (bounds.removeFromTop (20));
+        bounds.removeFromTop (3);
+        auto locatorRow = bounds.removeFromTop (24);
+        arrangement.locatorDeleteControl().setBounds (locatorRow.removeFromRight (34));
+        locatorRow.removeFromRight (3);
+        arrangement.locatorNextControl().setBounds (locatorRow.removeFromRight (26));
+        locatorRow.removeFromRight (3);
+        arrangement.locatorSetControl().setBounds (locatorRow.removeFromRight (26));
+        locatorRow.removeFromRight (3);
+        arrangement.locatorPreviousControl().setBounds (locatorRow.removeFromRight (26));
+    }
+
+private:
+    std::array<juce::Component*, 8> controls() const
+    {
+        return { &arrangement.locatorPreviousControl(), &arrangement.locatorSetControl(),
+                 &arrangement.locatorNextControl(), &arrangement.locatorDeleteControl(),
+                 &arrangement.locatorOverflowControl(), &arrangement.automationTargetControl(),
+                 &arrangement.automationModeControl(), &arrangement.automationStatusControl() };
+    }
+
+    ArrangementView& arrangement;
+    juce::Label title;
+    juce::TextButton foldButton { "v" };
     bool collapsed = false;
 };
 
@@ -1552,9 +1654,9 @@ MainComponent::MainComponent()
     stereoImager = std::make_unique<StereoImager>();
     addAndMakeVisible (stereoImager.get());
     stereoImager->onCollapseChanged = [this] { resized(); };
-    loudnessHistory = std::make_unique<LoudnessHistory>();
-    addAndMakeVisible (loudnessHistory.get());
-    loudnessHistory->onCollapseChanged = [this] { resized(); };
+    locatorAutomationPanel = std::make_unique<LocatorAutomationPanel> (arrangement);
+    addAndMakeVisible (locatorAutomationPanel.get());
+    locatorAutomationPanel->onCollapseChanged = [this] { resized(); };
     arrangement.setBpm (engine.graph().getBpm());
     arrangement.setAudioDataProvider ([this] (const std::string& path) -> const AudioFileData*
     {
@@ -3564,10 +3666,10 @@ void MainComponent::resized()
     }
     monitorArea.removeFromTop (8);
     const int collapsedAnalyzerHeight = 28;
-    const int loudnessHeight = std::min (monitorArea.getHeight(),
-        loudnessHistory->isCollapsed()
-            ? collapsedAnalyzerHeight : std::clamp (monitorArea.getHeight() / 5, 108, 136));
-    const int analysisHeight = std::max (1, monitorArea.getHeight() - loudnessHeight - 16);
+    const int controlsHeight = std::min (monitorArea.getHeight(),
+        locatorAutomationPanel->isCollapsed()
+            ? collapsedAnalyzerHeight : std::clamp (monitorArea.getHeight() / 5, 104, 120));
+    const int analysisHeight = std::max (1, monitorArea.getHeight() - controlsHeight - 16);
     const int spectrumHeight = spectrumAnalyzer->isCollapsed()
         ? collapsedAnalyzerHeight
         : stereoImager->isCollapsed()
@@ -3581,8 +3683,8 @@ void MainComponent::resized()
         ? std::min (collapsedAnalyzerHeight, analysisArea.getHeight()) : analysisArea.getHeight();
     stereoImager->setBounds (analysisArea.removeFromTop (stereoHeight));
     monitorArea.removeFromTop (8);
-    loudnessHistory->setBounds (monitorArea.removeFromTop (
-        std::min (loudnessHeight, monitorArea.getHeight())));
+    locatorAutomationPanel->setBounds (monitorArea.removeFromTop (
+        std::min (controlsHeight, monitorArea.getHeight())));
 
     rightTop = workspace.getY();
     rightHeight = std::max (1, workspace.getHeight());
@@ -4497,6 +4599,8 @@ void MainComponent::publishAudioTrack (int trackId)
                 clip.warpEnabled, clip.reverse
             };
             playback.durationSeconds = clip.durationSeconds;
+            playback.sourceLoopStartSeconds = clip.sourceLoopStartSeconds;
+            playback.sourceLoopEndSeconds = clip.sourceLoopEndSeconds;
             playback.warpMarkers = clip.warpMarkers;
             for (const auto& envelope : track->automation)
                 if (envelope.target.clipId == clip.id)
@@ -5112,12 +5216,6 @@ bool MainComponent::startRecording (bool loopWasEnabled)
             setProjectStatus ("Audio recording unavailable: the input device has an invalid sample rate.");
             return false;
         }
-        if (! track->isAudioFree (session->startBeat, 1.0 / 16.0))
-        {
-            setProjectStatus ("Recording cannot start: the selected audio track already has a clip here.");
-            return false;
-        }
-
         session->kind = RecordingSession::Kind::Audio;
         session->audioChannels = std::clamp (inputCount, 1, 2);
         auto folder = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
@@ -5263,12 +5361,11 @@ void MainComponent::finishRecording (bool discard)
 
             auto* target = project.track (trackId);
             const double lengthBeats = data->durationSeconds * sourceBpm / 60.0;
-            if (target == nullptr || target->type != roll::TrackType::Audio
-                || ! target->isAudioFree (startBeat, lengthBeats))
+            if (target == nullptr || target->type != roll::TrackType::Audio)
             {
                 audioFile.deleteFile();
                 reportFailure (target == nullptr ? "the target track no longer exists."
-                    : "the recorded range overlaps an existing clip.");
+                    : "the target track is no longer an audio track.");
                 return;
             }
 
@@ -7161,8 +7258,6 @@ void MainComponent::timerCallback()
         spectrumAnalyzer->update (leftSamples, rightSamples, sampleRate);
         stereoImager->update (leftSamples, rightSamples);
     }
-    if (engine.graph().isPlaying())
-        loudnessHistory->update (engine.rms (AudioEngine::masterTrackId));
     mixerView->refresh();
     for (const auto& gesture : engine.consumePluginParameterGestures())
         handlePluginParameterGesture (gesture.trackId, gesture.deviceId,

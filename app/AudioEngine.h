@@ -238,6 +238,8 @@ struct AudioClipPlayback
     bool reverse = false;
     std::vector<roll::AutomationEnvelope> automation;
     double durationSeconds = 0.0;
+    double sourceLoopStartSeconds = 0.0;
+    double sourceLoopEndSeconds = 0.0;
     std::vector<roll::AudioWarpMarker> warpMarkers;
 };
 

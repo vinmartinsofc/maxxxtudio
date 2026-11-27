@@ -1985,6 +1985,81 @@ TEST_CASE ("Audio clip reverse reads the selected source region backwards")
              > rendered.getSample (0, juce::roundToInt (30000.0 * sampleRate / 44100.0)));
 }
 
+TEST_CASE ("Overlapping audio clips are summed during track playback")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    source->samples->clear();
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample, 0.2f);
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback first;
+    first.startBeat = 0.0;
+    first.lengthBeats = 2.0;
+    first.sourceBpm = 120.0;
+    first.source = source;
+    first.warpEnabled = false;
+    auto second = first;
+    second.startBeat = 0.5;
+    engine.publishAudioClips (1, { first, second });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (1, error));
+    const int sampleRate = juce::roundToInt (engine.offlineRenderSampleRate());
+    juce::AudioBuffer<float> rendered (2, juce::roundToInt (0.5 * sampleRate));
+    const auto result = engine.renderTrackRange (0.0, 1.0, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    const int overlapSample = juce::roundToInt (0.4 * sampleRate);
+    CHECK (std::abs (rendered.getSample (0, overlapSample) - 0.4f) < 0.01f);
+}
+
+TEST_CASE ("Extending an audio clip to the left repeats the source loop")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample,
+                static_cast<float> (sample) / source->samples->getNumSamples());
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 3.0;
+    clip.sourceOffsetSeconds = 0.5;
+    clip.durationSeconds = 1.5;
+    clip.sourceLoopStartSeconds = 0.0;
+    clip.sourceLoopEndSeconds = 1.0;
+    clip.sourceBpm = 120.0;
+    clip.source = std::move (source);
+    clip.warpEnabled = false;
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (1, error));
+    const int sampleRate = juce::roundToInt (engine.offlineRenderSampleRate());
+    juce::AudioBuffer<float> rendered (2, juce::roundToInt (1.5 * sampleRate));
+    const auto result = engine.renderTrackRange (0.0, 3.0, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    const int beforeOriginalStart = juce::roundToInt (0.1 * sampleRate);
+    const int afterLoopWrap = juce::roundToInt (0.6 * sampleRate);
+    CHECK (rendered.getSample (0, beforeOriginalStart) > 0.5f);
+    CHECK (rendered.getSample (0, afterLoopWrap) < 0.2f);
+}
+
 TEST_CASE ("Manual warp markers control audio source timing")
 {
     AudioEngine engine;
@@ -2016,6 +2091,44 @@ TEST_CASE ("Manual warp markers control audio source timing")
 
     REQUIRE (result.wasOk());
     CHECK (std::abs (rendered.getSample (0, sampleRate) - 0.75f) < 0.02f);
+}
+
+TEST_CASE ("Audio clips repeat their preserved source loop when extended")
+{
+    AudioEngine engine;
+    engine.addTrack (1, roll::TrackType::Audio);
+
+    auto source = std::make_shared<AudioFileData>();
+    source->samples = std::make_shared<juce::AudioBuffer<float>> (2, 44100);
+    for (int channel = 0; channel < source->samples->getNumChannels(); ++channel)
+        for (int sample = 0; sample < source->samples->getNumSamples(); ++sample)
+            source->samples->setSample (channel, sample,
+                static_cast<float> (sample) / source->samples->getNumSamples());
+    source->sampleRate = 44100.0;
+    source->durationSeconds = 1.0;
+
+    AudioClipPlayback clip;
+    clip.lengthBeats = 4.0;
+    clip.sourceBpm = 120.0;
+    clip.sourceOffsetSeconds = 0.25;
+    clip.durationSeconds = 0.25;
+    clip.sourceLoopStartSeconds = 0.25;
+    clip.sourceLoopEndSeconds = 0.5;
+    clip.source = std::move (source);
+    clip.warpEnabled = false;
+    engine.publishAudioClips (1, { clip });
+
+    juce::String error;
+    REQUIRE (engine.beginOfflineTrackRender (1, error));
+    const int sampleRate = juce::roundToInt (engine.offlineRenderSampleRate());
+    juce::AudioBuffer<float> rendered (2, 2 * sampleRate);
+    const auto result = engine.renderTrackRange (0.0, 4.0, rendered, {}, {});
+    engine.finishOfflineRender();
+
+    REQUIRE (result.wasOk());
+    const int first = juce::roundToInt (0.1 * sampleRate);
+    const int repeated = juce::roundToInt (0.35 * sampleRate);
+    CHECK (std::abs (rendered.getSample (0, first) - rendered.getSample (0, repeated)) < 0.02f);
 }
 
 TEST_CASE ("Audio clip gain automation affects playback and applies base gain once")

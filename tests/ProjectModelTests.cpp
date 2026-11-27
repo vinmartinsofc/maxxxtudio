@@ -51,6 +51,24 @@ TEST_CASE ("ProjectModel undo restores mixer and loop edits")
     REQUIRE (project.loopEnd == 16.0);
 }
 
+TEST_CASE ("ProjectModel clip colours are undoable")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Midi);
+    REQUIRE (track != nullptr);
+    auto* clip = project.addClip (track->id, 0.0, 4.0);
+    REQUIRE (clip != nullptr);
+    const int trackId = track->id;
+    const int clipId = clip->id;
+
+    REQUIRE (project.setClipColour (trackId, clipId, false, 0xff16d34b));
+    CHECK (project.track (trackId)->find (clipId)->colour == 0xff16d34b);
+    REQUIRE (project.undo());
+    CHECK (project.track (trackId)->find (clipId)->colour == 0);
+    REQUIRE (project.redo());
+    CHECK (project.track (trackId)->find (clipId)->colour == 0xff16d34b);
+}
+
 TEST_CASE ("ProjectModel undo and redo preserve MIDI mapping edits")
 {
     ProjectModel project;
@@ -477,6 +495,119 @@ TEST_CASE ("Adjacent split audio clips can be joined")
     REQUIRE (joined->durationSeconds == Catch::Approx (2.0));
     REQUIRE (joined->sourceOffsetSeconds == Catch::Approx (0.25));
     REQUIRE (track->findAudioClip (rightId) == nullptr);
+}
+
+TEST_CASE ("Split audio clips keep original loop bounds while edges are restored")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Audio);
+    REQUIRE (track != nullptr);
+    auto* clip = project.addAudioClip (
+        track->id, 0.0, 8.0, "C:/audio/original.wav", "original.wav", {}, 4.0, 120.0);
+    REQUIRE (clip != nullptr);
+    clip->sourceOffsetSeconds = 1.0;
+    clip->durationSeconds = 3.0;
+    clip->sourceLoopStartSeconds = 0.0;
+    clip->sourceLoopEndSeconds = 4.0;
+    clip->colour = 0xff16d34b;
+
+    const int rightId = project.splitAudioClip (track->id, clip->id, 4.0);
+    REQUIRE (rightId > 0);
+    auto* right = track->findAudioClip (rightId);
+    REQUIRE (right != nullptr);
+    CHECK (right->sourceLoopStartSeconds == 0.0);
+    CHECK (right->sourceLoopEndSeconds == 4.0);
+    CHECK (right->colour == 0xff16d34b);
+
+    project.deleteAudioClip (track->id, clip->id);
+    REQUIRE (project.resizeAudioClipStart (track->id, rightId, 2.0, 6.0));
+    CHECK (right->sourceOffsetSeconds == Catch::Approx (1.5));
+    CHECK (right->durationSeconds == Catch::Approx (2.5));
+    REQUIRE (project.resizeAudioClip (track->id, rightId, 8.0));
+    CHECK (right->sourceLoopEndSeconds == 4.0);
+}
+
+TEST_CASE ("Resizing an audio clip replaces occupied regions without losing untouched tails")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Audio);
+    REQUIRE (track != nullptr);
+    auto* first = project.addAudioClip (
+        track->id, 0.0, 2.0, "C:/audio/first.wav", "first.wav", {}, 1.0, 120.0);
+    auto* second = project.addAudioClip (
+        track->id, 2.0, 2.0, "C:/audio/second.wav", "second.wav", {}, 1.0, 120.0);
+    auto* overlay = project.addAudioClip (
+        track->id, 1.0, 2.0, "C:/audio/overlay.wav", "overlay.wav", {}, 1.0, 120.0);
+    REQUIRE (first != nullptr);
+    REQUIRE (second != nullptr);
+    REQUIRE (overlay != nullptr);
+    const int secondId = second->id;
+    const int overlayId = overlay->id;
+
+    REQUIRE (project.resizeAudioClip (track->id, first->id, 3.0));
+    CHECK (first->end() == Catch::Approx (3.0));
+    const auto* overlayTail = track->findAudioClip (overlayId);
+    REQUIRE (overlayTail != nullptr);
+    CHECK (overlayTail->start == Catch::Approx (1.0));
+    CHECK (overlayTail->lengthBeats == Catch::Approx (1.0));
+    CHECK (track->findAudioClip (secondId) == nullptr);
+    const auto remainingTail = std::find_if (
+        track->audioClips.begin(), track->audioClips.end(),
+        [] (const auto& clip) { return clip->start == Catch::Approx (3.0); });
+    REQUIRE (remainingTail != track->audioClips.end());
+    CHECK ((*remainingTail)->lengthBeats == Catch::Approx (1.0));
+    CHECK ((*remainingTail)->start >= first->end());
+}
+
+TEST_CASE ("Extending an audio clip to the left wraps the source and replaces occupied audio")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Audio);
+    REQUIRE (track != nullptr);
+    auto* neighbor = project.addAudioClip (
+        track->id, 3.0, 1.0, "C:/audio/neighbor.wav", "neighbor.wav", {}, 0.5, 120.0);
+    auto* clip = project.addAudioClip (
+        track->id, 4.0, 2.0, "C:/audio/loop.wav", "loop.wav", {}, 1.0, 120.0);
+    REQUIRE (neighbor != nullptr);
+    REQUIRE (clip != nullptr);
+    const int neighborId = neighbor->id;
+    clip->sourceLoopStartSeconds = 0.0;
+    clip->sourceLoopEndSeconds = 1.0;
+    clip->warpMarkers = { { 0.0, 0.0 }, { 0.5, 1.0 }, { 1.0, 2.0 } };
+
+    REQUIRE (project.resizeAudioClipStart (track->id, clip->id, 3.0, 3.0));
+    CHECK (track->findAudioClip (neighborId) == nullptr);
+    CHECK (clip->start == Catch::Approx (3.0));
+    CHECK (clip->sourceOffsetSeconds == Catch::Approx (0.5));
+    CHECK (clip->durationSeconds == Catch::Approx (1.5));
+    CHECK (roll::isValidAudioWarpMarkers (
+        clip->warpMarkers, clip->sourceOffsetSeconds, clip->durationSeconds, clip->lengthBeats));
+    CHECK (roll::audioSourcePositionAtBeat (*clip, 1.0, 120.0, 1.0)
+           == Catch::Approx (0.0));
+}
+
+TEST_CASE ("Resizing MIDI clips replaces occupied regions and retains untouched notes")
+{
+    ProjectModel project;
+    auto* track = project.addTrack (roll::TrackType::Midi);
+    REQUIRE (track != nullptr);
+    auto* first = project.addClip (track->id, 0.0, 2.0);
+    auto* second = project.addClip (track->id, 2.0, 4.0);
+    REQUIRE (first != nullptr);
+    REQUIRE (second != nullptr);
+    const int secondId = second->id;
+    second->clip.addNote ({ 62, 1.0, 2.0, 90 });
+
+    REQUIRE (project.resizeClip (track->id, first->id, 4.0));
+    CHECK (first->end() == Catch::Approx (4.0));
+    CHECK (track->find (secondId) == nullptr);
+    const auto remainingTail = std::find_if (
+        track->clips.begin(), track->clips.end(),
+        [] (const auto& clip) { return clip->start == Catch::Approx (4.0); });
+    REQUIRE (remainingTail != track->clips.end());
+    CHECK ((*remainingTail)->clip.length() == Catch::Approx (2.0));
+    REQUIRE ((*remainingTail)->clip.notes().size() == 1);
+    CHECK ((*remainingTail)->clip.notes().front().startBeats == Catch::Approx (0.0));
 }
 
 TEST_CASE ("Audio warp markers stay aligned across split and join")

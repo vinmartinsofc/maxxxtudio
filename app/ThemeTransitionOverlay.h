@@ -18,7 +18,7 @@ public:
     void start (juce::Component& parent)
     {
         buttonBounds.clear();
-        collectButtonBounds (parent, {});
+        collectButtonBounds (parent);
         startedAt = juce::Time::getMillisecondCounterHiRes();
         opacity = 0.0f;
         setVisible (true);
@@ -69,23 +69,29 @@ public:
     }
 
 private:
-    void collectButtonBounds (juce::Component& component, juce::Point<int> parentOffset)
+    void collectButtonBounds (juce::Component& component)
     {
         if (&component != this && component.isShowing()
             && (dynamic_cast<juce::Button*> (&component) != nullptr
                 || dynamic_cast<juce::ComboBox*> (&component) != nullptr))
         {
-            const auto bounds = component.getLocalBounds().toFloat()
-                .translated (static_cast<float> (parentOffset.x),
-                             static_cast<float> (parentOffset.y));
+            auto bounds = getLocalArea (&component, component.getLocalBounds());
+            auto* ancestor = component.getParentComponent();
+            while (ancestor != nullptr && ancestor != this)
+            {
+                bounds = bounds.getIntersection (
+                    getLocalArea (ancestor, ancestor->getLocalBounds()));
+                ancestor = ancestor->getParentComponent();
+            }
+            bounds = bounds.getIntersection (getLocalBounds());
             if (bounds.getWidth() >= 24.0f && bounds.getHeight() >= 18.0f)
-                buttonBounds.push_back (bounds);
+                buttonBounds.push_back (bounds.toFloat());
         }
 
         for (int i = 0; i < component.getNumChildComponents(); ++i)
             if (auto* child = component.getChildComponent (i);
                 child != nullptr && child->isVisible())
-                collectButtonBounds (*child, parentOffset + child->getPosition());
+                collectButtonBounds (*child);
     }
 
     static void drawButtonSweep (juce::Graphics& g, juce::Rectangle<float> bounds,
@@ -157,6 +163,8 @@ private:
             buttonBounds.clear();
             setVisible (false);
         }
+        if (auto* parent = getParentComponent())
+            parent->repaint();
         repaint();
     }
 

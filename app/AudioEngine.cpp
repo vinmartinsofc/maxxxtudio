@@ -828,6 +828,32 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             const double sourceDuration = clip.durationSeconds > 0.0
                 ? clip.durationSeconds : clip.source->durationSeconds;
             const double durationSamples = sourceDuration * clip.source->sampleRate;
+            double loopStartSamples = clip.sourceLoopStartSeconds * clip.source->sampleRate;
+            double loopEndSamples = clip.sourceLoopEndSeconds * clip.source->sampleRate;
+            if (! std::isfinite (loopStartSamples) || ! std::isfinite (loopEndSamples)
+                || loopStartSamples < 0.0 || loopEndSamples <= loopStartSamples)
+            {
+                loopStartSamples = 0.0;
+                loopEndSamples = static_cast<double> (source.getNumSamples());
+            }
+            loopEndSamples = std::min (loopEndSamples, static_cast<double> (source.getNumSamples()));
+            if (loopEndSamples <= loopStartSamples)
+            {
+                loopStartSamples = 0.0;
+                loopEndSamples = static_cast<double> (source.getNumSamples());
+            }
+            const double loopLengthSamples = loopEndSamples - loopStartSamples;
+            const auto wrapSourcePosition = [loopStartSamples, loopEndSamples, loopLengthSamples]
+                (double position)
+            {
+                if (loopLengthSamples <= 0.0
+                    || (position >= loopStartSamples && position < loopEndSamples))
+                    return position;
+                double wrapped = std::fmod (position - loopStartSamples, loopLengthSamples);
+                if (wrapped < 0.0)
+                    wrapped += loopLengthSamples;
+                return loopStartSamples + wrapped;
+            };
             const double relativeSamples = useManualWarp
                 ? integratedWarpSourceSamples (clip.warpMarkers, clip.startBeat,
                     activeStart - clip.startBeat, clip.source->sampleRate,
@@ -849,11 +875,14 @@ void TrackAudioSource::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
             for (int i = 0; i < frameCount; ++i)
             {
                 const double beat = activeStart + i * shared.plan.beatsPerSample;
+                sourcePosition = wrapSourcePosition (sourcePosition);
                 const int sourceIndex = static_cast<int> (sourcePosition);
                 if (sourceIndex < 0 || sourceIndex >= source.getNumSamples())
                     break;
 
-                const int nextIndex = std::min (sourceIndex + 1, source.getNumSamples() - 1);
+                const double nextPosition = wrapSourcePosition (sourcePosition + 1.0);
+                const int nextIndex = std::clamp (static_cast<int> (nextPosition),
+                                                  0, source.getNumSamples() - 1);
                 const float fraction = static_cast<float> (sourcePosition - sourceIndex);
                 const double gainDb = gainEnvelope != nullptr
                     ? roll::automationValueAt (*gainEnvelope, beat, clip.gainDb) : clip.gainDb;

@@ -7,6 +7,18 @@ namespace
 {
 constexpr double clipOverlapEpsilon = 1.0e-9;
 
+double wrapSourceSeconds (double position, double loopStart, double loopEnd)
+{
+    const double loopLength = loopEnd - loopStart;
+    if (loopLength <= 0.0 || (position >= loopStart && position < loopEnd))
+        return position;
+
+    double wrapped = std::fmod (position - loopStart, loopLength);
+    if (wrapped < 0.0)
+        wrapped += loopLength;
+    return loopStart + wrapped;
+}
+
 bool isAudioClipAutomation (roll::AutomationParameterType type)
 {
     return type == roll::AutomationParameterType::AudioClipGain
@@ -106,6 +118,42 @@ bool replaceAudioRange (roll::Track& track, double start, double end, int ignore
     }
 
     return true;
+}
+
+void commitAudioTrackPreservingClipPointer (roll::Track& target, roll::Track&& updated,
+                                           int clipId)
+{
+    auto preserved = target.takeAudioClip (clipId);
+    if (preserved != nullptr)
+        if (const auto* changed = updated.findAudioClip (clipId))
+            *preserved = *changed;
+
+    target = std::move (updated);
+    if (preserved != nullptr)
+        for (auto& clip : target.audioClips)
+            if (clip->id == clipId)
+            {
+                clip = std::move (preserved);
+                break;
+            }
+}
+
+void commitMidiTrackPreservingClipPointer (roll::Track& target, roll::Track&& updated,
+                                           int clipId)
+{
+    auto preserved = target.take (clipId);
+    if (preserved != nullptr)
+        if (const auto* changed = updated.find (clipId))
+            *preserved = *changed;
+
+    target = std::move (updated);
+    if (preserved != nullptr)
+        for (auto& clip : target.clips)
+            if (clip->id == clipId)
+            {
+                clip = std::move (preserved);
+                break;
+            }
 }
 
 std::vector<roll::AudioWarpMarker> effectiveWarpMarkers (const roll::AudioPlacement& clip)
@@ -871,6 +919,30 @@ bool ProjectModel::setTrackColour (int trackId, std::uint32_t colour)
     return true;
 }
 
+bool ProjectModel::setClipColour (int trackId, int clipId, bool audio, std::uint32_t colour)
+{
+    auto* t = track (trackId);
+    if (t == nullptr)
+        return false;
+
+    std::uint32_t* currentColour = nullptr;
+    if (audio)
+    {
+        if (auto* clip = t->findAudioClip (clipId))
+            currentColour = &clip->colour;
+    }
+    else if (auto* clip = t->find (clipId))
+        currentColour = &clip->colour;
+
+    if (currentColour == nullptr || *currentColour == colour)
+        return false;
+
+    recordUndo();
+    *currentColour = colour;
+    sendChangeMessage();
+    return true;
+}
+
 void ProjectModel::setTrackRouting (int trackId, roll::TrackOutputRouting routing)
 {
     if (auto* t = track (trackId))
@@ -1004,8 +1076,7 @@ roll::AudioPlacement* ProjectModel::addAudioClip (int trackId, double start, dou
 {
     auto* t = track (trackId);
     if (t == nullptr || t->type != roll::TrackType::Audio || start < 0.0 || length <= 0.0
-        || filePath.empty() || durationSeconds < 0.0 || sourceBpm < 20.0 || sourceBpm > 300.0
-        || ! t->isAudioFree (start, length))
+        || filePath.empty() || durationSeconds < 0.0 || sourceBpm < 20.0 || sourceBpm > 300.0)
         return nullptr;
 
     recordUndo();
@@ -1285,7 +1356,7 @@ int ProjectModel::splitAudioClip (int trackId, int clipId, double beat)
     auto* t = track (trackId);
     auto* source = t != nullptr ? t->findAudioClip (clipId) : nullptr;
     if (t == nullptr || source == nullptr || beat <= source->start
-        || beat >= source->end() || ! t->isAudioFree (beat, source->end() - beat, clipId))
+        || beat >= source->end())
         return -1;
 
     recordUndo();
@@ -1331,6 +1402,10 @@ bool ProjectModel::joinAudioClips (int trackId, int leftClipId, int rightClipId)
     recordUndo();
     left->lengthBeats += right->lengthBeats;
     left->durationSeconds += right->durationSeconds;
+    left->sourceLoopStartSeconds = std::min (
+        left->sourceLoopStartSeconds, right->sourceLoopStartSeconds);
+    left->sourceLoopEndSeconds = std::max (
+        left->sourceLoopEndSeconds, right->sourceLoopEndSeconds);
     left->warpMarkers = std::move (joinedMarkers);
     left->fadeOutBeats = right->fadeOutBeats;
     left->fadeOutCurve = right->fadeOutCurve;
@@ -1348,15 +1423,45 @@ bool ProjectModel::resizeAudioClip (int trackId, int clipId, double length)
 {
     auto* t = track (trackId);
     auto* clip = t != nullptr ? t->findAudioClip (clipId) : nullptr;
-    if (t == nullptr || t->type != roll::TrackType::Audio || clip == nullptr || length <= 0.0
-        || ! t->isAudioFree (clip->start, length, clipId))
+    if (t == nullptr || t->type != roll::TrackType::Audio || clip == nullptr
+        || ! std::isfinite (length) || length <= 0.0)
         return false;
+
+    roll::Track updated (*t);
+    if (length > clip->lengthBeats + clipOverlapEpsilon
+        && ! replaceAudioRange (updated, clip->end(), clip->start + length, clipId))
+        return false;
+    clip = updated.findAudioClip (clipId);
+    if (clip == nullptr)
+        return false;
+
     recordUndo();
     const double oldLength = clip->lengthBeats;
+    const double sourceSecondsPerBeat = 60.0 / std::max (clip->sourceBpm, 20.0);
+    const double sourceDelta = (length - oldLength) * sourceSecondsPerBeat;
+    const double oldSourceEnd = clip->sourceOffsetSeconds + clip->durationSeconds;
+    const double sourceLoopStart = std::max (0.0, clip->sourceLoopStartSeconds);
+    const double sourceLoopEnd = std::max (clip->sourceLoopEndSeconds, oldSourceEnd);
+    if (clip->reverse)
+    {
+        clip->sourceOffsetSeconds = std::clamp (
+            clip->sourceOffsetSeconds - sourceDelta, sourceLoopStart,
+            std::max (sourceLoopStart, oldSourceEnd - 1.0e-6));
+        clip->durationSeconds = oldSourceEnd - clip->sourceOffsetSeconds;
+    }
+    else
+    {
+        const double sourceEnd = std::clamp (
+            oldSourceEnd + sourceDelta, clip->sourceOffsetSeconds + 1.0e-6,
+            std::max (sourceLoopEnd, clip->sourceOffsetSeconds + 1.0e-6));
+        clip->durationSeconds = sourceEnd - clip->sourceOffsetSeconds;
+    }
     clip->lengthBeats = length;
     resizeWarpMarkers (*clip, oldLength, clip->sourceOffsetSeconds);
     clip->fadeInBeats = std::min (clip->fadeInBeats, length);
     clip->fadeOutBeats = std::min (clip->fadeOutBeats, length);
+    commitAudioTrackPreservingClipPointer (*t, std::move (updated), clipId);
+    clip = t->findAudioClip (clipId);
     growTo (clip->end() + 64.0);
     if (onAudioClipsChanged) onAudioClipsChanged (trackId);
     sendChangeMessage();
@@ -1369,22 +1474,87 @@ bool ProjectModel::resizeAudioClipStart (int trackId, int clipId, double start, 
     auto* clip = t != nullptr ? t->findAudioClip (clipId) : nullptr;
     if (t == nullptr || t->type != roll::TrackType::Audio || clip == nullptr
         || ! std::isfinite (start) || ! std::isfinite (length)
-        || start < 0.0 || length <= 0.0
-        || ! t->isAudioFree (start, length, clipId))
+        || start < 0.0 || length <= 0.0)
         return false;
 
-    recordUndo();
+    roll::Track updated (*t);
+    const double originalStart = clip->start;
+    const double originalEnd = clip->end();
+    if (start < originalStart - clipOverlapEpsilon
+        && ! replaceAudioRange (updated, start, originalStart, clipId))
+        return false;
+    if (start + length > originalEnd + clipOverlapEpsilon
+        && ! replaceAudioRange (updated, originalEnd, start + length, clipId))
+        return false;
+    clip = updated.findAudioClip (clipId);
+    if (clip == nullptr)
+        return false;
+
     const double oldLength = clip->lengthBeats;
     const double oldSourceOffset = clip->sourceOffsetSeconds;
     const double beatDelta = start - clip->start;
-    if (beatDelta < 0.0 && clip->sourceBpm > 0.0)
-        clip->sourceOffsetSeconds = std::max (
-            0.0, clip->sourceOffsetSeconds + beatDelta * 60.0 / clip->sourceBpm);
+    const double oldEnd = clip->end();
+    const double sourceSecondsPerBeat = 60.0 / std::max (clip->sourceBpm, 20.0);
+    const double sourceLoopStart = std::max (0.0, clip->sourceLoopStartSeconds);
+    const double sourceLoopEnd = std::max (clip->sourceLoopEndSeconds,
+                                           oldSourceOffset + clip->durationSeconds);
+    const double sourceEpsilon = 1.0e-6;
+    const double endDelta = start + length - oldEnd;
+    const double oldSourceEnd = oldSourceOffset + clip->durationSeconds;
+    double newSourceStart = 0.0;
+    double newSourceEnd = 0.0;
+    const bool extendsBefore = beatDelta < -clipOverlapEpsilon;
+    if (extendsBefore)
+    {
+        const double extensionSeconds = -beatDelta * sourceSecondsPerBeat;
+        newSourceStart = clip->reverse ? oldSourceOffset
+            : wrapSourceSeconds (oldSourceOffset - extensionSeconds,
+                                 sourceLoopStart, sourceLoopEnd);
+        newSourceEnd = newSourceStart + clip->durationSeconds + extensionSeconds;
+
+        if (! clip->warpMarkers.empty())
+        {
+            const double sourceShift = clip->reverse ? extensionSeconds
+                : newSourceStart - (oldSourceOffset - extensionSeconds);
+            std::vector<roll::AudioWarpMarker> extendedMarkers {
+                { newSourceStart, 0.0 }
+            };
+            extendedMarkers.reserve (clip->warpMarkers.size() + 1);
+            for (auto marker : clip->warpMarkers)
+            {
+                marker.sourceSeconds += sourceShift;
+                marker.beat -= beatDelta;
+                extendedMarkers.push_back (marker);
+            }
+            clip->warpMarkers = std::move (extendedMarkers);
+        }
+    }
+    else
+    {
+        newSourceStart = clip->reverse
+            ? std::clamp (oldSourceOffset - endDelta * sourceSecondsPerBeat, sourceLoopStart,
+                          std::max (sourceLoopStart, oldSourceEnd - sourceEpsilon))
+            : std::clamp (oldSourceOffset + beatDelta * sourceSecondsPerBeat, sourceLoopStart,
+                          std::max (sourceLoopStart, sourceLoopEnd - sourceEpsilon));
+        newSourceEnd = clip->reverse
+            ? std::clamp (oldSourceEnd - beatDelta * sourceSecondsPerBeat,
+                          newSourceStart + sourceEpsilon,
+                          std::max (newSourceStart + sourceEpsilon, sourceLoopEnd))
+            : std::clamp (oldSourceEnd + endDelta * sourceSecondsPerBeat,
+                          newSourceStart + sourceEpsilon,
+                          std::max (newSourceStart + sourceEpsilon, sourceLoopEnd));
+    }
+    clip->sourceOffsetSeconds = newSourceStart;
+    clip->durationSeconds = newSourceEnd - newSourceStart;
     clip->start = start;
     clip->lengthBeats = length;
-    resizeWarpMarkers (*clip, oldLength, oldSourceOffset);
+    if (! extendsBefore)
+        resizeWarpMarkers (*clip, oldLength, oldSourceOffset);
     clip->fadeInBeats = std::min (clip->fadeInBeats, length);
     clip->fadeOutBeats = std::min (clip->fadeOutBeats, length);
+    recordUndo();
+    commitAudioTrackPreservingClipPointer (*t, std::move (updated), clipId);
+    clip = t->findAudioClip (clipId);
     growTo (clip->end() + 64.0);
     if (onAudioClipsChanged) onAudioClipsChanged (trackId);
     sendChangeMessage();
@@ -1397,13 +1567,53 @@ bool ProjectModel::resizeClipStart (int trackId, int clipId, double start, doubl
     auto* clip = t != nullptr ? t->find (clipId) : nullptr;
     if (t == nullptr || t->type != roll::TrackType::Midi || clip == nullptr
         || ! std::isfinite (start) || ! std::isfinite (length)
-        || start < 0.0 || length <= 0.0
-        || ! t->isFree (start, length, clipId))
+        || start < 0.0 || length <= 0.0)
+        return false;
+
+    roll::Track updated (*t);
+    const double originalStart = clip->start;
+    const double originalEnd = clip->end();
+    if (start < originalStart - clipOverlapEpsilon
+        && ! replaceMidiRange (updated, start, originalStart, clipId))
+        return false;
+    if (start + length > originalEnd + clipOverlapEpsilon
+        && ! replaceMidiRange (updated, originalEnd, start + length, clipId))
+        return false;
+    clip = updated.find (clipId);
+    if (clip == nullptr)
         return false;
 
     recordUndo();
     clip->start = start;
     clip->clip.setLength (length);
+    commitMidiTrackPreservingClipPointer (*t, std::move (updated), clipId);
+    clip = t->find (clipId);
+    growTo (clip->end() + 64.0);
+    if (onTrackNotes) onTrackNotes (trackId);
+    sendChangeMessage();
+    return true;
+}
+
+bool ProjectModel::resizeClip (int trackId, int clipId, double length)
+{
+    auto* t = track (trackId);
+    auto* clip = t != nullptr ? t->find (clipId) : nullptr;
+    if (t == nullptr || t->type != roll::TrackType::Midi || clip == nullptr
+        || ! std::isfinite (length) || length <= 0.0)
+        return false;
+
+    roll::Track updated (*t);
+    if (length > clip->clip.length() + clipOverlapEpsilon
+        && ! replaceMidiRange (updated, clip->end(), clip->start + length, clipId))
+        return false;
+    clip = updated.find (clipId);
+    if (clip == nullptr)
+        return false;
+
+    recordUndo();
+    clip->clip.setLength (length);
+    commitMidiTrackPreservingClipPointer (*t, std::move (updated), clipId);
+    clip = t->find (clipId);
     growTo (clip->end() + 64.0);
     if (onTrackNotes) onTrackNotes (trackId);
     sendChangeMessage();
@@ -1491,9 +1701,6 @@ bool ProjectModel::setAudioClipSourceBpm (int trackId, int clipId, double source
         return false;
 
     const double newLength = clip->durationSeconds * sourceBpm / 60.0;
-    if (! t->isAudioFree (clip->start, newLength, clipId))
-        return false;
-
     recordUndo();
     const double oldLength = clip->lengthBeats;
     clip->sourceBpm = sourceBpm;

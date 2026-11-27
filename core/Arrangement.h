@@ -127,6 +127,7 @@ struct Placement
     int         id = 0;
     double      start = 0.0;
     bool        enabled = true;
+    std::uint32_t colour = 0;
     std::string name;
     Clip        clip { 4.0 };
 
@@ -166,11 +167,14 @@ struct AudioPlacement
     double      lengthBeats = 0.0;
     double      durationSeconds = 0.0;
     double      sourceOffsetSeconds = 0.0;
+    double      sourceLoopStartSeconds = 0.0;
+    double      sourceLoopEndSeconds = 0.0;
     double      fadeInBeats = 0.0;
     double      fadeOutBeats = 0.0;
     double      fadeInCurve = 0.0;
     double      fadeOutCurve = 0.0;
     double      sourceBpm = 120.0;
+    std::uint32_t colour = 0;
     double pitchSemitones = 0.0;
     double pitchCents = 0.0;
     double gainDb = 0.0;
@@ -206,6 +210,58 @@ inline double audioSourceSecondsAtBeat (const AudioPlacement& clip, double beat)
     const double proportion = clip.lengthBeats > 0.0
         ? std::clamp (beat / clip.lengthBeats, 0.0, 1.0) : 0.0;
     return clip.sourceOffsetSeconds + clip.durationSeconds * proportion;
+}
+
+inline double audioSourcePositionAtBeat (const AudioPlacement& clip, double beat,
+                                         double projectBpm, double sourceDurationSeconds)
+{
+    double position = 0.0;
+    if (clip.warpMarkers.size() >= 2)
+    {
+        const auto& markers = clip.warpMarkers;
+        if (beat < markers.front().beat)
+        {
+            const auto& first = markers[0];
+            const auto& second = markers[1];
+            position = first.sourceSeconds + (beat - first.beat)
+                * (second.sourceSeconds - first.sourceSeconds) / (second.beat - first.beat);
+        }
+        else if (beat > markers.back().beat)
+        {
+            const auto& previous = markers[markers.size() - 2];
+            const auto& last = markers.back();
+            position = last.sourceSeconds + (beat - last.beat)
+                * (last.sourceSeconds - previous.sourceSeconds) / (last.beat - previous.beat);
+        }
+        else
+            position = audioSourceSecondsAtBeat (clip, beat);
+    }
+    else
+    {
+        const double playbackBpm = clip.warpEnabled ? clip.sourceBpm : projectBpm;
+        position = clip.sourceOffsetSeconds + beat * 60.0 / std::max (playbackBpm, 20.0);
+    }
+
+    if (clip.reverse)
+        position = clip.sourceOffsetSeconds + clip.durationSeconds
+                 - (position - clip.sourceOffsetSeconds);
+
+    double loopStart = std::max (0.0, clip.sourceLoopStartSeconds);
+    double loopEnd = std::min (sourceDurationSeconds, clip.sourceLoopEndSeconds);
+    if (loopEnd <= loopStart)
+    {
+        loopStart = 0.0;
+        loopEnd = sourceDurationSeconds;
+    }
+    const double loopLength = loopEnd - loopStart;
+    if (loopLength > 0.0 && (position < loopStart || position >= loopEnd))
+    {
+        double wrapped = std::fmod (position - loopStart, loopLength);
+        if (wrapped < 0.0)
+            wrapped += loopLength;
+        position = loopStart + wrapped;
+    }
+    return std::clamp (position, 0.0, std::max (0.0, sourceDurationSeconds));
 }
 
 inline bool isValidAudioWarpMarkers (const std::vector<AudioWarpMarker>& markers,

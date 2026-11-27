@@ -226,6 +226,7 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
         clipNode->setAttribute ("start", clip->start);
         clipNode->setAttribute ("length", clip->clip.length());
         clipNode->setAttribute ("enabled", clip->enabled);
+        clipNode->setAttribute ("colour", juce::String (static_cast<juce::int64> (clip->colour)));
         clipNode->setAttribute ("name", stringFromUtf8 (clip->name));
         clipNode->setAttribute ("selectedPianoLocatorId", clip->clip.selectedPianoRollLocatorId());
         if (clip->clip.groove())
@@ -286,6 +287,12 @@ void writeTrack (juce::XmlElement& parent, const roll::Track& track,
         audioNode->setAttribute ("length", clip->lengthBeats);
         audioNode->setAttribute ("duration", clip->durationSeconds);
         audioNode->setAttribute ("sourceOffset", clip->sourceOffsetSeconds);
+        if (clip->sourceLoopEndSeconds > clip->sourceLoopStartSeconds)
+        {
+            audioNode->setAttribute ("sourceLoopStart", clip->sourceLoopStartSeconds);
+            audioNode->setAttribute ("sourceLoopEnd", clip->sourceLoopEndSeconds);
+        }
+        audioNode->setAttribute ("colour", juce::String (static_cast<juce::int64> (clip->colour)));
         audioNode->setAttribute ("fadeIn", clip->fadeInBeats);
         audioNode->setAttribute ("fadeOut", clip->fadeOutBeats);
         audioNode->setAttribute ("fadeInCurve", clip->fadeInCurve);
@@ -340,9 +347,28 @@ bool validNumber (double value)
     return std::isfinite (value);
 }
 
+double sourceDurationForFile (const juce::File& source, juce::AudioFormatManager& formats,
+                              std::map<std::string, double>& durations)
+{
+    const auto path = source.getFullPathName().toStdString();
+    if (const auto cached = durations.find (path); cached != durations.end())
+        return cached->second;
+    double duration = 0.0;
+    if (source.existsAsFile())
+    {
+        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (source));
+        if (reader != nullptr && reader->sampleRate > 0.0)
+            duration = static_cast<double> (reader->lengthInSamples) / reader->sampleRate;
+    }
+    durations.emplace (path, duration);
+    return duration;
+}
+
 bool readTrack (const juce::XmlElement& node, roll::Track& track,
                 const juce::File& projectFolder, std::set<int>& trackIds,
-                std::vector<juce::File>& missingAudioFiles, ProgressReporter& progress)
+                std::vector<juce::File>& missingAudioFiles, ProgressReporter& progress,
+                juce::AudioFormatManager& audioFormats,
+                std::map<std::string, double>& audioDurations)
 {
     track.id = node.getIntAttribute ("id", -1);
     const auto type = node.getStringAttribute ("type");
@@ -437,6 +463,11 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
             clip->id = id;
             track.reserveClipId (id);
             clip->enabled = child->getBoolAttribute ("enabled", true);
+            const auto colour = child->getStringAttribute ("colour", "0").getLargeIntValue();
+            if (colour < 0 || static_cast<std::uint64_t> (colour)
+                    > std::numeric_limits<std::uint32_t>::max())
+                return false;
+            clip->colour = static_cast<std::uint32_t> (colour);
             clip->name = child->getStringAttribute ("name").toStdString();
             bool foundGroove = false;
             std::vector<roll::Note> notes;
@@ -527,12 +558,22 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
                 return false;
             const double duration = child->getDoubleAttribute ("duration", 0.0);
             const double sourceOffset = child->getDoubleAttribute ("sourceOffset", 0.0);
+            const bool hasSourceLoop = child->hasAttribute ("sourceLoopEnd");
+            const double sourceFileDuration = hasSourceLoop ? 0.0
+                : sourceDurationForFile (source, audioFormats, audioDurations);
+            const double sourceLoopStart = child->getDoubleAttribute ("sourceLoopStart", 0.0);
+            const double sourceLoopEnd = hasSourceLoop
+                ? child->getDoubleAttribute ("sourceLoopEnd", 0.0)
+                : sourceFileDuration > 0.0 ? sourceFileDuration : sourceOffset + duration;
             const double fadeIn = child->getDoubleAttribute ("fadeIn", 0.0);
             const double fadeOut = child->getDoubleAttribute ("fadeOut", 0.0);
             const double fadeInCurve = child->getDoubleAttribute ("fadeInCurve", 0.0);
             const double fadeOutCurve = child->getDoubleAttribute ("fadeOutCurve", 0.0);
             const double sourceBpm = child->getDoubleAttribute ("sourceBpm", 120.0);
             if (! validNumber (duration) || duration < 0.0 || ! validNumber (sourceOffset) || sourceOffset < 0.0
+                || ! validNumber (sourceLoopStart) || sourceLoopStart < 0.0
+                || ! validNumber (sourceLoopEnd)
+                || (hasSourceLoop && sourceLoopEnd <= sourceLoopStart)
                 || ! validNumber (fadeIn) || fadeIn < 0.0 || ! validNumber (fadeOut) || fadeOut < 0.0
                 || ! validNumber (fadeInCurve) || fadeInCurve < -1.0 || fadeInCurve > 1.0
                 || ! validNumber (fadeOutCurve) || fadeOutCurve < -1.0 || fadeOutCurve > 1.0
@@ -545,6 +586,13 @@ bool readTrack (const juce::XmlElement& node, roll::Track& track,
             clip->id = id;
             track.reserveClipId (id);
             clip->sourceOffsetSeconds = sourceOffset;
+            clip->sourceLoopStartSeconds = sourceLoopStart;
+            clip->sourceLoopEndSeconds = sourceLoopEnd;
+            const auto colour = child->getStringAttribute ("colour", "0").getLargeIntValue();
+            if (colour < 0 || static_cast<std::uint64_t> (colour)
+                    > std::numeric_limits<std::uint32_t>::max())
+                return false;
+            clip->colour = static_cast<std::uint32_t> (colour);
             clip->fadeInBeats = fadeIn;
             clip->fadeOutBeats = fadeOut;
             clip->fadeInCurve = fadeInCurve;
@@ -816,6 +864,9 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
         || xml->getIntAttribute ("version", 0) != 1)
         return juce::Result::fail ("Invalid or unsupported project file.");
 
+    juce::AudioFormatManager audioFormats;
+    audioFormats.registerBasicFormats();
+    std::map<std::string, double> audioDurations;
     ProjectFileData loaded;
     loaded.bpm = xml->getDoubleAttribute ("bpm", 120.0);
     loaded.transportPosition = xml->getDoubleAttribute ("transportPosition", 0.0);
@@ -852,7 +903,7 @@ juce::Result ProjectFile::load (const juce::File& file, ProjectFileData& data,
             continue;
         roll::Track track;
         if (! readTrack (*node, track, file.getParentDirectory(), trackIds,
-                         loaded.missingAudioFiles, progress))
+                         loaded.missingAudioFiles, progress, audioFormats, audioDurations))
             return juce::Result::fail ("A track or clip contains invalid data.");
         if (track.id == AudioEngine::masterTrackId)
         {

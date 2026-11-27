@@ -42,6 +42,28 @@ TEST_CASE("Note turns on and off at the correct instants (120 BPM, 44.1k)")
     REQUIRE(near(ev[1].sample, 44100));
 }
 
+TEST_CASE("Starting playback beyond the loop end does not jump back into the loop")
+{
+    TransportClock clock;
+    clock.setPosition (10.0);
+    TransportSettings settings;
+    settings.loop = true;
+    settings.loopStart = 4.0;
+    settings.loopEnd = 8.0;
+    BlockPlan plan;
+
+    clock.plan (settings, 120.0, 60, plan);
+    REQUIRE (plan.count == 1);
+    CHECK (std::abs (plan.seg[0].a - 10.0) < 1.0e-9);
+    CHECK_FALSE (plan.seg[0].flushBefore);
+    CHECK_FALSE (plan.seg[0].flushAfter);
+
+    clock.plan (settings, 120.0, 60, plan);
+    REQUIRE (plan.count == 1);
+    CHECK (plan.seg[0].a > 10.9);
+    CHECK (plan.seg[0].a < 11.1);
+}
+
 TEST_CASE("Loop cuts a note at the end and retriggers on the wrap")
 {
     Sequencer s; TransportClock c;

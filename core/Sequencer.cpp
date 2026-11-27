@@ -14,7 +14,7 @@ void TransportClock::plan (const TransportSettings& t, double sampleRate, int nu
 
     const double bps = t.bpm / 60.0 / sampleRate;           // Beats per sample.
     out.beatsPerSample = bps;
-    const bool loopOk = t.loop && t.loopEnd > t.loopStart;
+    const bool loopOk = t.loop && t.loopEnd > t.loopStart && pos <= t.loopEnd;
 
     int done = 0;
     while (done < numSamples && out.count < BlockPlan::maxSegments)

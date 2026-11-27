@@ -107,6 +107,14 @@ public:
     void deleteSelectedLocator();
     static juce::Colour colourFor (int trackId);
     static juce::Colour colourFor (const roll::Track&);
+    juce::TextButton& locatorPreviousControl() noexcept { return locatorPreviousButton; }
+    juce::TextButton& locatorSetControl() noexcept { return locatorSetButton; }
+    juce::TextButton& locatorNextControl() noexcept { return locatorNextButton; }
+    juce::TextButton& locatorDeleteControl() noexcept { return locatorDeleteButton; }
+    juce::TextButton& locatorOverflowControl() noexcept { return locatorOverflowButton; }
+    juce::TextButton& automationTargetControl() noexcept { return automationTargetButton; }
+    juce::TextButton& automationModeControl() noexcept { return automationModeButton; }
+    juce::Label& automationStatusControl() noexcept { return automationStatusLabel; }
 
     void paint (juce::Graphics&) override;
     void resized() override;

@@ -56,6 +56,7 @@ private:
     class SpectrumAnalyzer;
     class StereoImager;
     class LoudnessHistory;
+    class LocatorAutomationPanel;
     class MixerView;
     class PluginWindow;
     class PluginWindowNavigator;
@@ -266,7 +267,7 @@ private:
     std::unique_ptr<ComputerMidiIndicator> computerMidiIndicator;
     std::unique_ptr<SpectrumAnalyzer> spectrumAnalyzer;
     std::unique_ptr<StereoImager> stereoImager;
-    std::unique_ptr<LoudnessHistory> loudnessHistory;
+    std::unique_ptr<LocatorAutomationPanel> locatorAutomationPanel;
     std::unique_ptr<MixerView> mixerView;
     std::jthread taskSimulationThread;
     int nextPluginCascadeIndex = 0;

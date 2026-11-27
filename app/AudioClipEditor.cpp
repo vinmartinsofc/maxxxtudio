@@ -668,39 +668,20 @@ void AudioClipEditor::paint (juce::Graphics& g)
         {
             const double visibleLength = clip != nullptr
                 ? clip->lengthBeats / waveformZoom : 0.0;
-            const double beatStart = waveformViewStartBeat
-                + static_cast<double> (x) / waveformArea.getWidth() * visibleLength;
-            const double beatEnd = waveformViewStartBeat
-                + static_cast<double> (x + 1) / waveformArea.getWidth() * visibleLength;
-            double sourceStart = clip != nullptr
-                ? roll::audioSourceSecondsAtBeat (*clip, beatStart) : 0.0;
-            double sourceEnd = clip != nullptr
-                ? roll::audioSourceSecondsAtBeat (*clip, beatEnd) : sourceStart;
-            if (clip != nullptr && clip->reverse)
-            {
-                const double sourceEndClip = clip->sourceOffsetSeconds + clip->durationSeconds;
-                sourceStart = sourceEndClip - (sourceStart - clip->sourceOffsetSeconds);
-                sourceEnd = sourceEndClip - (sourceEnd - clip->sourceOffsetSeconds);
-            }
+            const double beat = waveformViewStartBeat
+                + (static_cast<double> (x) + 0.5) / waveformArea.getWidth() * visibleLength;
             const double duration = source != nullptr && source->durationSeconds > 0.0
                 ? source->durationSeconds : 1.0;
-            auto firstIndex = static_cast<std::size_t> (std::clamp (
-                std::min (sourceStart, sourceEnd) / duration * source->waveform.size(),
+            const double sourceSeconds = clip != nullptr
+                ? roll::audioSourcePositionAtBeat (*clip, beat, projectBpm, duration) : 0.0;
+            const auto index = static_cast<std::size_t> (std::clamp (
+                sourceSeconds / duration * source->waveform.size(),
                 0.0, static_cast<double> (source->waveform.size() - 1)));
-            auto lastIndex = static_cast<std::size_t> (std::clamp (
-                std::max (sourceStart, sourceEnd) / duration * source->waveform.size(),
-                0.0, static_cast<double> (source->waveform.size() - 1)));
-            if (lastIndex <= firstIndex)
-                lastIndex = std::min (source->waveform.size() - 1, firstIndex + 1);
-            float minimum = 0.0f, maximum = 0.0f;
-            for (std::size_t i = firstIndex; i <= lastIndex; ++i)
-            {
-                minimum = std::min (minimum, source->waveform[i].minimum);
-                maximum = std::max (maximum, source->waveform[i].maximum);
-            }
             visibleWaveform.push_back ({
-                static_cast<float> (std::clamp (minimum * gainFactor, -1.0, 1.0)),
-                static_cast<float> (std::clamp (maximum * gainFactor, -1.0, 1.0))
+                static_cast<float> (std::clamp (
+                    source->waveform[index].minimum * gainFactor, -1.0, 1.0)),
+                static_cast<float> (std::clamp (
+                    source->waveform[index].maximum * gainFactor, -1.0, 1.0))
             });
         }
         drawWaveformEnvelope (g, waveformArea.toFloat(), visibleWaveform,
@@ -771,6 +752,35 @@ void AudioClipEditor::paint (juce::Graphics& g)
                                 x + 5.0f, static_cast<float> (waveformArea.getY() + 10));
             g.fillPath (handle);
         }
+
+        const double loopStart = clip->sourceLoopStartSeconds;
+        const double loopEnd = std::min (
+            source != nullptr ? source->durationSeconds : clip->sourceLoopEndSeconds,
+            clip->sourceLoopEndSeconds);
+        const double sourceStart = clip->reverse
+            ? clip->sourceOffsetSeconds + clip->durationSeconds
+            : clip->sourceOffsetSeconds;
+        const double secondsToLoop = clip->reverse
+            ? sourceStart - loopStart : loopEnd - sourceStart;
+        const double displayBpm = clip->warpEnabled ? clip->sourceBpm : projectBpm;
+        const double firstLoopBeat = std::max (0.0, secondsToLoop * displayBpm / 60.0);
+        const double loopBeats = (loopEnd - loopStart) * displayBpm / 60.0;
+        if (loopEnd > loopStart && loopBeats > 0.0)
+            for (double beat = firstLoopBeat; beat < clip->lengthBeats; beat += loopBeats)
+            {
+                const float x = waveformXAtBeat (beat);
+                if (x < waveformArea.getX() || x > waveformArea.getRight())
+                    continue;
+                g.setColour (theme::text().withAlpha (0.85f));
+                g.fillRect (x - 2.5f, static_cast<float> (waveformArea.getY()), 5.0f, 8.0f);
+                g.setColour (juce::Colours::black);
+                g.fillRect (x - 1.0f, static_cast<float> (waveformArea.getY() + 1), 2.0f, 6.0f);
+                juce::Path marker;
+                marker.addTriangle (x - 3.0f, static_cast<float> (waveformArea.getY() + 1),
+                                    x + 3.0f, static_cast<float> (waveformArea.getY() + 1),
+                                    x, static_cast<float> (waveformArea.getY() + 5.0f));
+                g.fillPath (marker);
+            }
     }
     g.restoreState();
 }
